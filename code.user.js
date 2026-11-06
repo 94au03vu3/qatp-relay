@@ -946,7 +946,6 @@
 
 
   function isEditorEnvironment() {
-    // 嚴格判定：依 URL 路由或頁面內存在實體可編輯之輸入元件，杜絕檢視態 .file.js-gist-file 干擾
     return isEditPage() || isNewPage() || !!document.querySelector('input.js-gist-filename, textarea.file-editor-textarea');
   }
 
@@ -1373,13 +1372,11 @@
     }
 
 
-    // 文字淨化：去 BOM、標準引號與破折號還原
     let cleaned = rawText.replace(/^\uFEFF/, '').trim();
     cleaned = cleaned.replace(/[\u201C\u201D]/g, '"').replace(/[\u2018\u2019]/g, "'");
     cleaned = cleaned.replace(/[\u2013\u2014]/g, '-');
 
 
-    // P3-12/13: 精準括號平衡邊界截取
     const startIdx = cleaned.indexOf('{');
     const endIdx = cleaned.lastIndexOf('}');
     if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) {
@@ -1404,7 +1401,6 @@
     const config = loadConfig();
 
 
-    // P3-09: 正則字串長度上限 500 防禦 ReDoS
     if (typeof featureData.qatpPrimaryToken === 'string' && featureData.qatpPrimaryToken.trim()) {
       config.qatpPrimaryToken = featureData.qatpPrimaryToken.trim();
     }
@@ -1452,7 +1448,6 @@
 
 
     if (templateText === null) {
-      // 容錯降級嘗試舊版關鍵字
       for (const row of grid) {
         if (row && row[0] && row[0].trim().toLowerCase() === 'gist & grep') {
           templateText = row[1] || '';
@@ -2105,7 +2100,7 @@
 
 
   // ==========================================
-  // 三合一智能裝配決策狀態機 (雙槽滿載智慧避讓防沖刷版)
+  // 三合一智能裝配決策狀態機 (切片 1: 演進 INV-04 等冪熱更新 / 切片 2: 交接檔哨兵連動)
   // OBS-D: 智能裝配採就地水合更新；一鍵加交接檔採 claimOrCreateSlot 空槽認領
   // ==========================================
   async function runSmartAssemblyPipeline() {
@@ -2202,7 +2197,7 @@
       };
 
 
-      // 5. 雙槽滿載智慧避讓防線 (INV-04)
+      // 5. 雙槽狀態盤點 (切片 1: 演進版 INV-04：支援等冪熱更新)
       const currentSlots = document.querySelectorAll('.js-gist-file');
       const qatpFileNameLower = (config.qatpFileName || 'QATP.md').toLowerCase();
       const handoffFileNameLower = (config.defaultFileName || 'note').toLowerCase();
@@ -2223,14 +2218,7 @@
       }
 
 
-      if (existingCodeHasContent && existingQatpHasContent && classified.type === 'TYPE_CODE') {
-        showToast('⚠️ 當前 Gist 代碼與 QATP 已就緒。若欲更新交接檔請複製交接檔；若欲開立全新任務請勾選頂部『開新Gist』開關！', 'warning', 5000);
-        updateFileBoard();
-        return;
-      }
-
-
-      // 分支 A: 生產代碼
+      // 分支 A: 生產代碼 (支援內容相異熱更新，內容相同等冪避讓)
       if (classified.type === 'TYPE_CODE') {
         showToast('⏳ 正在裝配生產代碼至代碼槽...', 'warning', 1500);
 
@@ -2246,9 +2234,10 @@
 
 
         const targetCodeSlot = await resolveSemanticSlot('TYPE_CODE', config);
-        await hydrateSlot(targetCodeSlot, classified.meta.fileName, classified.content);
+        const hydrateRes = await hydrateSlot(targetCodeSlot, classified.meta.fileName, classified.content);
 
 
+        // 檢查是否存在 QATP 槽且具備內容
         const latestFiles = document.querySelectorAll('.js-gist-file');
         const qatpName = (config.qatpFileName || 'QATP.md').toLowerCase();
         let qatpHasContent = false;
@@ -2263,17 +2252,17 @@
 
 
         if (qatpHasContent) {
-          // 演算法 4：雙槽存檔自動連動中繼時序 (AC-3)
-          if (config.autoSubmitDualReady) {
-            try {
-              sessionStorage.setItem(SESSION_KEY_RELAY, '1');
-            } catch (e) {
-              console.warn('[QATP] 無法寫入 sessionStorage', e);
+          // 若代碼實質發生變更，自動存檔並重送倉庫；若無變更則等冪避讓
+          if (hydrateRes.modified) {
+            if (config.autoSubmitDualReady) {
+              try { sessionStorage.setItem(SESSION_KEY_RELAY, '1'); } catch (e) {}
+              showToast('🎉 代碼熱更新成功！正在自動存檔並同步中繼倉...', 'success', 2000);
+              setTimeout(() => triggerSaveAction(false), 400);
+            } else {
+              showToast('🎉 代碼熱更新成功！請手動儲存以同步中繼倉', 'success', 3000);
             }
-            showToast('🎉 代碼注入成功！兩槽齊全，正在自動存檔並連動投送...', 'success', 2000);
-            setTimeout(() => triggerSaveAction(false), 400);
           } else {
-            showToast('🎉 代碼注入成功！兩槽齊全，請手動提交儲存', 'success', 3000);
+            showToast('ℹ️ 代碼內容與當前一致，跳過重複存檔與推倉', 'info', 2500);
           }
         } else {
           showToast('✅ 代碼已填入，已預建 QATP 槽位！請複製 QATP 後再次點擊本按鈕', 'success', 4000);
@@ -2307,7 +2296,6 @@
 
 
         if (codeHasContent) {
-          // 演算法 4：雙槽存檔自動連動中繼時序 (AC-3)
           if (config.autoSubmitDualReady) {
             try {
               sessionStorage.setItem(SESSION_KEY_RELAY, '1');
@@ -2323,7 +2311,7 @@
           showToast('✅ QATP 已填入槽位，已保留代碼槽！請複製代碼後再次點擊本按鈕', 'success', 4000);
         }
       }
-      // 分支 C: Handoff 交接檔
+      // 分支 C: Handoff 交接檔 (切片 2: 連動 handoff 哨兵)
       else if (classified.type === 'TYPE_HANDOFF') {
         showToast('⏳ 正在裝配交接檔...', 'warning', 1500);
 
@@ -2354,7 +2342,10 @@
 
 
         if (hasCode && hasQatp) {
-          showToast('🎉 三槽內容全數齊全！正在提交儲存...', 'success', 2000);
+          showToast('🎉 三槽內容全數齊全！正在提交儲存並連動投送交接檔...', 'success', 2000);
+          try {
+            sessionStorage.setItem(SESSION_KEY_RELAY, 'handoff'); // 標記為交接檔投送模式
+          } catch (e) {}
           setTimeout(() => {
             triggerSaveAction(false);
           }, 500);
@@ -2397,7 +2388,7 @@
 
 
   // ==========================================
-  // 一鍵加交接檔流水線 (Btn 2 / ITEM-03 智慧認領優先)
+  // 一鍵加交接檔流水線 (Btn 2 / ITEM-03 智慧認領優先 / 切片 2: 連動 handoff 哨兵)
   // ==========================================
   async function executeHandoffPipeline(rawText = null) {
     try {
@@ -2424,7 +2415,10 @@
 
 
       updateFileBoard();
-      showToast('💾 交接檔內容已注入，正在提交儲存...', 'success', 2000);
+      showToast('💾 交接檔內容已注入，正在儲存並連動投送交接檔...', 'success', 2000);
+      try {
+        sessionStorage.setItem(SESSION_KEY_RELAY, 'handoff'); // 標記為交接檔投送模式
+      } catch (e) {}
       setTimeout(() => {
         triggerSaveAction(false);
       }, 500);
@@ -2537,7 +2531,6 @@
 
         GM_xmlhttpRequest(reqDetails);
       } else {
-        // fetch 降級路徑：深拷貝標頭並排除 User-Agent 防瀏覽器報錯 (P3-01)
         const fetchHeaders = Object.assign({}, headers);
         delete fetchHeaders['User-Agent'];
 
@@ -2576,22 +2569,22 @@
 
   // ==========================================
   // 全量乾淨鏡像樹清場時序 (Git Trees Commit Pipeline / 妥協案 13, 14, 15)
+  // 切片 4: 支援 relayMode 模式標籤與交接檔投送剪貼簿防污染
   // P2-02: 編輯態安全攔截防自殺時序
   // P3-10: 檢視態 .blob-code-inner 純代碼萃取與路徑穿越防禦
-  // AC-3: 雲端動態大一統提示詞組裝
   // ==========================================
-  async function mirrorToGitHubRelay() {
+  async function mirrorToGitHubRelay(relayMode = '1') {
     try {
       // 0. 演算法 1：編輯態時序解耦防自殺 (妥協案 15 / P2-02 / AC-2)
       if (isEditorEnvironment()) {
         try {
-          sessionStorage.setItem(SESSION_KEY_RELAY, '1');
+          sessionStorage.setItem(SESSION_KEY_RELAY, relayMode);
         } catch (e) {
           console.warn('[QATP] 無法寫入 sessionStorage', e);
         }
         showToast('💾 正在儲存 Gist，跳轉後將自動完成跨倉鏡像...', 'warning', 2000);
         triggerSaveAction(false);
-        return; // 立即中斷，交棒給跳轉後檢視態
+        return;
       }
 
 
@@ -2629,14 +2622,12 @@
         const fileName = nameEl ? nameEl.textContent.trim() : '';
 
 
-        // P3-10: 檔名路徑穿越防禦
         if (!fileName || fileName.includes('..') || fileName.startsWith('/')) {
           continue;
         }
 
 
         let content = '';
-        // 優先讀取行節點 .blob-code-inner 拼接換行，徹底消除 .blob-num 行號污染 (AC-4)
         const lineNodes = container.querySelectorAll('.blob-code-inner');
         if (lineNodes && lineNodes.length > 0) {
           content = Array.from(lineNodes).map((l) => l.innerText).join('\n').trim();
@@ -2743,6 +2734,13 @@
       const shortSha = newCommitSha.slice(0, 7);
 
 
+      // 切片 4: 分支判定：若為交接檔投送 (Round 2)，落實剪貼簿防污染，不覆寫剪貼簿
+      if (relayMode === 'handoff') {
+        showToast(`🚀 已將交接檔 (note) 鏡像至 ${currentOwner}/${repo} (${shortSha})！3 檔就緒`, 'success', 4500);
+        return;
+      }
+
+
       let finalPromptText = '';
       try {
         const csvData = await fetchCloudCSV();
@@ -2788,8 +2786,9 @@
       }
 
 
+      // 常規 QATP 輪次 (Round 1)：向剪貼簿寫入雲端 repo & grep 引導詞
       await writeToClipboard(finalPromptText);
-      showToast(`🚀 已鏡像至 ${currentOwner}/${repo}！Claude 引導詞已複製`, 'success', 4000);
+      showToast(`🚀 已鏡像至 ${currentOwner}/${repo} (${shortSha})！大一統 QATP 指令已就緒`, 'success', 4500);
 
 
     } catch (err) {
@@ -3694,7 +3693,6 @@
           }
 
 
-          // P3-07: 強制截斷至 3 組插槽防溢出
           const boundedSlots = parsed.relaySlots.slice(0, 3).map((s) => ({
             account: (s && typeof s.account === 'string') ? s.account.trim() : '',
             token: (s && typeof s.token === 'string') ? s.token.trim() : ''
@@ -4262,7 +4260,6 @@
       document.addEventListener('mouseup', onMouseUp);
 
 
-      // P3-08: 視窗失焦或移出視窗邊緣時自動釋放拖曳
       window.addEventListener('blur', onMouseUp, { once: true });
       document.addEventListener('mouseleave', onMouseUp, { once: true });
     });
@@ -4566,7 +4563,7 @@
       }
       btnRelay.addEventListener('click', (e) => {
         e.preventDefault();
-        mirrorToGitHubRelay();
+        mirrorToGitHubRelay('1');
       });
 
 
@@ -4612,7 +4609,7 @@
 
   // ==========================================
   // 跨頁換頁哨兵監聽器 (加固延遲 600ms / 容器探針 / 剪貼簿防污染)
-  // AC-2, AC-3: 中繼投送哨兵喚醒
+  // 切片 3: 傳遞 relayMode 模式標籤至 mirrorToGitHubRelay
   // ==========================================
   function checkSessionGuards() {
     // 哨兵 0: 跨倉中繼投送哨兵 (最高優先級，編輯態 ➔ 檢視態自動投送)
@@ -4622,7 +4619,7 @@
     } catch (e) {}
 
 
-    if (pendingRelay === '1' && !isEditPage() && !isNewPage()) {
+    if (pendingRelay && !isEditPage() && !isNewPage()) {
       const currentHref = window.location.href.split('#')[0].split('?')[0];
       const gistRegex = /^https:\/\/gist\.github\.com\/[^\/\s]+\/[a-f0-9]+$/;
       if (gistRegex.test(currentHref)) {
@@ -4632,7 +4629,7 @@
 
 
         setTimeout(() => {
-          mirrorToGitHubRelay();
+          mirrorToGitHubRelay(pendingRelay); // 傳入模式標籤 ('1' 或 'handoff')
         }, 300);
         return;
       }
@@ -4719,7 +4716,7 @@
       runSmartAssemblyPipeline();
     });
     GM_registerMenuCommand('🌐 投送 Claude (Repo)', () => {
-      mirrorToGitHubRelay();
+      mirrorToGitHubRelay('1');
     });
     GM_registerMenuCommand('⚙️ 打開設定管理器', () => {
       openConfigModal();
