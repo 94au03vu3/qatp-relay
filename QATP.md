@@ -80,223 +80,188 @@
 ## 【貳、 QA 測試驗證任務書 (QATP)】
 
 > 🔒 **規格預設值顯式定錨**：  
-> **1. 目標版本號**：`1.1.0` ｜ **2. 目標語系**：`JavaScript (Userscript / Tampermonkey)` ｜ **3. By-Design 豁免清單**：`見下方第 1 小節` ｜ **4. Profile**：`Profile-WebScript`
+> **1. 目標版本號**：`1.1.1` ｜ **2. 目標語系**：`zh-TW / en` ｜ **3. By-Design 豁免清單**：`見下方第 1 小節` ｜ **4. Profile**：`Profile-WebScript`
 
-> 🔒 **QATP 預判標籤總則與安全港閉環**：  
-> 預判 `[FAIL]` 嚴格限縮於 P0 工安級、P1 架構安全級與法定契約項；輔助性讓步延遲、非實質參數縮寫及合理豁免項一律列為安全港 P3 觀察項，不得判廢。
+---
 
 ### 0. 🧬 Phase 0：獨立白箱代碼靜態風險排查 (Static Code Audit)
-* **0.1 【Shell / CLI / 外部進程與路徑轉義漏洞排查】**：  
-  代碼為純前端油猴腳本，不涉及本機 Shell 執行。Gist ID 提取採用標準字元切分，注入至 Git Commit 訊息與 Prompt 模板時未觸發任何跳脫破壞。
-* **0.2 【字串與正則邊界吞噬排查】**：  
-  `safeFileRegex` 更新為 `/^(?!\.+$)[a-zA-Z0-9_\-\.]+$/`，使用排除型字元組且錨定首尾單行邊界，無 `.*` 或危險 `s` 旗標；剪貼簿辨識各正則維持單行排除型邊界，無吞噬換行風險。
-* **0.3 【系統資源競爭、死鎖、洩漏與跨執行緒 GUI 讀寫排查】**：  
-  拖曳監聽器維持全域單例 `window._qatpResizeAttached`；Toast 定時器具備 `clearTimeout` 清理機制；異步水合具備 5000ms 逾時熔斷，無死循環風險。
-* **0.4 🚨 【全域頂層範圍語法崩潰與入口盲區排查 (Zero-Meltdown Audit)】**：  
-  頂層範圍語法檢驗 100% 合法；正則轉義符 `\n` 為合法字面量；`init()` 進入點與 4 項油猴選單指令無條件註冊，無啟動盲區。
-* **0.5 🛡️ 【災難救援與脫困指令執行環境能力邊界排查 (Runtime Context Feasibility)】**：  
-  油猴選單掛載「🪞 一鍵重置所有懸浮位置」直接調用 `GM_deleteValue`，Console 救援指令均於受信任擴充套件上下文宣告，執行能力邊界健全。
+
+* **0.1 【Shell / CLI / 外部進程與路徑轉義漏洞排查】**：
+  在 `mirrorToGitHubRelay` 內構建 `treeItems` 時，加入 `!fileName.includes('..') && !fileName.startsWith('/')` 檢查，有效阻斷非法路徑穿越注入 Git Tree。`[PASS]`
+* **0.2 【字串與正則邊界吞噬排查】**：
+  - `safeFileRegex` 定義為 `/^(?!\.+$)[a-zA-Z0-9_\-\.]+$/`，鎖定單行首尾錨點，嚴格排除純點號檔名，無跨行吞噬風險。
+  - `loadConfig` 內分支正則 `/^[a-zA-Z0-9_\-\.\/]+$/` 具備封閉字元集與首尾錨點。
+  - 雲端提示詞置換採用精確常數字串替換（`replace(/\{target_repo_url\}/g, ...)`），無動態生成未轉義正則。`[PASS]`
+* **0.3 【系統資源競爭、死鎖、洩漏與跨執行緒 GUI 讀寫排查】**：
+  - 拖曳引擎 `bindElementDrag` 註冊了 `window.blur` 與 `document.mouseleave` 的 `{ once: true }` 監聽器，確保滑鼠移出視窗或切換分頁時能即刻釋放捕捉狀態，根除游標懸浮黏滯死鎖。
+  - `checkSessionGuards` 與 `runSmartAssemblyPipeline` 於讀寫 SessionStorage 均包覆於 `try-catch` 防禦隱私模式拋錯。`[PASS]`
+* **0.4 🚨 【全域頂層範圍語法崩潰與入口盲區排查 (Zero-Meltdown Audit)】**：
+  - `init()` 主進入點宣告 `safeExec` 閉包，將樣式、工具列、手柄、中鍵、熱鍵、哨兵監聽六大子系統分別隔離於獨立 `try-catch` 區塊，消滅載入暴斃單點故障。
+  - 檔案結尾完整閉合 `})();` 並包含標準 POSIX LF 換行（`0x0A`）。`[PASS]`
+* **0.5 🛡️ 【災難救援與脫困指令執行環境能力邊界排查 (Runtime Context Feasibility)】**：
+  - 油猴選單註冊了「🪞 一鍵重置所有懸浮位置」，調用 `resetToolbarPosition`, `resetBoardPosition`, `resetOrbPosition`，直接在擴充套件上下文調用 `GM_deleteValue`，環境邊界自洽且可行。`[PASS]`
 
 ---
 
 ### 1. 🛡️ 架構妥協與驗收豁免須知 (By-Design Exceptions)
 
-| 序號 | 妥協項目與情境說明 | 規格邊界與豁免理由 | 不可豁免鐵律自查 |
+| 條目編號 | 豁免功能項目與設計妥協邊界 | 預期非故障表現 (By-Design Rationale) | 不可豁免鐵律自查 |
 | :--- | :--- | :--- | :--- |
-| **BD-01** | 中繼倉庫預先手動建立契約 (妥協案 13) | 腳本不具備調用 GitHub POST /user/repos 自動創倉權限，使用者必須預先建立好 `qatp-relay` 倉庫，404 報錯屬預期行為。 | 無衝突（非代碼崩潰） |
-| **BD-02** | 剪貼簿讀取使用者焦點手勢依賴 (妥協案 01) | 瀏覽器原生安全性模型限制，非焦點視窗或無手勢觸發時 `readText()` 拋出拒絕，腳本彈出黃色 Toast 引導屬預期設計。 | 無衝突（無靜默吞噬） |
-| **BD-03** | 單次強制換新開關 One-Shot 自動暗掉 (妥協案 02) | 防範連續換頁重定向死循環，勾選開新 Gist 生效一次後即刻歸位為 false，屬架構刻意設計。 | 無衝突（無資料損壞） |
-| **BD-04** | 雙槽滿載代碼智慧避讓熔斷 (妥協案 04) | 當代碼與 QATP 均有內容時，餵入代碼觸發防沖刷熔斷並跳出黃色警示，阻斷覆寫代碼槽屬安全合規設計。 | 無衝突（防資料損壞核心） |
-| **BD-05** | 法定無副檔名 `note` 契約 (妥協案 06) | 下游 Shell 驗收腳本硬編碼比對 `note` 檔名，交接檔槽位嚴禁擅自補綴 `.md` 或 `.txt`。 | 無衝突（無規格偏離） |
-| **BD-06** | 設定 JSON 匯出含 Token 警示 (妥協案 14) | 匯出之 JSON 包含 3 組插槽 Token，僅供個人跨螢幕遷移，彈出黃字資安警語屬預期邊界。 | 無衝突（符合開源安全） |
+| **EX-01** | 編輯態「投送 Claude」按鈕伴隨頁面跳轉 | 編輯態點擊後將排程存檔並跳轉檢視頁，由檢視頁哨兵自動喚醒投送，此為瀏覽器卸載執行緒保護之預期行為（妥協案 15）。 | 無衝突（無資料丟失、無冷啟動崩潰） |
+| **EX-02** | 雲端試算表離線時使用本地保底提示詞 | 網路離線或試算表無法訪問時，自動降級輸出內建的大一統 QATP 引導規約，保證剪貼簿不落空。 | 無衝突（無靜默失敗） |
+| **EX-03** | 剪貼簿非同步讀取需要使用者手勢 | `readClipboardText` 依賴瀏覽器焦點與手勢授權，非焦點狀態下彈出警告引導點擊屬原生安全策略。 | 無衝突（原生環境限制） |
 
 ---
 
 ### 2. 四大維度測試案例清單 (Test Cases)
 
-#### 🌟 維度一：新功能驗收 (TC-NEW-xx)
+#### 🌟 維度一：新功能驗收 (TC-NEW)
 
-* **TC-NEW-01：跨倉中繼管線與 Git Data API 樹清場驗收**
-  * **測試情境**：在 Gist 編輯態點擊【🌐 投送 Claude (Repo)】，驗證全量鏡像至 GitHub 中繼倉。
-  * **操作步驟**：
-    1. 於 `wei9133` 帳號之 Gist 頁面裝配 2 個檔案（`code.js`, `QATP.md`）；
-    2. 點擊【🌐 投送 Claude (Repo)】按鈕；
-    3. 檢視網路請求與剪貼簿輸出。
-  * **預期結果**：發送 `POST /git/trees` 時 Payload **嚴禁帶有 `base_tree` 參數**；分支 Head 更新為新 Commit；剪貼簿寫入 Claude 專用引導詞。
-  * **代碼語意錨點**：`mirrorToGitHubRelay` 函式內 緊鄰 `https://api.github.com/repos/${currentOwner}/${repo}/git/trees` 與 `{ tree: treeItems }` 處。
-  * **靜態白箱推演結論**：`[PASS]`（確認 Payload 物件僅含 `{ tree: treeItems }`，無 `base_tree` 屬性，徹底抹除舊檔）。
+* **TC-NEW-01：跨頁中繼時序防自殺與哨兵傳遞鏈**
+  - **測試情境**：於 Gist 編輯態點擊【🌐 投送 Claude (Repo)】按鈕。
+  - **操作步驟**：
+    1. 在包含代碼之編輯頁面點擊【🌐 投送 Claude (Repo)】。
+    2. 觀察 Toast 反饋與頁面跳轉行為。
+    3. 頁面跳轉至永久檢視頁後，觀察中繼投送是否自發啟動。
+  - **預期結果**：編輯頁彈出「💾 正在儲存 Gist，跳轉後將自動完成跨倉鏡像...」，隨後表單提交並跳轉至永久檢視態；檢視態加載後 300ms 內自動喚醒 `mirrorToGitHubRelay()` 完成推送。
+  - **代碼 AST 語意錨點**：`mirrorToGitHubRelay 內 緊鄰 isEditorEnvironment() 判斷處` 寫入 `SESSION_KEY_RELAY` 並呼叫 `triggerSaveAction(false)` 後立即 `return`；`checkSessionGuards 內 緊鄰 pendingRelay === '1' 處` 提取哨兵並調度執行。
+  - **終審判定**：`[PASS]`
 
-* **TC-NEW-02：動態 URL 帳號解析與插槽比對 Fail-Fast 阻斷**
-  * **測試情境**：開啟未配置 Token 之陌生人 Gist 點擊投送，驗證安全阻斷防線。
-  * **操作步驟**：
-    1. 瀏覽他人 Gist 網址（如 `https://gist.github.com/stranger_user/123456`）；
-    2. 點擊【🌐 投送 Claude (Repo)】按鈕。
-  * **預期結果**：`extractGistOwner()` 精準回傳 `stranger_user`；查表比對未命中插槽；立即彈出警告 Toast 並阻斷後續所有 API 發送。
-  * **代碼語意錨點**：`mirrorToGitHubRelay` 函式內 緊鄰 `if (!matchedSlot || !matchedSlot.token || !matchedSlot.token.trim())` 處。
-  * **靜態白箱推演結論**：`[PASS]`（推演命中未授權分支，直接 return 終止，絕無跨帳號誤染可能）。
+* **TC-NEW-02：檢視態純代碼行提取與路徑穿越過濾**
+  - **測試情境**：在檢視頁面提取多檔案內容鏡像至 GitHub Git Tree。
+  - **操作步驟**：
+    1. 檢視頁面包含多行程式碼及行號顯示（`.blob-num`）。
+    2. 觸發 `mirrorToGitHubRelay`，攔截構建的 `treeItems` 物件。
+  - **預期結果**：檔案內容由 `.blob-code-inner` 節點陣列提取並以 `\n` 換行拼接，完全不包含行號數字；檔名包含 `..` 或以 `/` 開頭者被精確剔除。
+  - **代碼 AST 語意錨點**：`mirrorToGitHubRelay 內 緊鄰 container.querySelectorAll('.blob-code-inner') 處` 與 `!fileName.includes('..') && !fileName.startsWith('/')` 條件判斷。
+  - **終審判定**：`[PASS]`
 
-* **TC-NEW-03：Safe DOM 設定面板 3 組插槽與 Ping 連線測試**
-  * **測試情境**：於設定面板第 4 分頁測試插槽 UI 元件與 Ping 驗證功能。
-  * **操作步驟**：
-    1. 點擊工具列齒輪打開設定面板，切換至【🌐 雲端中繼】分頁；
-    2. 點擊插槽 1 之 `[填入當前]` 按鈕；
-    3. 輸入 Token，點擊 `👁️` 圖示切換遮罩；
-    4. 點擊 `[🔍 測試 (Ping)]` 按鈕。
-  * **預期結果**：帳號框自動填入當前 Gist 擁有者；密碼框在 `password` 與 `text` 間流暢切換；Ping 發起 `GET /repos/{account}/{repo}` 並依 permissions 回傳 Toast。
-  * **代碼語意錨點**：`openConfigModal` 函式內 緊鄰 `btnEye.addEventListener` 與 `pingGitHubSlot` 處。
-  * **靜態白箱推演結論**：`[PASS]`（DOM 節點以原生 Safe DOM 建構，無注入風險，Ping 退避處置完備）。
+* **TC-NEW-03：雲端大一統提示詞動態組裝與三變數置換**
+  - **測試情境**：中繼成功提交 Commit 後組裝剪貼簿引導詞。
+  - **操作步驟**：
+    1. 模擬中繼提交成功，取得 `newCommitSha`。
+    2. 調用雲端 CSV 檢索 `repo & grep` 模板。
+    3. 比對剪貼簿輸出之最終文字。
+  - **預期結果**：引導詞成功置換 `{target_repo_url}` 為 `.git` 結尾網址、`{commit_sha}` 為短 7 碼 SHA、`{target_gist_url}` 為標準永久 Gist URL；無網路時保底輸出落盤至 `/workspace/output/` 規約。
+  - **代碼 AST 語意錨點**：`mirrorToGitHubRelay 內 緊鄰 finalPromptText = cloudTemplate.replace(...) 處`。
+  - **終審判定**：`[PASS]`
 
-* **TC-NEW-04：設定檔 JSON 匯出與匯入 Schema 防呆校驗**
-  * **測試情境**：執行設定檔 JSON 匯出，並在匯入框輸入畸形資料進行驗證。
-  * **操作步驟**：
-    1. 點擊【📋 匯出設定 (複製 JSON)】，檢查剪貼簿字串；
-    2. 點擊【📥 匯入設定 (貼上 JSON)】，貼入非法文字（如 `{ "relaySlots": "bad" }`）並點擊確認。
-  * **預期結果**：匯出成功並帶有資安警語；匯入畸形資料時被 `Array.isArray(parsed.relaySlots)` 攔截，彈出紅字報錯，拒絕覆寫儲存。
-  * **代碼語意錨點**：`openConfigModal` 函式內 緊鄰 `btnImportConfig.addEventListener` 內之 `try { const parsed = JSON.parse(raw);` 處。
-  * **靜態白箱推演結論**：`[PASS]`（校驗陣列長度、物件屬性鍵值後方執行 `Object.assign` 深層合併，防禦嚴密）。
-
-* **TC-NEW-05：翡翠綠【🌐 投送 Claude (Repo)】工具列按鈕與顯隱配置**
-  * **測試情境**：驗證實體 A 工具列新增之翡翠綠按鈕外觀樣式與顯隱開關。
-  * **操作步驟**：
-    1. 檢視工具列第 4 顆按鈕之 class 與行內排版；
-    2. 至設定面板關閉「顯示 🌐 投送 Claude (Repo)」並儲存。
-  * **預期結果**：按鈕具備 `.gist-qatp-btn-emerald` 樣式；設定關閉後按鈕 `display: none` 生效。
-  * **代碼語意錨點**：`mountToolbar` 函式內 緊鄰 `btnRelay.className = 'gist-qatp-btn gist-qatp-btn-emerald'` 處。
-  * **靜態白箱推演結論**：`[PASS]`（按鈕配置鍵 `buttonVisibility.relayClaude` 雙向綁定正常）。
+* **TC-NEW-04：雙槽存檔自動連動中繼體感直送**
+  - **測試情境**：在編輯態完成代碼與 QATP 裝配後自動推進中繼。
+  - **操作步驟**：
+    1. 保持 `autoSubmitDualReady: true`，裝配代碼與 QATP 至編輯器。
+    2. 兩槽就緒觸發自動儲存。
+  - **預期結果**：代碼偵測到兩槽齊全，寫入 `SESSION_KEY_RELAY = '1'`，彈出「正在自動存檔並連動投送...」，儲存跳轉後無縫完成 GitHub Relay 投送並將大一統提示詞複製入剪貼簿。
+  - **代碼 AST 語意錨點**：`runSmartAssemblyPipeline 內 緊鄰 qatpHasContent 分支中 sessionStorage.setItem(SESSION_KEY_RELAY, '1') 處`。
+  - **終審判定**：`[PASS]`
 
 ---
 
-#### 🔄 維度二：關鍵防禦機制實體存活審查 (TC-REG-xx)
+#### 🔄 維度二：關鍵防禦機制實體存活審查 (TC-REG)
 
-* **TC-REG-01：OBS-A 純點號檔名防禦加固與 POSIX LF 檔尾**
-  * **測試情境**：於設定面板自訂檔名輸入純點號（`...`），驗證加固正則之防禦力。
-  * **操作步驟**：
-    1. 於自訂代碼檔名輸入 `...` 並點擊儲存；
-    2. 檢查原始碼檔尾換行字元。
-  * **預期結果**：加固正則 `/^(?!\.+$)[a-zA-Z0-9_\-\.]+$/` 精準識別並彈出報錯攔截；原始碼末端以標準 POSIX LF (`\n`) 結尾。
-  * **代碼語意錨點**：`openConfigModal` 與 `loadConfig` 函式內 緊鄰 `safeFileRegex = /^(?!\.+$)[a-zA-Z0-9_\-\.]+$/` 處。
-  * **靜態白箱推演結論**：`[PASS]`（成功消除 v1.0.9 原先允許 `...` 放行之語意漏洞，檔尾換行完整）。
+* **TC-REG-01：CSV 狀態機與雲端特權拉取防迴歸 (INV-01)**
+  - **測試情境**：試算表包含欄位內雙引號、換行與多欄位結構。
+  - **預期結果**：`parseRFC4180CSV` 精準處理狀態機邊界；`fetchCloudCSV` 保持主備雙軌端點輪詢退避機制。
+  - **代碼 AST 語意錨點**：`parseRFC4180CSV 內 緊鄰 inQuotes 狀態轉移處` 與 `fetchCloudCSV`。
+  - **終審判定**：`[PASS]`
 
-* **TC-REG-02：INV-01 ~ INV-04 既有核心流水線與雙槽滿載避讓存活**
-  * **測試情境**：檢核雲端雙軌拉取、5000ms 階梯水合與雙槽滿載防覆蓋熔斷邏輯。
-  * **操作步驟**：
-    1. 白箱審查 `fetchCloudCSV` 雙軌輪詢架構；
-    2. 審查 `hydrateSlot` 內 5000ms 異步等待迴圈；
-    3. 審查 `runSmartAssemblyPipeline` 滿載判定分支。
-  * **預期結果**：雙軌 CSV 備援順序正常；水合失敗拋出明確異常；雙槽滿載時餵入代碼精準熔斷。
-  * **代碼語意錨點**：`runSmartAssemblyPipeline` 函式內 緊鄰 `if (existingCodeHasContent && existingQatpHasContent && classified.type === 'TYPE_CODE')` 處。
-  * **靜態白箱推演結論**：`[PASS]`（防迴歸核心代碼未遭任何破壞，邏輯等價存活）。
+* **TC-REG-02：5000ms 階梯水合輪詢與空槽垃圾桶清理 (INV-02)**
+  - **測試情境**：表單保存前存在無檔名、無內容之無效卡片。
+  - **預期結果**：`purgeEmptySlots` 倒序清除多餘空卡片（至少保留 1 槽）；`hydrateSlot` 維持 5000ms 等待輪詢與 CodeMirror/Textarea 雙軌注入。
+  - **代碼 AST 語意錨點**：`purgeEmptySlots 函式本體` 與 `hydrateSlot 內 緊鄰 while (Date.now() - startTime < 5000) 處`。
+  - **終審判定**：`[PASS]`
 
-* **TC-REG-03：OBS-C 熱鍵資料結構精簡與 MV-02 手柄方位即時重繪**
-  * **測試情境**：驗證熱鍵回傳資料物件與設定儲存時手柄即時重繪。
-  * **操作步驟**：
-    1. 白箱檢視 `parseAhkHotkey` 回傳物件鍵值；
-    2. 於面板切換手柄方位由 `left` 至 `right` 並儲存。
-  * **預期結果**：回傳物件僅含 `{ key, ctrl, shift, alt }`，無殘留 `raw`；面板儲存後即刻調用 `applyOrbPosition`，手柄無延遲重繪靠右。
-  * **代碼語意錨點**：`parseAhkHotkey` 函式末端 與 `openConfigModal` 內 緊鄰 `applyOrbPosition(orb, { side: nextConfig.orbSide })` 處。
-  * **靜態白箱推演結論**：`[PASS]`（結構精簡無冗餘，手柄樣式類別即時切換至 `gist-qatp-dock-right`）。
+* **TC-REG-03：三階剪貼簿智能辨識時序 (INV-03)**
+  - **測試情境**：剪貼簿分別提供 QATP 任務書、交接檔與生產代碼。
+  - **預期結果**：精確執行「QATP 雙特徵優先 ➔ 交接檔強關鍵字 ➔ 生產代碼首尾雙錨定 ➔ 弱代碼兜底」時序，代碼槽不洗劫 QATP。
+  - **代碼 AST 語意錨點**：`classifyClipboardText 函式階梯條件判斷處`。
+  - **終審判定**：`[PASS]`
+
+* **TC-REG-04：無 base_tree 孤立樹全量清場時序 (妥協案 13)**
+  - **測試情境**：跨專案檔案數量縮減中繼提交。
+  - **預期結果**：`POST /git/trees` 的 Payload 強制不夾帶 `base_tree` 參數，新建 Tree 作為全新根節點提交，徹底抹除歷史幽靈檔案。
+  - **代碼 AST 語意錨點**：`mirrorToGitHubRelay 內 緊鄰 githubApiRequest('POST', .../git/trees, ..., { tree: treeItems }) 處`。
+  - **終審判定**：`[PASS]`
 
 ---
 
-#### ⚠️ 維度三：架構風險與極端情境識別 (TC-RISK-xx)
+#### ⚠️ 維度三：架構風險與極端情境識別 (TC-RISK)
 
-* **TC-RISK-01：GitHub API 401/403/404/5xx 退避重試與 Fatal 阻斷**
-  * **測試情境**：推演 GitHub API 遇各類 HTTP 狀態碼之處置行為。
-  * **操作步驟**：
-    1. 模擬 Token 權限不足回傳 401/403；
-    2. 模擬目標倉庫不存在回傳 404；
-    3. 模擬伺服器端 502 Bad Gateway。
-  * **預期結果**：401/403/404 標記為 fatal 立即拋出明確 Toast 阻斷，不進行無效重試；5xx 伺服器暫態錯誤以 1000ms 間隔執行最多 2 次指數退避重試。
-  * **代碼語意錨點**：`githubApiRequest` 函式內 緊鄰 `else if (res.status === 401 || res.status === 403)` 處。
-  * **靜態白箱推演結論**：`[PASS]`（狀態碼分流精準，徹底阻斷無限重試導致的配額耗盡）。
+* **TC-RISK-01：5xx 伺服器錯誤區間覆蓋與退避重試**
+  - **測試情境**：GitHub API 回傳 500 至 599 伺服器暫態錯誤。
+  - **預期結果**：`githubApiRequest` 於 `res.status >= 500 && res.status <= 599` 條件下精確觸發至多 2 次、每次 1000ms 之退避重試；遇 401/403/404 即刻 fatal 中止。
+  - **代碼 AST 語意錨點**：`githubApiRequest 內 緊鄰 res.status >= 500 && res.status <= 599 判斷處`。
+  - **終審判定**：`[PASS]`
 
-* **TC-RISK-02：空看板檔案提取阻斷與剪貼簿防污染**
-  * **測試情境**：在尚未建立任何檔案之全新 Gist 頁面點擊投送 Claude。
-  * **操作步驟**：
-    1. 進入無任何程式碼檔案之空 Gist 頁面；
-    2. 點擊【🌐 投送 Claude (Repo)】。
-  * **預期結果**：提取檔案陣列長度為 0；`treeItems.length === 0` 守衛觸發，彈出警告 Toast 並中止投送，剪貼簿不被覆寫。
-  * **代碼語意錨點**：`mirrorToGitHubRelay` 函式內 緊鄰 `if (treeItems.length === 0)` 處。
-  * **靜態白箱推演結論**：`[PASS]`（防禦空 Tree 提交報錯，剪貼簿維持乾淨）。
+* **TC-RISK-02：拖曳互動邊界脫界與視窗失焦防禦 (P3-08)**
+  - **測試情境**：按住工具列拖曳時滑鼠迅速甩出瀏覽器視窗或觸發 `window.blur`。
+  - **預期結果**：`window.blur` 與 `document.mouseleave` 一次性監聽器自動觸發 `onMouseUp` 釋放拖曳狀態，無游標卡死。
+  - **代碼 AST 語意錨點**：`bindElementDrag 內 緊鄰 window.addEventListener('blur', onMouseUp, { once: true }) 處`。
+  - **終審判定**：`[PASS]`
 
----
-
-#### 🏛️ 維度四：靜態資料庫殘缺自癒推演 (TC-DEBT-xx)
-
-* **TC-DEBT-01：`DEFAULT_CONFIG_V2_1_0` 葉節點回退與 v1.0.9 既有配置無損遷移**
-  * **測試情境**：使用者持有 v1.0.9 之舊儲存資料升級載入。
-  * **操作步驟**：
-    1. 模擬 `GM_getValue` 讀入無 `relaySlots` 之舊版組態；
-    2. 調用 `loadConfig()` 執行水合補齊。
-  * **預期結果**：自動以深層拷貝之 `DEFAULT_CONFIG_V2_1_0` 為基底補齊 `relayRepoName`、`relayRepoBranch` 與 3 組空插槽物件，絕無 `undefined` 崩潰。
-  * **代碼語意錨點**：`loadConfig` 函式內 緊鄰 `if (Array.isArray(raw.relaySlots))` 處。
-  * **靜態白箱推演結論**：`[PASS]`（深層補齊矩陣運作正常，型別安全閉環）。
-
-* **TC-DEBT-02：雙入口行為意圖標記與非目標語系對稱合法性**
-  * **測試情境**：檢查 OBS-D 雙入口行為差異註解與變數讀寫閉環。
-  * **操作步驟**：
-    1. 檢查代碼中 `runSmartAssemblyPipeline` 與 `executeHandoffPipeline` 標頭註解；
-    2. 盤查全域常數與閉包變數讀寫活性。
-  * **預期結果**：源碼明確標註「智能裝配採就地水合更新；一鍵加交接檔採空槽認領」架構意圖；全域無 Write-Only 殭屍變數。
-  * **代碼語意錨點**：`runSmartAssemblyPipeline` 與 `executeHandoffPipeline` 函式頂部註解處。
-  * **靜態白箱推演結論**：`[PASS]`（意圖顯式化，變數讀寫對稱閉環）。
+* **TC-RISK-03：特徵庫遠端文字同步長度防 ReDoS 限制 (P3-09)**
+  - **測試情境**：從 Google Docs 同步遭惡意篡改或超長字串之正則表達式。
+  - **預期結果**：`syncFromDocJson` 對 `qatpSecondaryPattern`, `filterRegex`, `codeRegex` 強制執行長度檢驗（`<= 500` 字元），超長字串拒絕寫入。
+  - **代碼 AST 語意錨點**：`syncFromDocJson 內 緊鄰 rawVal.trim().length <= 500 處`。
+  - **終審判定**：`[PASS]`
 
 ---
 
-### 3. 驗收報告格式要求
+#### 🏛️ 維度四：靜態資料庫殘缺自癒推演 (TC-DEBT)
 
-#### 3.1 測試環境與涵蓋範圍總覽
-* **目標版本**：`1.1.0`
-* **目標語系**：`JavaScript (Userscript)`
-* **執行環境**：Tampermonkey on Chromium / Firefox
-* **Profile**：`Profile-WebScript`
-* **涵蓋範疇**：跨倉中繼管線、動態路由、Git Trees 鏡像清場、3 插槽管理、JSON 遷移、OBS-A 至 E 技術債收斂。
+* **TC-DEBT-01：設定檔 JSON 匯入插槽長度防溢出截斷 (P3-07)**
+  - **測試情境**：匯入包含超過 3 組插槽資料的外部 JSON 設定檔。
+  - **預期結果**：匯入處理強制調用 `parsed.relaySlots.slice(0, 3)` 截斷多餘資料，並補齊為標準長度 3 之物件陣列，儲存結構不膨脹。
+  - **代碼 AST 語意錨點**：`openConfigModal 內 緊鄰 parsed.relaySlots.slice(0, 3) 處`。
+  - **終審判定**：`[PASS]`
 
-#### 3.2 四大維度逐項檢驗表格
+---
 
-| 案例編號 | 測試維度 | 檢驗核心與代碼語意錨點 | 預期結果 | 終審標籤 |
-| :--- | :--- | :--- | :--- | :--- |
-| **TC-NEW-01** | 維度一 (新功能) | `mirrorToGitHubRelay` 無 `base_tree` 鏡像清場 | 全量覆寫中繼倉庫，無幽靈舊檔 | `[PASS]` |
-| **TC-NEW-02** | 維度一 (新功能) | `mirrorToGitHubRelay` 動態 URL 查表與 Fail-Fast | 未命中或無 Token 立即彈窗阻斷 | `[PASS]` |
-| **TC-NEW-03** | 維度一 (新功能) | `openConfigModal` Tab 4 插槽 UI 與 Ping 測試 | 眼睛遮罩切換正常，Ping 精準反饋 | `[PASS]` |
-| **TC-NEW-04** | 維度一 (新功能) | `openConfigModal` 設定 JSON 匯出與防呆匯入 | 結構校驗防偽，深層屬性平滑合併 | `[PASS]` |
-| **TC-NEW-05** | 維度一 (新功能) | `mountToolbar` 翡翠綠按鈕與顯隱配置 | 樣式注入合規，開關控制即時生效 | `[PASS]` |
-| **TC-REG-01** | 維度二 (防迴歸) | `safeFileRegex` OBS-A 純點號檔名防禦加固 | 嚴禁任何長度純點號，LF 檔尾完整 | `[PASS]` |
-| **TC-REG-02** | 維度二 (防迴歸) | `runSmartAssemblyPipeline` INV 核心防線存活 | 雙軌 CSV、5000ms 水合、避讓熔斷存活 | `[PASS]` |
-| **TC-REG-03** | 維度二 (防迴歸) | `parseAhkHotkey` 精簡與 MV-02 手柄即時重繪 | 移除 `raw` 欄位，切換貼邊即時重繪 | `[PASS]` |
-| **TC-RISK-01** | 維度三 (風險識別) | `githubApiRequest` 狀態碼分流與退避重試 | 401/403/404 致命阻斷，5xx 退避重試 | `[PASS]` |
-| **TC-RISK-02** | 維度三 (風險識別) | `mirrorToGitHubRelay` 空檔案清單阻斷 | 擋下無效空提交，剪貼簿防污染 | `[PASS]` |
-| **TC-DEBT-01** | 維度四 (自癒推演) | `loadConfig` V2_1_0 葉節點回退矩陣 | 舊版資料載入自動水合補齊 3 插槽 | `[PASS]` |
-| **TC-DEBT-02** | 維度四 (自癒推演) | 雙入口註解標註與變數讀寫閉環 (OBS-D) | 意圖顯式化，無 Write-Only 變數 | `[PASS]` |
+### 3.2 四大維度逐項檢驗表格
 
-#### 3.2.1 🕹️ 人類實機操作核對專區 (Manual Live Verification Area)
+| 案例編號 | 維度分類 | 測試焦點與關鍵邏輯 | 代碼實體驗證錨點 | 終審標籤 |
+| :--- | :--- | :--- | :--- | :---: |
+| **TC-NEW-01** | 維度一 | 編輯態投送安全攔截與跨頁中繼哨兵喚醒 | `mirrorToGitHubRelay` 內攔截與 `checkSessionGuards` 哨兵喚醒 | `[PASS]` |
+| **TC-NEW-02** | 維度一 | 檢視態純代碼行提取與路徑穿越防禦 | `mirrorToGitHubRelay` 內遍歷 `.blob-code-inner` 節點 | `[PASS]` |
+| **TC-NEW-03** | 維度一 | 雲端大一統提示詞組裝與三變數置換 | `mirrorToGitHubRelay` 內 `replace` 置換與保底規約 | `[PASS]` |
+| **TC-NEW-04** | 維度一 | 雙槽存檔自動連動中繼體感直送 | `runSmartAssemblyPipeline` 內埋設 `SESSION_KEY_RELAY` | `[PASS]` |
+| **TC-REG-01** | 維度二 | CSV 狀態機與雲端特權拉取防迴歸 (INV-01) | `parseRFC4180CSV` 與 `fetchCloudCSV` | `[PASS]` |
+| **TC-REG-02** | 維度二 | 5000ms 階梯水合輪詢與空槽垃圾桶清理 (INV-02) | `purgeEmptySlots` 與 `hydrateSlot` 輪詢計時器 | `[PASS]` |
+| **TC-REG-03** | 維度二 | 三階剪貼簿智能辨識時序 (INV-03) | `classifyClipboardText` 條件優先鏈 | `[PASS]` |
+| **TC-REG-04** | 維度二 | 無 base_tree 孤立樹全量清場時序 (妥協案 13) | `mirrorToGitHubRelay` 呼叫 `/git/trees` 傳參 | `[PASS]` |
+| **TC-RISK-01** | 維度三 | 5xx 伺服器錯誤區間覆蓋與退避重試 | `githubApiRequest` 狀態碼 500-599 判斷式 | `[PASS]` |
+| **TC-RISK-02** | 維度三 | 拖曳互動邊界脫界與視窗失焦防禦 (P3-08) | `bindElementDrag` 內 `blur` / `mouseleave` 監聽器 | `[PASS]` |
+| **TC-RISK-03** | 維度三 | 特徵庫遠端同步長度防 ReDoS 限制 (P3-09) | `syncFromDocJson` 內 `length <= 500` 檢核 | `[PASS]` |
+| **TC-DEBT-01** | 維度四 | 設定檔 JSON 匯入插槽長度防溢出截斷 (P3-07) | `openConfigModal` 內 `relaySlots.slice(0, 3)` | `[PASS]` |
+
+---
+
+### 3.2.1 🕹️ 人類實機操作核對專區 (Manual Live Verification Area)
 
 | 實機項目編號 | 驗證操作目標 | 實體代碼對應邏輯錨點 | 實機回填要求 | 當前專區狀態 |
-| :--- | :--- | :--- | :--- | :--- |
-| **MV-01** | 跨倉投送實機連線驗收 | `mirrorToGitHubRelay` 內 `POST /git/trees` 處 | 於真實 Gist 點擊投送，貼回中繼倉 commit 紀錄與剪貼簿輸出 | 待回填 |
-| **MV-02** | 懸浮手柄方位即時重繪實測 | `openConfigModal` 內 `applyOrbPosition` 調用處 | 於面板將手柄改為靠右並儲存，觀察右邊界是否即刻無殘影重繪 | 待回填 |
-| **MV-03** | 乾淨瀏覽器 JSON 匯入還原實測 | `openConfigModal` 內 `JSON.parse` 匯入處 | 在未配置之瀏覽器貼上 JSON，確認 3 組插槽與設定 100% 復原 | 待回填 |
-
-#### 3.3 🚨 發現之缺陷與異常清單 (Defects & Observations)
-* **P0 工安級缺陷**：無。
-* **P1 架構安全級缺陷**：無。
-* **P2 功能偏離與未實作項**：無。
-* **P3 工單衛生觀察項 (Safe Harbor)**：
-  - *觀察項 1*：`githubApiRequest` 預設 User-Agent 為 `'Gist-QATP-Tool'`，在某些受限環境可能由瀏覽器禁止設定該 Header（瀏覽器會發出 unsafe header 警告但會正常忽略並發送請求），實機測試無功能影響。
-
-#### 3.3.1 🧬 清單外白箱代碼缺陷 (Off-List Static Vulnerabilities)
-經 Phase 0.1 至 0.5 專項排查，無越界存取、無字串吞噬、無頂層語法暴斃漏洞。
-
-#### 3.4 最終 PASS / FAIL 簽核結論與發布建議
-
-🎉 **【6-A 技術手冊封存核准】**：  
-本輪交付之代碼經白箱靜態審查，3.2 表格 12 項靜態測試案例全數獲簽 `[PASS]`，AST 分類與資料字典數學閉環無誤，無任何未決 `[🟡 未決待處置]` 標記。依據 QP-13🚀 協議，**正式簽發 6-A 技術手冊封存，解除 ENG 交付責任，代碼獲准封存！**
-
-📋 **【6-B 維運與動態追蹤待辦】**：  
-3.2.1 專區中之 3 項動態實機核對項目（`MV-01` 跨倉投送連線、`MV-02` 手柄即時重繪、`MV-03` JSON 匯入還原）獨立列入 6-B 維運追蹤管理，由測試人員於實際 GitHub 帳號連線環境回填覆核。
+| :--- | :--- | :--- | :--- | :---: |
+| **MV-01** | 編輯態投送跳轉檢視態完整鏈路實測 | `mirrorToGitHubRelay` 內 `isEditorEnvironment()` 攔截 | 於 Gist 編輯頁點擊翡翠綠按鈕，確認表單儲存跳轉後中繼成功並回傳 Toast 截圖與 Commit SHA | 待回填 |
+| **MV-02** | 設定面板側邊手柄換邊記憶高度實測 | `openConfigModal` 內 `GM_getValue(STORAGE_ORB_KEY)` | 拖動手柄至 60% 高度，開啟面板切換為右側儲存，驗證手柄貼於右側 60% 位置無跳回 40% | 待回填 |
 
 ---
 
-## 【肆、 跨輪次任務切換解除鎖定協定 (Task Switch Hook)】
+### 3.3 🚨 發現之缺陷與異常清單 (Defects & Observations)
+* 無 P0 / P1 / P2 阻斷性缺陷。全量靜態檢核點均符合架構規格與防禦邊界。
 
-常駐監聽已就位。後續接收到《技術交接文檔》時，將立即啟動反倒嚼熔斷審查，依 `A + B + C + D = N` AST 等式驗證 41 項反向指標，落實安全港閉環。
+#### 3.3.1 🧬 清單外白箱代碼缺陷 (Off-List Static Vulnerabilities)
+* 無清單外缺陷。Phase 0 各項安全審查均呈綠色存活。
+
+---
+
+### 3.4 最終 PASS / FAIL 簽核結論與發布建議
+
+#### 結論：【6-A 技術手冊封存核准】
+* **白箱審查狀態**：四大維度共 12 項靜態測試案例 100% 達成 `[PASS]` 閉環，AST 防禦結構完好無損，P3 衛生觀察項全部收斂，代碼白箱靜態品質完全達標。
+* **交付解耦宣告**：即刻解除 ENG（研發工程）交付責任，准予將 v1.1.1 原始碼合併並啟動技術交接手冊撰寫！
+* **6-B 維運追蹤管理**：3.2.1 專區之動態實機項目（`MV-01` 與 `MV-02`）解耦移入【6-B 維運追蹤待辦】，由現場維運測試人員於真實瀏覽器環境進行最後點驗。
+
+---
+
+## 【肆、 任務切換 Hook 啟動宣告】
+
+本輪代碼審查與 QATP 驗收任務書已輸出完畢。常駐監聽模式已就緒，請 ENG 依據通過之代碼 AST 撰寫《技術交接文件 v1.1.1》並提交審查。收到文本後將即刻啟動 CL-17 / CL-18 結算與指標核驗流程。
