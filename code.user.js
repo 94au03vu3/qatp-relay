@@ -1,4764 +1,5999 @@
 // ==UserScript==
-// @name         GitHub Gist 一鍵 QATP 工具
-// @namespace    https://gist.github.com/
-// @description  GitHub Gist 智能裝配、任務書提取、技術交接加檔與語意槽位防撞名自動化工具 (BN Pattern 雲端多態特徵加固版)
-// @version      1.1.1
-// @license      MIT
-// @icon         https://www.google.com/s2/favicons?sz=64&domain=github.com
-// @match        https://gist.github.com/*
-// @grant        GM_xmlhttpRequest
+// @name         AI 雙模式乾淨複製器
+// @namespace    https://github.com/
+// @version      4.3.3
+// @description  精準過濾 AI 思考過程與工具欄雜訊，一鍵複製 Markdown。支援 ChatGPT、DeepSeek、通義千問、Kimi、Google AI Studio、智譜 AI、Mistral AI Playground、Perplexity AI、Z.AI 及 MiniMax Agent 旗艦 10 合 1。v4.3.3 實裝 Z.AI 成果物智能階梯降級、切片最長代碼塊旗標解耦、寬容備援雙換行保底與死代碼物理退役。
+// @author       Frontend Integration Engineering Team
+// @match        https://chatgpt.com/*
+// @match        https://chat.openai.com/*
+// @match        https://chat.deepseek.com/*
+// @match        https://chat.qwen.ai/*
+// @match        https://tongyi.aliyun.com/*
+// @match        https://kimi.ai/*
+// @match        https://*.kimi.ai/*
+// @match        https://kimi.moonshot.cn/*
+// @match        https://*.moonshot.cn/*
+// @match        https://www.kimi.com/chat/*
+// @match        https://aistudio.google.com/*
+// @match        https://chatglm.cn/*
+// @match        https://*.bigmodel.cn/*
+// @match        https://console.mistral.ai/*
+// @match        https://www.perplexity.ai/*
+// @match        https://perplexity.ai/*
+// @match        https://chat.z.ai/*
+// @match        https://agent.minimax.io/*
+// @match        https://*.minimax.io/*
 // @grant        GM_setClipboard
 // @grant        GM_setValue
 // @grant        GM_getValue
-// @grant        GM_deleteValue
+// @grant        GM_addStyle
 // @grant        GM_registerMenuCommand
-// @grant        unsafeWindow
+// @grant        GM_xmlhttpRequest
+// @icon         https://pic.imgdd.cc/i/034KFA32qXGmXFBp3GGyNP.png
 // @connect      docs.google.com
 // @connect      googleusercontent.com
-// @connect      api.github.com
-// @description:zh-TW
-// @downloadURL https://update.greasyfork.org/scripts/601102/GitHub%20Gist%20%E4%B8%80%E9%8D%B5%20QATP%20%E5%B7%A5%E5%85%B7.user.js
-// @updateURL https://update.greasyfork.org/scripts/601102/GitHub%20Gist%20%E4%B8%80%E9%8D%B5%20QATP%20%E5%B7%A5%E5%85%B7.meta.js
+// @noframes
+// @run-at       document-idle
+// @license      MIT
+// @downloadURL https://update.greasyfork.org/scripts/591228/AI%20%E9%9B%99%E6%A8%A1%E5%BC%8F%E4%B9%BE%E6%B7%A8%E8%A4%87%E8%A3%BD%E5%99%A8.user.js
+// @updateURL https://update.greasyfork.org/scripts/591228/AI%20%E9%9B%99%E6%A8%A1%E5%BC%8F%E4%B9%BE%E6%B7%A8%E8%A4%87%E8%A3%BD%E5%99%A8.meta.js
 // ==/UserScript==
 
 
 (function () {
-  'use strict';
-
-
-  // ==========================================
-  // 常數與設定宣告 (M01 / M04 / v1.1.1 Project Bridge-Drop)
-  // ==========================================
-  const SESSION_KEY_QATP = 'gas_pending_qatp';
-  const SESSION_KEY_HANDOFF = 'gist_qatp_pending_handoff';
-  const SESSION_KEY_SMART = 'gist_qatp_pending_smart';
-  const SESSION_KEY_RELAY = 'gist_qatp_pending_relay';
-
-
-  const STORAGE_POS_KEY = 'gist_qatp_toolbar_pos_v1';
-  const STORAGE_BOARD_POS_KEY = 'gist_qatp_board_pos_v1';
-  const STORAGE_ORB_KEY = 'gist_qatp_dock_orb_pos_v1';
-  const STORAGE_CONFIG_KEY_V2 = 'gist_qatp_config_v2';
-  const STORAGE_CONFIG_KEY_V1 = 'gist_qatp_config_v1';
-
-
-  const VIEWPORT_MARGIN = 8;
-
-
-  const DEFAULT_POSITION = {
-    top: 72,
-    right: 24
-  };
-
-
-  const DEFAULT_BOARD_POSITION = {
-    top: 72,
-    right: 320
-  };
-
-
-  const DEFAULT_ORB_POSITION = {
-    side: 'left',
-    topPercent: 40
-  };
-
-
-  // v1.1.1 預設設定物件 (Deep Fallback 基線)
-  const DEFAULT_CONFIG_V2_1_1 = {
-    layoutMode: 'single', // 'single' | 'double' | 'horizontal'
-    orbSide: 'left',      // 'left' | 'right'
-    showFileBoard: true,
-    fileBoardMaxWidth: 380,
-    buttonFontSize: 15,
-    buttonVisibility: {
-      smart: true,
-      handoff: true,
-      saveCopy: true,
-      relayClaude: true,
-      extractOnly: true
-    },
-    codeNamingMode: 'infer_code', // 'infer_code' | 'infer_name' | 'custom'
-    customCodeFileName: 'code',
-    qatpFileName: 'QATP.md',
-    defaultFileName: 'note',
-    autoNewGistOnFinished: true,
-    autoSubmitDualReady: true,
-    enableMiddleClick: true,
-    smartAssemblyHotkey: 'F4',
-    codeRegex: '/(?:==UserScript==|#Requires\\s+AutoHotkey|__version__|def\\s+|import\\s+)/i',
-    qatpPrimaryToken: 'QATP',
-    qatpSecondaryPattern: '/(?:QA\\s*獨立覆核任務|QA\\s*測試驗證任務書|QATP\\s*驗收任務書|四大維度測試案例清單|人類實機操作核對專區)/i',
-    qatpRegex: '/(?:QA\\s*獨立覆核任務|QA\\s*測試驗證任務書|##?\\s*【?貳[、\\s]+QA|QATP)/i', // 歷史保留相容
-    filterRegex: '/(?:#[^\\S\\r\\n]*舊版內容對照清單|技術交接|反向驗證清單|歷史技術債客觀勘誤表|Bottom-Up Settlement|技術交接與維護規格書)/i',
-    noteKeywords: [
-      '舊版內容對照清單',
-      '技術交接',
-      '反向驗證清單',
-      '歷史技術債客觀勘誤表',
-      'Bottom-Up Settlement',
-      '函式計數驗證痕跡',
-      '技術交接與維護規格書',
-      '交接文檔',
-      '交接檔',
-      '初版交接',
-      '無歷史交接文檔'
-    ],
-    jsonSyncUrl: 'https://docs.google.com/document/d/1tUcuaMXKYGSzfxknXGPOq-cB8KxTOQBxBliUVT8Saf4/edit?usp=sharing',
-    cloudEndpointPrimary: 'https://docs.google.com/spreadsheets/d/1GTZ0ZpDy9D39MHE-SikJhakCxYOlPUgEljrVJMzYe8c/export?format=csv&gid=0',
-    cloudEndpointSecondary: 'https://docs.google.com/spreadsheets/d/1GTZ0ZpDy9D39MHE-SikJhakCxYOlPUgEljrVJMzYe8c/gviz/tq?tqx=out:csv&gid=0',
-    cloudKeyword: 'repo & grep',
-
-
-    // --- Project Bridge-Drop 欄位 ---
-    relayRepoName: 'qatp-relay',
-    relayRepoBranch: 'main',
-    relaySlots: [
-      { account: '', token: '' }, // 插槽 1
-      { account: '', token: '' }, // 插槽 2
-      { account: '', token: '' }  // 插槽 3
-    ]
-  };
-
-
-  // 全域統一檔名合法性正則 (P3-02: OBS-A 純點號防禦加固)
-  const safeFileRegex = /^(?!\.+$)[a-zA-Z0-9_\-\.]+$/;
-
-
-  // ==========================================
-  // 正則字串解析器 (支援 /pattern/flags 格式)
-  // ==========================================
-  function parseRegexPattern(patternStr) {
-    if (!patternStr || typeof patternStr !== 'string') return null;
-    const trimmed = patternStr.trim();
-    const slashMatch = trimmed.match(/^\/(.*)\/([gimsuy]*)$/);
-    try {
-      if (slashMatch) {
-        return new RegExp(slashMatch[1], slashMatch[2]);
-      }
-      return new RegExp(trimmed, 'i');
-    } catch (e) {
-      console.warn('[QATP] 正則表示式語法無效:', patternStr, e);
-      return null;
-    }
-  }
-
-
-  // ==========================================
-  // 配置管理器模組 (Config Manager)
-  // ==========================================
-  function loadConfig() {
-    let raw = null;
-    try {
-      raw = GM_getValue(STORAGE_CONFIG_KEY_V2, null);
-      if (!raw) {
-        raw = GM_getValue(STORAGE_CONFIG_KEY_V1, null);
-      }
-    } catch (e) {
-      console.warn('[QATP] 無法讀取 GM 設定，使用基線設定', e);
-    }
-
-
-    if (!raw || typeof raw !== 'object') {
-      return JSON.parse(JSON.stringify(DEFAULT_CONFIG_V2_1_1));
-    }
-
-
-    const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG_V2_1_1));
-
-
-    config.layoutMode = ['single', 'double', 'horizontal'].includes(raw.layoutMode) ? raw.layoutMode : DEFAULT_CONFIG_V2_1_1.layoutMode;
-    config.orbSide = (raw.orbSide === 'left' || raw.orbSide === 'right') ? raw.orbSide : DEFAULT_CONFIG_V2_1_1.orbSide;
-    config.showFileBoard = typeof raw.showFileBoard === 'boolean' ? raw.showFileBoard : DEFAULT_CONFIG_V2_1_1.showFileBoard;
-
-
-    const boardW = Number(raw.fileBoardMaxWidth);
-    config.fileBoardMaxWidth = (!isNaN(boardW) && boardW >= 240 && boardW <= 600) ? boardW : DEFAULT_CONFIG_V2_1_1.fileBoardMaxWidth;
-
-
-    const fs = Number(raw.buttonFontSize);
-    config.buttonFontSize = (!isNaN(fs) && fs >= 12 && fs <= 20) ? fs : DEFAULT_CONFIG_V2_1_1.buttonFontSize;
-
-
-    // 按鈕顯隱配置
-    if (raw.buttonVisibility && typeof raw.buttonVisibility === 'object') {
-      config.buttonVisibility.smart = typeof raw.buttonVisibility.smart === 'boolean' ? raw.buttonVisibility.smart : DEFAULT_CONFIG_V2_1_1.buttonVisibility.smart;
-      config.buttonVisibility.handoff = typeof raw.buttonVisibility.handoff === 'boolean' ? raw.buttonVisibility.handoff : DEFAULT_CONFIG_V2_1_1.buttonVisibility.handoff;
-      config.buttonVisibility.saveCopy = typeof raw.buttonVisibility.saveCopy === 'boolean' ? raw.buttonVisibility.saveCopy : DEFAULT_CONFIG_V2_1_1.buttonVisibility.saveCopy;
-      config.buttonVisibility.relayClaude = typeof raw.buttonVisibility.relayClaude === 'boolean' ? raw.buttonVisibility.relayClaude : DEFAULT_CONFIG_V2_1_1.buttonVisibility.relayClaude;
-      config.buttonVisibility.extractOnly = typeof raw.buttonVisibility.extractOnly === 'boolean' ? raw.buttonVisibility.extractOnly : DEFAULT_CONFIG_V2_1_1.buttonVisibility.extractOnly;
-    }
-
-
-    config.codeNamingMode = ['infer_code', 'infer_name', 'custom'].includes(raw.codeNamingMode) ? raw.codeNamingMode : DEFAULT_CONFIG_V2_1_1.codeNamingMode;
-
-
-    if (typeof raw.customCodeFileName === 'string' && safeFileRegex.test(raw.customCodeFileName.trim())) {
-      config.customCodeFileName = raw.customCodeFileName.trim();
-    }
-    if (typeof raw.qatpFileName === 'string' && safeFileRegex.test(raw.qatpFileName.trim())) {
-      config.qatpFileName = raw.qatpFileName.trim();
-    }
-    if (typeof raw.defaultFileName === 'string' && safeFileRegex.test(raw.defaultFileName.trim())) {
-      config.defaultFileName = raw.defaultFileName.trim();
-    }
-
-
-    config.autoNewGistOnFinished = typeof raw.autoNewGistOnFinished === 'boolean' ? raw.autoNewGistOnFinished : DEFAULT_CONFIG_V2_1_1.autoNewGistOnFinished;
-    config.autoSubmitDualReady = typeof raw.autoSubmitDualReady === 'boolean' ? raw.autoSubmitDualReady : DEFAULT_CONFIG_V2_1_1.autoSubmitDualReady;
-
-
-    config.enableMiddleClick = typeof raw.enableMiddleClick === 'boolean' ? raw.enableMiddleClick : DEFAULT_CONFIG_V2_1_1.enableMiddleClick;
-    if (typeof raw.smartAssemblyHotkey === 'string' && raw.smartAssemblyHotkey.trim()) {
-      config.smartAssemblyHotkey = raw.smartAssemblyHotkey.trim();
-    } else {
-      config.smartAssemblyHotkey = DEFAULT_CONFIG_V2_1_1.smartAssemblyHotkey;
-    }
-
-
-    config.codeRegex = typeof raw.codeRegex === 'string' && raw.codeRegex.trim() ? raw.codeRegex.trim() : DEFAULT_CONFIG_V2_1_1.codeRegex;
-    config.qatpPrimaryToken = typeof raw.qatpPrimaryToken === 'string' && raw.qatpPrimaryToken.trim() ? raw.qatpPrimaryToken.trim() : DEFAULT_CONFIG_V2_1_1.qatpPrimaryToken;
-    config.qatpSecondaryPattern = typeof raw.qatpSecondaryPattern === 'string' && raw.qatpSecondaryPattern.trim() ? raw.qatpSecondaryPattern.trim() : DEFAULT_CONFIG_V2_1_1.qatpSecondaryPattern;
-    config.qatpRegex = typeof raw.qatpRegex === 'string' && raw.qatpRegex.trim() ? raw.qatpRegex.trim() : DEFAULT_CONFIG_V2_1_1.qatpRegex;
-    config.filterRegex = typeof raw.filterRegex === 'string' && raw.filterRegex.trim() ? raw.filterRegex.trim() : DEFAULT_CONFIG_V2_1_1.filterRegex;
-
-
-    if (Array.isArray(raw.noteKeywords) && raw.noteKeywords.length > 0) {
-      config.noteKeywords = raw.noteKeywords.map((k) => String(k).trim()).filter(Boolean);
-    }
-    if (typeof raw.jsonSyncUrl === 'string' && /^https?:\/\//i.test(raw.jsonSyncUrl.trim())) {
-      config.jsonSyncUrl = raw.jsonSyncUrl.trim();
-    }
-
-
-    if (typeof raw.cloudEndpointPrimary === 'string' && /^https?:\/\//i.test(raw.cloudEndpointPrimary.trim())) {
-      config.cloudEndpointPrimary = raw.cloudEndpointPrimary.trim();
-    }
-    if (typeof raw.cloudEndpointSecondary === 'string' && /^https?:\/\//i.test(raw.cloudEndpointSecondary.trim())) {
-      config.cloudEndpointSecondary = raw.cloudEndpointSecondary.trim();
-    }
-    if (typeof raw.cloudKeyword === 'string' && raw.cloudKeyword.trim()) {
-      config.cloudKeyword = raw.cloudKeyword.trim();
-    }
-
-
-    // Bridge-Drop 欄位回退防護 (P3-05: 分支名稱合法字元守衛)
-    if (typeof raw.relayRepoName === 'string' && safeFileRegex.test(raw.relayRepoName.trim())) {
-      config.relayRepoName = raw.relayRepoName.trim();
-    }
-    if (typeof raw.relayRepoBranch === 'string' && /^[a-zA-Z0-9_\-\.\/]+$/.test(raw.relayRepoBranch.trim())) {
-      config.relayRepoBranch = raw.relayRepoBranch.trim();
-    }
-    if (Array.isArray(raw.relaySlots)) {
-      config.relaySlots = [0, 1, 2].map((idx) => {
-        const item = raw.relaySlots[idx] || {};
-        return {
-          account: typeof item.account === 'string' ? item.account.trim() : '',
-          token: typeof item.token === 'string' ? item.token.trim() : ''
-        };
-      });
-    }
-
-
-    return config;
-  }
-
-
-  function saveConfig(newConfig) {
-    try {
-      GM_setValue(STORAGE_CONFIG_KEY_V2, newConfig);
-      return true;
-    } catch (e) {
-      console.error('[QATP] 保存配置失敗', e);
-      return false;
-    }
-  }
-
-
-  // ==========================================
-  // 樣式動態注入模組 (BN Pattern / 雙實體拓撲 / 頁籤 Modal / 聚光燈契約)
-  // ==========================================
-  function injectStyles() {
-    let styleEl = document.getElementById('gist-qatp-injected-style');
-    if (!styleEl) {
-      styleEl = document.createElement('style');
-      styleEl.id = 'gist-qatp-injected-style';
-      document.head.appendChild(styleEl);
-    }
-
-
-    const config = loadConfig();
-    const fs = config.buttonFontSize || 15;
-    const lh = fs + 6;
-    const maxBW = config.fileBoardMaxWidth || 380;
-
-
-    styleEl.textContent = `
-      /* 實體 A：操作工具列 */
-      #gist-qatp-toolbar {
-        position: fixed;
-        z-index: 99999;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        padding: 6px 8px;
-        width: fit-content;
-        background: rgba(22, 27, 34, 0.94);
-        border: 1px solid rgba(240, 246, 252, 0.18);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-        border-radius: 8px;
-        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-        user-select: none;
-        cursor: grab;
-        box-sizing: border-box;
-        pointer-events: auto;
-      }
-      #gist-qatp-toolbar:active {
-        cursor: grabbing;
-      }
-      .gist-qatp-topbar {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        padding-bottom: 4px;
-        border-bottom: 1px solid rgba(240, 246, 252, 0.1);
-      }
-      .gist-qatp-topbar-row1 {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        width: 100%;
-        gap: 8px;
-      }
-      .gist-qatp-topbar-row2 {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        width: 100%;
-      }
-      .gist-qatp-title-brand {
-        font-size: ${fs}px;
-        line-height: ${lh}px;
-        font-weight: 600;
-        color: #8b949e;
-        display: flex;
-        align-items: center;
-        gap: 4px;
-      }
-      .gist-qatp-pill-label {
-        flex: 1;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 3px;
-        cursor: pointer;
-        user-select: none;
-        padding: 2px 4px;
-        border-radius: 4px;
-        border: 1px solid rgba(240, 246, 252, 0.15);
-        background: rgba(13, 17, 23, 0.6);
-        transition: background-color 0.15s, border-color 0.15s;
-        box-sizing: border-box;
-      }
-      .gist-qatp-pill-label:hover {
-        background: rgba(33, 38, 45, 0.9);
-        border-color: #58a6ff;
-      }
-      .gist-qatp-pill-cb {
-        cursor: pointer;
-        margin: 0;
-        width: 13px;
-        height: 13px;
-        flex-shrink: 0;
-      }
-      .gist-qatp-pill-cb.cb-green {
-        accent-color: #238636;
-      }
-      .gist-qatp-pill-cb.cb-blue {
-        accent-color: #1f6feb;
-      }
-      .gist-qatp-pill-text {
-        font-size: 11px;
-        font-weight: 600;
-        color: #8b949e;
-        line-height: 1;
-        white-space: nowrap;
-      }
-      .gist-qatp-btn-gear {
-        background: transparent;
-        border: none;
-        color: #8b949e;
-        cursor: pointer;
-        padding: 2px 4px;
-        font-size: ${fs}px;
-        line-height: 1;
-        border-radius: 4px;
-        transition: color 0.15s, background-color 0.15s;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        pointer-events: auto;
-      }
-      .gist-qatp-btn-gear:hover {
-        color: #f0f6fc;
-        background-color: #30363d;
-      }
-
-      /* 佈局容器 */
-      .gist-qatp-button-container {
-        display: flex;
-        gap: 6px;
-      }
-      .gist-qatp-layout-single {
-        flex-direction: column;
-        width: 100%;
-      }
-      .gist-qatp-layout-single .gist-qatp-btn {
-        width: 100%;
-        justify-content: flex-start;
-      }
-      .gist-qatp-layout-double {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        width: 100%;
-      }
-      .gist-qatp-layout-double .gist-qatp-btn {
-        width: 100%;
-      }
-      .gist-qatp-layout-horizontal {
-        flex-direction: row;
-        align-items: center;
-      }
-
-      .gist-qatp-btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        font-size: ${fs}px;
-        font-weight: 600;
-        line-height: ${lh}px;
-        padding: 6px 12px;
-        border-radius: 6px;
-        cursor: pointer;
-        user-select: none;
-        transition: background-color 0.2s cubic-bezier(0.3, 0, 0.5, 1), border-color 0.2s cubic-bezier(0.3, 0, 0.5, 1);
-        text-decoration: none;
-        box-sizing: border-box;
-        white-space: nowrap;
-        pointer-events: auto;
-        flex-shrink: 0;
-      }
-      .gist-qatp-btn-smart {
-        background-color: #238636;
-        color: #ffffff;
-        border: 1px solid rgba(240, 246, 252, 0.1);
-      }
-      .gist-qatp-btn-smart:hover {
-        background-color: #2ea043;
-      }
-      .gist-qatp-btn-warm {
-        background-color: #b08800;
-        color: #ffffff;
-        border: 1px solid rgba(240, 246, 252, 0.1);
-      }
-      .gist-qatp-btn-warm:hover {
-        background-color: #c69026;
-      }
-      .gist-qatp-btn-primary {
-        background-color: #0969da;
-        color: #ffffff;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-      }
-      .gist-qatp-btn-primary:hover {
-        background-color: #0858b9;
-      }
-      .gist-qatp-btn-emerald {
-        background-color: #0f766e;
-        color: #ffffff;
-        border: 1px solid rgba(45, 212, 191, 0.3);
-      }
-      .gist-qatp-btn-emerald:hover {
-        background-color: #115e59;
-      }
-      .gist-qatp-btn-secondary {
-        background-color: #21262d;
-        color: #c9d1d9;
-        border: 1px solid rgba(240, 246, 252, 0.1);
-      }
-      .gist-qatp-btn-secondary:hover {
-        background-color: #30363d;
-        color: #f0f6fc;
-      }
-
-      /* 實體 B：檔案狀態看板 */
-      #gist-qatp-file-board {
-        position: fixed;
-        z-index: 99998;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        padding: 8px 10px;
-        min-width: 220px;
-        max-width: ${maxBW}px;
-        width: fit-content;
-        background: rgba(22, 27, 34, 0.94);
-        border: 1px solid rgba(240, 246, 252, 0.18);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-        border-radius: 8px;
-        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-        user-select: none;
-        cursor: grab;
-        box-sizing: border-box;
-        pointer-events: auto;
-      }
-      #gist-qatp-file-board:active {
-        cursor: grabbing;
-      }
-      .gist-qatp-board-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        padding-bottom: 4px;
-        border-bottom: 1px solid rgba(240, 246, 252, 0.1);
-        font-size: ${fs}px;
-        line-height: ${lh}px;
-        font-weight: 600;
-        color: #8b949e;
-      }
-      .gist-qatp-board-copy,
-      .gist-qatp-board-close {
-        background: transparent;
-        border: none;
-        color: #8b949e;
-        cursor: pointer;
-        padding: 0 4px;
-        font-size: ${fs}px;
-        line-height: 1;
-        border-radius: 4px;
-        transition: color 0.15s, background-color 0.15s;
-        flex-shrink: 0;
-        box-sizing: border-box;
-      }
-      .gist-qatp-board-copy {
-        margin-left: auto;
-        margin-right: 2px;
-      }
-      .gist-qatp-board-copy:hover {
-        color: #58a6ff;
-        background-color: #30363d;
-      }
-      .gist-qatp-board-close:hover {
-        color: #f0f6fc;
-        background-color: #30363d;
-      }
-      .gist-qatp-board-list {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        margin: 0;
-        padding: 0;
-        list-style: none;
-      }
-      .gist-qatp-board-item {
-        font-size: ${fs}px;
-        line-height: ${lh}px;
-        color: #c9d1d9;
-        word-break: break-all;
-        white-space: normal;
-        display: flex;
-        align-items: flex-start;
-        gap: 6px;
-      }
-      .gist-qatp-board-bullet {
-        color: #58a6ff;
-        flex-shrink: 0;
-      }
-      .gist-qatp-board-link {
-        color: #58a6ff;
-        text-decoration: none;
-        cursor: pointer;
-        word-break: break-all;
-        transition: color 0.15s, text-decoration 0.15s;
-      }
-      .gist-qatp-board-link:hover {
-        color: #79c0ff;
-        text-decoration: underline;
-      }
-
-      /* 聚光燈閃爍動畫契約 */
-      .gist-qatp-spotlight {
-        box-shadow: 0 0 0 4px #58a6ff !important;
-        transition: box-shadow 0.3s ease !important;
-      }
-
-      /* Toast 反饋提示 */
-      .gist-qatp-toast {
-        position: fixed;
-        bottom: 24px;
-        right: 24px;
-        z-index: 100000;
-        padding: 10px 16px;
-        border-radius: 6px;
-        font-size: 13px;
-        font-weight: 600;
-        color: #ffffff;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-        opacity: 0;
-        transform: translateY(12px);
-        transition: opacity 300ms ease, transform 300ms ease;
-        pointer-events: none;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-        white-space: pre-wrap;
-        max-width: 480px;
-      }
-      .gist-qatp-toast.show {
-        opacity: 1;
-        transform: translateY(0);
-      }
-      .gist-qatp-toast.success { background-color: #2da44e; }
-      .gist-qatp-toast.danger { background-color: #cf222e; }
-      .gist-qatp-toast.warning { background-color: #a07500; color: #ffffff; }
-      .gist-qatp-toast.info { background-color: #1f6feb; }
-
-      /* 側邊吸附手柄 */
-      #gist-qatp-dock-orb {
-        position: fixed;
-        z-index: 99998;
-        width: 32px;
-        height: 38px;
-        background: rgba(22, 27, 34, 0.88);
-        border: 1px solid rgba(240, 246, 252, 0.2);
-        backdrop-filter: blur(4px);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
-        transition: background-color 0.2s;
-        user-select: none;
-        pointer-events: auto;
-      }
-      #gist-qatp-dock-orb:hover {
-        background: rgba(33, 38, 45, 0.95);
-      }
-      .gist-qatp-dock-left {
-        left: 0;
-        right: auto !important;
-        border-radius: 0 8px 8px 0;
-        border-left: none;
-      }
-      .gist-qatp-dock-right {
-        right: 0;
-        left: auto !important;
-        border-radius: 8px 0 0 8px;
-        border-right: none;
-      }
-      .gist-qatp-dock-icon {
-        font-size: 16px;
-      }
-
-      /* 頁籤化 Safe DOM 設定面板 */
-      #gist-qatp-config-modal-overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.65);
-        z-index: 100001;
-        display: flex;
-        justify-content: center;
-        align-items: flex-start;
-        padding-top: 40px;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-        pointer-events: auto;
-      }
-      #gist-qatp-config-modal {
-        background: #161b22;
-        border: 1px solid #30363d;
-        border-radius: 8px;
-        width: 660px;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-        color: #c9d1d9;
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-      }
-      .gist-qatp-modal-header {
-        padding: 12px 16px;
-        border-bottom: 1px solid #30363d;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        font-size: 14px;
-        font-weight: 600;
-        color: #f0f6fc;
-      }
-      .gist-qatp-modal-main {
-        display: flex;
-        flex: 1;
-        min-height: 440px;
-        max-height: 80vh;
-      }
-      .gist-qatp-modal-sidebar {
-        width: 140px;
-        background: #0d1117;
-        border-right: 1px solid #30363d;
-        display: flex;
-        flex-direction: column;
-        padding: 8px 0;
-        gap: 2px;
-        flex-shrink: 0;
-      }
-      .gist-qatp-tab-btn {
-        background: transparent;
-        border: none;
-        color: #8b949e;
-        padding: 10px 14px;
-        text-align: left;
-        font-size: 13px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: background-color 0.15s, color 0.15s;
-        border-left: 2px solid transparent;
-      }
-      .gist-qatp-tab-btn:hover {
-        background: #161b22;
-        color: #c9d1d9;
-      }
-      .gist-qatp-tab-btn.active {
-        background: #21262d;
-        color: #58a6ff;
-        border-left: 2px solid #1f6feb;
-      }
-      .gist-qatp-modal-content {
-        padding: 16px;
-        flex: 1;
-        overflow-y: auto;
-      }
-      .gist-qatp-tab-pane {
-        display: none;
-      }
-      .gist-qatp-tab-pane.active {
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-      }
-      .gist-qatp-field-row {
-        display: flex;
-        flex-direction: column;
-        gap: 5px;
-      }
-      .gist-qatp-field-header-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-      }
-      .gist-qatp-field-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 12px;
-      }
-      .gist-qatp-field-checkbox {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        cursor: pointer;
-      }
-      .gist-qatp-field-label {
-        font-weight: 500;
-        color: #8b949e;
-        font-size: 12px;
-      }
-      .gist-qatp-link-btn {
-        font-size: 12px;
-        color: #58a6ff;
-        text-decoration: none;
-        display: inline-flex;
-        align-items: center;
-        gap: 3px;
-        transition: color 0.15s;
-      }
-      .gist-qatp-link-btn:hover {
-        color: #79c0ff;
-        text-decoration: underline;
-      }
-      .gist-qatp-field-hint {
-        color: #8b949e;
-        font-size: 11px;
-        line-height: 1.4;
-      }
-      .gist-qatp-input, .gist-qatp-select, .gist-qatp-textarea {
-        background-color: #0d1117;
-        border: 1px solid #30363d;
-        color: #c9d1d9;
-        padding: 6px 10px;
-        border-radius: 6px;
-        font-size: 13px;
-        outline: none;
-      }
-      .gist-qatp-textarea {
-        resize: vertical;
-        font-family: inherit;
-        line-height: 1.4;
-      }
-      .gist-qatp-input:focus, .gist-qatp-select:focus, .gist-qatp-textarea:focus {
-        border-color: #58a6ff;
-      }
-      .gist-qatp-action-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-top: 4px;
-        flex-wrap: wrap;
-      }
-      .gist-qatp-modal-footer {
-        padding: 12px 16px;
-        border-top: 1px solid #30363d;
-        display: flex;
-        justify-content: space-between;
-        background: #0d1117;
-      }
-
-      /* 插槽卡片樣式 (Slot Card) */
-      .gist-qatp-slot-card {
-        background: #0d1117;
-        border: 1px solid #30363d;
-        border-radius: 6px;
-        padding: 10px;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-      }
-      .gist-qatp-slot-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        font-size: 12px;
-        font-weight: 600;
-        color: #8b949e;
-      }
-      .gist-qatp-slot-inputs {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-      .gist-qatp-input-group {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-      }
-      .gist-qatp-input-group .gist-qatp-input {
-        flex: 1;
-      }
-      .gist-qatp-icon-btn {
-        background: #21262d;
-        border: 1px solid #30363d;
-        color: #c9d1d9;
-        border-radius: 6px;
-        padding: 5px 8px;
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 12px;
-        transition: background-color 0.15s, color 0.15s;
-        flex-shrink: 0;
-      }
-      .gist-qatp-icon-btn:hover {
-        background: #30363d;
-        color: #f0f6fc;
-      }
-    `;
-  }
-
-
-  // ==========================================
-  // Toast 反饋模組
-  // ==========================================
-  function showToast(message, type = 'success', duration = 3000) {
-    let toast = document.getElementById('gist-qatp-toast');
-    if (!toast) {
-      toast = document.createElement('div');
-      toast.id = 'gist-qatp-toast';
-      toast.className = 'gist-qatp-toast';
-      document.body.appendChild(toast);
-    }
-
-
-    toast.className = `gist-qatp-toast ${type}`;
-    toast.textContent = message;
-
-
-    void toast.offsetWidth;
-    toast.classList.add('show');
-
-
-    if (toast._timer) clearTimeout(toast._timer);
-    toast._timer = setTimeout(() => {
-      toast.classList.remove('show');
-    }, duration);
-  }
-
-
-  // ==========================================
-  // 網址正規化與帳號動態解析演算法 (加固編輯環境探針)
-  // ==========================================
-  function getCanonicalGistUrl() {
-    const rawHref = window.location.href;
-    const cleanUrl = rawHref.split('#')[0].split('?')[0];
-    const targetGistUrl = cleanUrl.replace(/\/edit\/?$/, '');
-
-
-    const gistRegex = /^https:\/\/gist\.github\.com\/[^\/\s]+\/[a-f0-9]+$/;
-    if (!gistRegex.test(targetGistUrl)) {
-      throw new Error('當前非有效 Gist 永久檢視頁面，無法提取網址');
-    }
-
-
-    return targetGistUrl;
-  }
-
-
-  function extractGistOwner() {
-    const path = window.location.pathname;
-    const parts = path.split('/').filter(Boolean);
-    const reservedWords = ['forked', 'stars', 'discover', 'mine'];
-    if (parts.length >= 1 && !reservedWords.includes(parts[0].toLowerCase())) {
-      return parts[0];
-    }
-    return '';
-  }
-
-
-  function isEditPage() {
-    const cleanUrl = window.location.href.split('#')[0].split('?')[0];
-    return /\/edit\/?$/.test(cleanUrl);
-  }
-
-
-  function isNewPage() {
-    const path = window.location.pathname;
-    return path === '/' || path === '' || path === '/forked';
-  }
-
-
-  function isEditorEnvironment() {
-    return isEditPage() || isNewPage() || !!document.querySelector('input.js-gist-filename, textarea.file-editor-textarea');
-  }
-
-
-  // ==========================================
-  // 動態檔案枚舉模組
-  // ==========================================
-  function inspectGistFiles() {
-    const isEdit = isEditorEnvironment();
-    let filenames = [];
-
-
-    if (isEdit) {
-      const inputs = document.querySelectorAll('input.js-gist-filename, input.form-control.js-gist-filename');
-      inputs.forEach((input) => {
-        const val = input.value.trim();
-        if (val) filenames.push(val);
-      });
-    } else {
-      const nodes = document.querySelectorAll('.gist-blob-name, strong.gist-blob-name, .file-header .Link--primary');
-      const set = new Set();
-      nodes.forEach((node) => {
-        const text = node.textContent.trim();
-        if (text && !set.has(text)) {
-          set.add(text);
-          filenames.push(text);
+    'use strict';
+
+
+    // ==========================================
+    // 0. 全局常數與預設資料結構 (Global Config v4.3.3 定稿)
+    // ==========================================
+    const CONFIG_KEY = 'ai_copy_global_config_v3';
+    const QA_QUEUE_KEY = 'ai_copy_qa_queue_v1';
+    const UI_CONTAINER_ID = 'ai-universal-copy-container';
+    const FLOATING_ORB_ID = 'ai-copy-floating-orb';
+    const MODAL_OVERLAY_ID = 'ai-copy-modal-overlay';
+
+
+    const ALL_SITE_DEFS = {
+        aistudio:   { id: 'aistudio',   label: 'Gemini' },
+        deepseek:   { id: 'deepseek',   label: 'DeepSeek' },
+        qwen:       { id: 'qwen',       label: '千問' },
+        kimi:       { id: 'kimi',       label: 'Kimi' },
+        chatgpt:    { id: 'chatgpt',    label: 'ChatGPT' },
+        perplexity: { id: 'perplexity', label: 'Perplexity' },
+        zhipu:      { id: 'zhipu',      label: '智譜' },
+        zai:        { id: 'zai',        label: 'Z.AI' },
+        mistral:    { id: 'mistral',    label: 'Mistral' },
+        minimax:    { id: 'minimax',    label: 'MiniMax' }
+    };
+
+
+    const DEFAULT_CONFIG = {
+        activeProfileId: 'profile_1',
+        uiPosition: null,   // 主卡片螢幕座標 { left, top }
+        orbPosition: null,  // 小光球螢幕座標 { left, top }
+        toastPosition: null,// Toast 獨立本機座標 { left, top }
+        isCollapsed: false, // 是否處於小光球收納狀態
+        siteTabOrder: ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'],
+        jsonSyncUrl: 'https://docs.google.com/document/d/1csaLbqi49GJhWLutrhkMdTwy4eOuXgmK29zS6arHCTI/edit?usp=sharing',
+        toastSettings: {
+            anchor: 'center', // 'left' | 'center' | 'right'
+            fontSize: 18,
+            background: 'linear-gradient(135deg, rgba(88, 28, 135, 0.95), rgba(124, 58, 237, 0.92))'
+        },
+        qaQueueSettings: {
+            captureHotkey: 'F4',
+            summaryHotkey: 'F7',
+            ttlHours: 2,
+            targetCount: 5,               // 滿額站點數閾值 (0 為停用)
+            keepQueueOnAutoSummary: false,// 滿額自動總結後是否保留佇列 (滾動更新模式)
+            siteActions: {
+                aistudio: 'SINGLE',
+                deepseek: 'SINGLE',
+                qwen: 'SINGLE',
+                kimi: 'SINGLE',
+                chatgpt: 'SINGLE',
+                perplexity: 'SINGLE',
+                zhipu: 'SINGLE',
+                zai: 'PREVIEW',
+                mistral: 'SINGLE',
+                minimax: 'PREVIEW'
+            }
+        },
+        noiseSettings: {
+            pipelineOrder: 'string_first',
+            customNoiseStrings:
+                '# 每行一條免轉義純字串，精確消除 (支援 # 註解)\n' +
+                '\n' +
+                '\n' +
+                '\n' +
+                '\n',
+            customNoiseRegexes:
+                '# 每行一條正則表達式 (/pattern/flags)\n' +
+                '/[^\\n]*尖峰時段使用量較高[，,][^\\n]*(?:升級即可使用|思考|快速|請稍後再試)[^\\n]*\\n?/gi\n' +
+                '/[^\\n]*(?:當前使用人數較多|当前使用人数较多|高峰時段使用量較高|高峰期使用量較高)[，,][^\\n]*\\n?/gi\n' +
+                '/(?:試算表|表格)\\s*(?:複製|复制|下载|下載)/gi\n'
+        },
+        uiSettings: {
+            showCleanSingle: true,
+            showFullThread: true,
+            purplePosition: 'bottom'
+        },
+        aiStudioSettings: {
+            primaryEngine: 'native_menu',
+            sliceLayout: 'staircase',
+            purplePosition: 'right',
+            wheelSwitchScope: 'capsule_only', // 'capsule_only' | 'control_group' | 'entire_toolbar'
+            activeModuleId: 'module_1',
+            fallbackAction: 'warn_block',     // 'warn_block' | 'lenient_full' | 'custom_string'
+            fallbackCustomText: '[ERROR: 錨點切片未命中]',
+            modules: {
+                module_1: {
+                    id: 'module_1',
+                    name: '專案發包組',
+                    badgeText: '發包',
+                    badgeColor: '#1E88E5',
+                    buttons: [
+                        {
+                            id: 'm1_btn_1',
+                            name: '✂️ 截取 QATP',
+                            mode: 'match',
+                            enabled: true,
+                            pattern: '/(?:##?\\s*【?貳[、\\s]+QA\\s*測試驗證任務書[\\s\\S]*)$/i',
+                            fallbackPattern: '/(?:##?\\s*.*(?:QA|測試驗證任務書)[\\s\\S]*)$/i',
+                            replaceValue: '',
+                            isCodeBlockTarget: false,
+                            prefix: 'https://docs.google.com/document/d/1TDprIAm5WMbVc0k6Nv-DmS89RVOnx1BRYM13EcqjNSQ/edit?usp=sharing',
+                            suffix: '',
+                            autoDivider: true
+                        },
+                        {
+                            id: 'm1_btn_2',
+                            name: '📑 截取純 PRD',
+                            mode: 'match',
+                            enabled: true,
+                            pattern: '/(#\\s*📑[\\s\\S]*?)(?:\\n=== 複製結束線|\\n=== TARGET_CODE_START ===|$)/i',
+                            fallbackPattern: '/((?:#\\s*【?PRD|##?\\s*模組一)[\\s\\S]*?)(?:\\n=== 複製結束線|\\n=== TARGET_CODE_START ===|$)/i',
+                            replaceValue: '',
+                            isCodeBlockTarget: false,
+                            prefix: '',
+                            suffix: '',
+                            autoDivider: false
+                        },
+                        {
+                            id: 'm1_btn_3',
+                            name: '📝 截取迭代需求',
+                            mode: 'match',
+                            enabled: true,
+                            pattern: '/<<< BACKLOG_START >>>[^\\S\\r\\n]*\\r?\\n?([\\s\\S]*?)\\r?\\n?[^\\S\\r\\n]*<<< BACKLOG_END >>>/i',
+                            fallbackPattern: '/(?:^|\\n)[ \\t]*(?:>+[ \\t]*)?(#{1,4}\\s*.*?(?:PM\\s*迭代|未來需求|Backlog\\s*Notes)[\\s\\S]*?)(?=\\r?\\n[ \\t]*(?:---[ \\t]*\\r?\\n|#{1,2}\\s+[^#\\n]|===|<<<)|$)/i',
+                            replaceValue: '',
+                            isCodeBlockTarget: false,
+                            prefix: '',
+                            suffix: '\n\n',
+                            autoDivider: false
+                        },
+                        {
+                            id: 'm1_btn_4',
+                            name: '📦 截取開工全包',
+                            mode: 'match',
+                            enabled: true,
+                            pattern: '/(=== 複製起始線[\\s\\S]*?=== 複製結束線 ===)/i',
+                            fallbackPattern: '/(=== 複製起始線[\\s\\S]*?=== 複製結束線)/i',
+                            replaceValue: '',
+                            isCodeBlockTarget: false,
+                            prefix: '',
+                            suffix: '',
+                            autoDivider: false
+                        },
+                        {
+                            id: 'm1_btn_5',
+                            name: '💻 截取生產代碼',
+                            mode: 'match',
+                            enabled: true,
+                            pattern: '/```(?:javascript|js|typescript|ts|python|py|ini|autohotkey|ahk2)?[^\\S\\r\\n]*[^\\r\\n]*\\r?\\n([\\s\\S]*)\\r?\\n```/i',
+                            fallbackPattern: '/```([\\s\\S]*)```/i',
+                            replaceValue: '',
+                            isCodeBlockTarget: true,
+                            prefix: '',
+                            suffix: '',
+                            autoDivider: false
+                        }
+                    ]
+                },
+                module_2: {
+                    id: 'module_2',
+                    name: '代碼測試組',
+                    badgeText: '代碼',
+                    badgeColor: '#43A047',
+                    buttons: [
+                        { id: 'm2_btn_1', name: '📜 截取交接檔', mode: 'match', enabled: true, pattern: '/((?:#\\s*📜|#\\s*【|#\\s*《)[^#\\n]*交接[\\s\\S]*)$/i', fallbackPattern: '', replaceValue: '', isCodeBlockTarget: false, prefix: '', suffix: '', autoDivider: false },
+                        { id: 'm2_btn_2', name: '🧪 截取測試例句', mode: 'match', enabled: true, pattern: '/(?:##?\\s*【?[第二三].*測試[\\s\\S]*?)(?:\\n##?|=== 字典全檔|$)/i', fallbackPattern: '', replaceValue: '', isCodeBlockTarget: false, prefix: '', suffix: '', autoDivider: false },
+                        { id: 'm2_btn_3', name: '🔍 截取審查報告', mode: 'match', enabled: true, pattern: '/(?:##?\\s*【?[第一].*報告[\\s\\S]*?)(?:\\n##?|=== 以下為|$)/i', fallbackPattern: '', replaceValue: '', isCodeBlockTarget: false, prefix: '', suffix: '', autoDivider: false },
+                        { id: 'm2_btn_4', name: '🧹 挖除思考過程', mode: 'replace', enabled: true, pattern: '/<think>[\\s\\S]*?<\\/think>\\r?\\n?/gi', fallbackPattern: '', replaceValue: '', isCodeBlockTarget: false, prefix: '', suffix: '', autoDivider: false },
+                        { id: 'm2_btn_5', name: '💻 截取純 JS/TS', mode: 'match', enabled: true, pattern: '/(?:\\/\\/\\s*==UserScript==[\\s\\S]*?\\n\\s*\\(\\)\\s*;\\s*)/i', fallbackPattern: '', replaceValue: '', isCodeBlockTarget: false, prefix: '', suffix: '', autoDivider: false }
+                    ]
+                },
+                module_3: {
+                    id: 'module_3',
+                    name: '日常備用組',
+                    badgeText: '日常',
+                    badgeColor: '#FB8C00',
+                    buttons: [
+                        {
+                            id: 'm3_btn_1',
+                            name: '📌 建議買進價格',
+                            mode: 'match',
+                            enabled: true,
+                            pattern: '/(?:^|\\n)\\s*📌\\s*(?:\\*\\*)?標的確認[\\s\\S]*$/',
+                            fallbackPattern: '',
+                            replaceValue: '',
+                            isCodeBlockTarget: false,
+                            prefix: '',
+                            suffix: '',
+                            autoDivider: false
+                        },
+                        {
+                            id: 'm3_btn_2',
+                            name: '🎯 建議買進價格',
+                            mode: 'match',
+                            enabled: true,
+                            pattern: '/((?:#{1,4}|[*+-])?\\s*🎯\\s*\\*{0,2}第[一1]階[\\s\\S]*)$/',
+                            fallbackPattern: '',
+                            replaceValue: '',
+                            isCodeBlockTarget: false,
+                            prefix: '',
+                            suffix: '',
+                            autoDivider: false
+                        },
+                        { id: 'm3_btn_3', name: '📌 自訂按鈕 3', mode: 'match', enabled: false, pattern: '', fallbackPattern: '', replaceValue: '', isCodeBlockTarget: false, prefix: '', suffix: '', autoDivider: false },
+                        { id: 'm3_btn_4', name: '📌 自訂按鈕 4', mode: 'match', enabled: false, pattern: '', fallbackPattern: '', replaceValue: '', isCodeBlockTarget: false, prefix: '', suffix: '', autoDivider: false },
+                        { id: 'm3_btn_5', name: '📌 自訂按鈕 5', mode: 'match', enabled: false, pattern: '', fallbackPattern: '', replaceValue: '', isCodeBlockTarget: false, prefix: '', suffix: '', autoDivider: false }
+                    ]
+                }
+            }
+        },
+        profiles: {
+            profile_1: {
+                id: 'profile_1',
+                name: '模式 1 (標準 QA)',
+                enabled: true,
+                enablePrefix: true,
+                enableSuffix: true,
+                prefixes: {
+                    aistudio: '1st',
+                    deepseek: '2nd',
+                    qwen: '3rd',
+                    kimi: '4th',
+                    chatgpt: '5th',
+                    perplexity: '5th',
+                    zhipu: '6th',
+                    zai: '6th',
+                    mistral: '7th',
+                    minimax: '8th'
+                },
+                suffixes: {
+                    aistudio: '\n\n',
+                    deepseek: '\n\n',
+                    qwen: '\n\n',
+                    kimi: '\n\n',
+                    chatgpt: '\n\n',
+                    perplexity: '\n\n',
+                    zhipu: '\n\n',
+                    zai: '\n\n',
+                    mistral: '\n\n',
+                    minimax: '\n\n'
+                }
+            },
+            profile_2: {
+                id: 'profile_2',
+                name: '模式 2 (特化標籤)',
+                enabled: true,
+                enablePrefix: true,
+                enableSuffix: true,
+                prefixes: {
+                    aistudio: 'gemini 3.7回覆',
+                    deepseek: '',
+                    qwen: '',
+                    kimi: '',
+                    chatgpt: '',
+                    perplexity: '',
+                    zhipu: '',
+                    zai: '',
+                    mistral: '',
+                    minimax: ''
+                },
+                suffixes: {
+                    aistudio: '\n\n',
+                    deepseek: '\n\n',
+                    qwen: '\n\n',
+                    kimi: '\n\n',
+                    chatgpt: '\n\n',
+                    perplexity: '\n\n',
+                    zhipu: '\n\n',
+                    zai: '\n\n',
+                    mistral: '\n\n',
+                    minimax: '\n\n'
+                }
+            },
+            profile_3: {
+                id: 'profile_3',
+                name: '模式 3 (自訂預備)',
+                enabled: false,
+                enablePrefix: true,
+                enableSuffix: true,
+                prefixes: {
+                    aistudio: '',
+                    deepseek: '',
+                    qwen: '',
+                    kimi: '',
+                    chatgpt: '',
+                    perplexity: '',
+                    zhipu: '',
+                    zai: '',
+                    mistral: '',
+                    minimax: ''
+                },
+                suffixes: {
+                    aistudio: '\n\n',
+                    deepseek: '\n\n',
+                    qwen: '\n\n',
+                    kimi: '\n\n',
+                    chatgpt: '\n\n',
+                    perplexity: '\n\n',
+                    zhipu: '\n\n',
+                    zai: '\n\n',
+                    mistral: '\n\n',
+                    minimax: '\n\n'
+                }
+            }
         }
-      });
-    }
+    };
 
 
-    return filenames;
-  }
+    // 【遷移合約與結構深層補齊】
+    function sanitizeConfig(data) {
+        if (!data || typeof data !== 'object') return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+        if (!data.profiles || typeof data.profiles !== 'object') data.profiles = JSON.parse(JSON.stringify(DEFAULT_CONFIG.profiles));
+        if (!data.activeProfileId || !data.profiles[data.activeProfileId]) data.activeProfileId = 'profile_1';
 
 
-  // ==========================================
-  // 看板平滑導航與聚光燈定位 (ITEM-01)
-  // ==========================================
-  function navigateToFileCard(targetName) {
-    if (!targetName) return;
-    const cleanTarget = targetName.trim();
-    let targetEl = null;
-
-
-    if (isEditorEnvironment()) {
-      const fileContainers = document.querySelectorAll('.js-gist-file');
-      for (const container of fileContainers) {
-        const input = container.querySelector('input.js-gist-filename, input.form-control.js-gist-filename');
-        if (input && input.value.trim() === cleanTarget) {
-          targetEl = container;
-          break;
-        }
-      }
-    } else {
-      const sanitized = cleanTarget.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
-      const directIdEl = document.getElementById(`file-${sanitized}`);
-      if (directIdEl) {
-        targetEl = directIdEl;
-      } else {
-        const fileContainers = document.querySelectorAll('.file.js-gist-file, div[id^="file-"]');
-        for (const container of fileContainers) {
-          const nameEl = container.querySelector('.gist-blob-name, strong.gist-blob-name, .file-header .Link--primary');
-          if (nameEl && nameEl.textContent.trim() === cleanTarget) {
-            targetEl = container;
-            break;
-          }
-        }
-      }
-    }
-
-
-    if (targetEl) {
-      targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      targetEl.classList.add('gist-qatp-spotlight');
-      setTimeout(() => {
-        targetEl.classList.remove('gist-qatp-spotlight');
-      }, 1500);
-    } else {
-      showToast('未在當前頁面找到對應檔案卡片', 'warning');
-    }
-  }
-
-
-  // ==========================================
-  // 結案偵測演算法 (M04)
-  // ==========================================
-  function isGistArchived() {
-    const files = inspectGistFiles();
-    const config = loadConfig();
-    const defaultName = (config.defaultFileName || 'note').toLowerCase();
-
-
-    for (const name of files) {
-      const lower = name.toLowerCase();
-      if (lower === defaultName || lower === `${defaultName}.md` || lower.startsWith(`${defaultName}.`)) {
-        return true;
-      }
-    }
-
-
-    if (isEditorEnvironment()) {
-      const handoffRegex = parseRegexPattern(config.filterRegex) || /(?:#[^\S\r\n]*舊版內容對照清單|技術交接|反向驗證清單|歷史技術債客觀勘誤表|Bottom-Up Settlement|技術交接與維護規格書)/i;
-      const fileContainers = document.querySelectorAll('.js-gist-file');
-      for (const slot of fileContainers) {
-        const content = getSlotContent(slot);
-        if (content) {
-          const topLines = content.split(/\r?\n/).slice(0, 15).join('\n');
-          if (handoffRegex.test(topLines)) {
-            return true;
-          }
-        }
-      }
-    }
-
-
-    return false;
-  }
-
-
-  // ==========================================
-  // 檔案狀態看板渲染與更新 (實體 B / ITEM-01 超連結與滑軌 / FEAT-01 一鍵複製)
-  // ==========================================
-  function updateFileBoard() {
-    const config = loadConfig();
-    let board = document.getElementById('gist-qatp-file-board');
-
-
-    if (!config.showFileBoard) {
-      if (board) board.remove();
-      return;
-    }
-
-
-    const files = inspectGistFiles();
-
-
-    if (!board) {
-      board = document.createElement('div');
-      board.id = 'gist-qatp-file-board';
-
-
-      const header = document.createElement('div');
-      header.className = 'gist-qatp-board-header';
-
-
-      const title = document.createElement('span');
-      title.id = 'gist-qatp-board-title';
-      title.textContent = `📁 ${files.length} 個檔案`;
-
-
-      // 一鍵複製檔案清單按鈕 (FEAT-01 / 妥協案 12)
-      const copyBtn = document.createElement('button');
-      copyBtn.id = 'gist-qatp-board-copy-btn';
-      copyBtn.className = 'gist-qatp-board-copy';
-      copyBtn.textContent = '📋';
-      copyBtn.title = '一鍵複製所有檔案名稱清單';
-      copyBtn.addEventListener('click', async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-
-
-        const currentFiles = inspectGistFiles();
-        if (currentFiles.length === 0) {
-          showToast('⚠️ 看板尚無可複製的檔案', 'warning');
-          return;
+        // 1. 補齊 10 站點排序矩陣
+        const defaultSites = ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
+        if (!Array.isArray(data.siteTabOrder)) {
+            data.siteTabOrder = [...defaultSites];
+        } else {
+            defaultSites.forEach(s => {
+                if (!data.siteTabOrder.includes(s)) data.siteTabOrder.push(s);
+            });
         }
 
 
+        // 2. 補齊雲端同步設定、Toast 座標與收納狀態
+        if (typeof data.jsonSyncUrl !== 'string') data.jsonSyncUrl = DEFAULT_CONFIG.jsonSyncUrl;
+        if (typeof data.isCollapsed !== 'boolean') data.isCollapsed = false;
+        if (typeof data.orbPosition !== 'object') data.orbPosition = null;
+        if (typeof data.toastPosition !== 'object') data.toastPosition = null;
+
+
+        // 補齊 toastSettings
+        if (!data.toastSettings || typeof data.toastSettings !== 'object') {
+            data.toastSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.toastSettings));
+        } else {
+            const ts = data.toastSettings;
+            if (!['left', 'center', 'right'].includes(ts.anchor)) ts.anchor = 'center';
+            if (typeof ts.fontSize !== 'number' || ts.fontSize <= 0) ts.fontSize = 18;
+            if (typeof ts.background !== 'string' || !ts.background.trim()) {
+                ts.background = DEFAULT_CONFIG.toastSettings.background;
+            }
+        }
+
+
+        // 補齊 qaQueueSettings 暫存池、滿額自動總結與熱鍵設定 (4 態白名單)
+        if (!data.qaQueueSettings || typeof data.qaQueueSettings !== 'object') {
+            data.qaQueueSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.qaQueueSettings));
+        } else {
+            const qs = data.qaQueueSettings;
+            if (typeof qs.captureHotkey !== 'string') qs.captureHotkey = 'F4';
+            if (typeof qs.summaryHotkey !== 'string') qs.summaryHotkey = 'F7';
+            if (typeof qs.ttlHours !== 'number' || qs.ttlHours <= 0) qs.ttlHours = 2;
+            if (typeof qs.targetCount !== 'number' || qs.targetCount < 0) qs.targetCount = 5;
+            if (typeof qs.keepQueueOnAutoSummary !== 'boolean') qs.keepQueueOnAutoSummary = false;
+
+
+            const validActions = ['SINGLE', 'SINGLE_CLEAN', 'PREVIEW', 'PREVIEW_CLEAN'];
+            if (!qs.siteActions || typeof qs.siteActions !== 'object') {
+                qs.siteActions = JSON.parse(JSON.stringify(DEFAULT_CONFIG.qaQueueSettings.siteActions));
+            } else {
+                defaultSites.forEach(s => {
+                    if (!validActions.includes(qs.siteActions[s])) {
+                        qs.siteActions[s] = (s === 'minimax' || s === 'zai') ? 'PREVIEW' : 'SINGLE';
+                    }
+                });
+            }
+        }
+
+
+        // 3. 補齊雙軌雜訊清洗引擎
+        if (!data.noiseSettings || typeof data.noiseSettings !== 'object') {
+            data.noiseSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.noiseSettings));
+        } else {
+            if (!['string_first', 'regex_first'].includes(data.noiseSettings.pipelineOrder)) {
+                data.noiseSettings.pipelineOrder = DEFAULT_CONFIG.noiseSettings.pipelineOrder;
+            }
+
+
+            const badRegexPattern = /\/\S*?\.\*\?\[(?:\\n|\n)\]\?\/\S*s\S*|\/\.\*\?\[(?:\\n|\n)\]\?\/gis/;
+            if (typeof data.noiseSettings.customNoiseRegexes !== 'string' || !data.noiseSettings.customNoiseRegexes.trim() || badRegexPattern.test(data.noiseSettings.customNoiseRegexes)) {
+                data.noiseSettings.customNoiseRegexes = DEFAULT_CONFIG.noiseSettings.customNoiseRegexes;
+            } else if (!data.noiseSettings.customNoiseRegexes.includes('請稍後再試')) {
+                data.noiseSettings.customNoiseRegexes = data.noiseSettings.customNoiseRegexes.replace(
+                    /(?:思考\|快速)/g,
+                    '思考|快速|請稍後再試'
+                );
+            }
+
+
+            if (typeof data.noiseSettings.customNoiseStrings === 'string') {
+                if (data.noiseSettings.customNoiseStrings.includes('K2.6')) {
+                    data.noiseSettings.customNoiseStrings = data.noiseSettings.customNoiseStrings
+                        .split('\n')
+                        .filter(l => !l.includes('K2.6'))
+                        .join('\n');
+                }
+            } else {
+                data.noiseSettings.customNoiseStrings = DEFAULT_CONFIG.noiseSettings.customNoiseStrings;
+            }
+
+
+            const nonCommentStrings = (data.noiseSettings.customNoiseStrings || '')
+                .split('\n')
+                .map(l => l.trim())
+                .filter(l => l && !l.startsWith('#') && !l.startsWith('//'));
+            if (nonCommentStrings.length === 0) {
+                data.noiseSettings.customNoiseStrings = DEFAULT_CONFIG.noiseSettings.customNoiseStrings;
+            }
+        }
+
+
+        // 4. 補齊 uiSettings
+        if (!data.uiSettings || typeof data.uiSettings !== 'object') {
+            data.uiSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.uiSettings));
+        } else {
+            if (typeof data.uiSettings.showCleanSingle !== 'boolean') data.uiSettings.showCleanSingle = true;
+            if (typeof data.uiSettings.showFullThread !== 'boolean') data.uiSettings.showFullThread = true;
+            if (!['right', 'bottom'].includes(data.uiSettings.purplePosition)) data.uiSettings.purplePosition = 'bottom';
+        }
+
+
+        // 5. 補齊 aiStudioSettings 與 3 模組按鈕
+        if (!data.aiStudioSettings || typeof data.aiStudioSettings !== 'object') {
+            data.aiStudioSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.aiStudioSettings));
+        } else {
+            const as = data.aiStudioSettings;
+            if (!['native_menu', 'pencil_edit', 'dom_parser'].includes(as.primaryEngine)) as.primaryEngine = 'native_menu';
+            if (!['grid_3_2', 'staircase', 'single_row'].includes(as.sliceLayout)) as.sliceLayout = 'staircase';
+            if (!['right', 'bottom', 'inherit'].includes(as.purplePosition)) as.purplePosition = 'right';
+            if (!['capsule_only', 'control_group', 'entire_toolbar'].includes(as.wheelSwitchScope)) as.wheelSwitchScope = 'capsule_only';
+            if (!['module_1', 'module_2', 'module_3'].includes(as.activeModuleId)) as.activeModuleId = 'module_1';
+            if (!['warn_block', 'lenient_full', 'custom_string'].includes(as.fallbackAction)) as.fallbackAction = 'warn_block';
+            if (typeof as.fallbackCustomText !== 'string') as.fallbackCustomText = '[ERROR: 錨點切片未命中]';
+
+
+            if (!as.modules || typeof as.modules !== 'object') {
+                as.modules = JSON.parse(JSON.stringify(DEFAULT_CONFIG.aiStudioSettings.modules));
+            } else {
+                ['module_1', 'module_2', 'module_3'].forEach(mKey => {
+                    const defMod = DEFAULT_CONFIG.aiStudioSettings.modules[mKey];
+                    if (!as.modules[mKey]) {
+                        as.modules[mKey] = JSON.parse(JSON.stringify(defMod));
+                    } else {
+                        const m = as.modules[mKey];
+                        if (typeof m.name !== 'string') m.name = defMod.name;
+                        if (typeof m.badgeText !== 'string') m.badgeText = defMod.badgeText;
+                        if (typeof m.badgeColor !== 'string') m.badgeColor = defMod.badgeColor;
+                        if (!Array.isArray(m.buttons)) {
+                            m.buttons = JSON.parse(JSON.stringify(defMod.buttons));
+                        } else {
+                            defMod.buttons.forEach((defBtn, bIdx) => {
+                                if (!m.buttons[bIdx]) {
+                                    m.buttons[bIdx] = JSON.parse(JSON.stringify(defBtn));
+                                } else {
+                                    const b = m.buttons[bIdx];
+                                    if (typeof b.name !== 'string') b.name = defBtn.name;
+                                    if (!['match', 'replace'].includes(b.mode)) b.mode = defBtn.mode || 'match';
+                                    if (typeof b.enabled !== 'boolean') b.enabled = defBtn.enabled;
+
+
+                                    if (b.id === 'm1_btn_3') {
+                                        b.name = defBtn.name;
+                                        b.pattern = defBtn.pattern;
+                                        b.fallbackPattern = defBtn.fallbackPattern;
+                                        b.suffix = '\n\n';
+                                    }
+                                    if (b.id === 'm1_btn_5') {
+                                        if (!b.pattern || b.pattern.includes('*?') || b.pattern.endsWith('/ig')) {
+                                            b.pattern = defBtn.pattern;
+                                            b.fallbackPattern = defBtn.fallbackPattern;
+                                        }
+                                    }
+
+
+                                    if (typeof b.pattern !== 'string') b.pattern = defBtn.pattern;
+                                    if (typeof b.fallbackPattern !== 'string') b.fallbackPattern = defBtn.fallbackPattern || '';
+                                    if (typeof b.replaceValue !== 'string') b.replaceValue = '';
+                                    if (typeof b.isCodeBlockTarget !== 'boolean') b.isCodeBlockTarget = false;
+                                    if (typeof b.prefix !== 'string') b.prefix = defBtn.prefix || '';
+                                    if (typeof b.suffix !== 'string') b.suffix = defBtn.suffix || '';
+                                    if (typeof b.autoDivider !== 'boolean') b.autoDivider = (defBtn.autoDivider === true);
+
+
+                                    if (b.id === 'm1_btn_1') {
+                                        if (typeof b.prefix !== 'string' || b.prefix.trim() === '') {
+                                            b.prefix = 'https://docs.google.com/document/d/1TDprIAm5WMbVc0k6Nv-DmS89RVOnx1BRYM13EcqjNSQ/edit?usp=sharing';
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    }
+                });
+            }
+            delete as.anchorButtons;
+        }
+
+
+        // 6. 補齊 profiles 各站點前綴與後綴
+        Object.keys(DEFAULT_CONFIG.profiles).forEach(key => {
+            if (!data.profiles[key]) {
+                data.profiles[key] = JSON.parse(JSON.stringify(DEFAULT_CONFIG.profiles[key]));
+            } else {
+                const p = data.profiles[key];
+                if (typeof p.enablePrefix !== 'boolean') p.enablePrefix = true;
+                if (typeof p.enableSuffix !== 'boolean') p.enableSuffix = true;
+                if (!p.prefixes || typeof p.prefixes !== 'object') p.prefixes = {};
+                if (!p.suffixes || typeof p.suffixes !== 'object') p.suffixes = {};
+
+
+                defaultSites.forEach(siteKey => {
+                    if (typeof p.prefixes[siteKey] === 'undefined' || (key === 'profile_1' && siteKey === 'minimax' && p.prefixes[siteKey] === '7th')) {
+                        p.prefixes[siteKey] = DEFAULT_CONFIG.profiles[key].prefixes[siteKey] || (siteKey === 'minimax' ? '8th' : '');
+                    }
+                    if (typeof p.suffixes[siteKey] === 'undefined') {
+                        p.suffixes[siteKey] = '\n\n';
+                    }
+                });
+            }
+        });
+        return data;
+    }
+
+
+    const Storage = {
+        get() {
+            let data = null;
+            try {
+                if (typeof GM_getValue !== 'undefined') {
+                    data = GM_getValue(CONFIG_KEY, null);
+                } else {
+                    const val = localStorage.getItem(CONFIG_KEY);
+                    data = val ? JSON.parse(val) : null;
+                }
+            } catch (e) {
+                console.error('⚠️ [AI Copy] Storage 讀取失敗，恢復預設值:', e);
+            }
+            return sanitizeConfig(data);
+        },
+        set(data) {
+            try {
+                if (typeof GM_setValue !== 'undefined') {
+                    GM_setValue(CONFIG_KEY, data);
+                } else {
+                    localStorage.setItem(CONFIG_KEY, JSON.stringify(data));
+                }
+            } catch (e) {
+                console.error('⚠️ [AI Copy] Storage 寫入失敗:', e);
+            }
+        }
+    };
+
+
+    let globalConfig = Storage.get();
+
+
+    // ==========================================
+    // 0.1 跨站點 QA 採集暫存池資料結構與 TTL 防線
+    // ==========================================
+    function getQaQueue() {
+        let raw = null;
         try {
-          const textToCopy = currentFiles.join('\n');
-          await writeToClipboard(textToCopy);
-          copyBtn.textContent = '✅';
-          showToast(`📋 已複製 ${currentFiles.length} 個檔名至剪貼簿！`, 'success');
-          setTimeout(() => {
-            copyBtn.textContent = '📋';
-          }, 1200);
-        } catch (err) {
-          console.error('[QATP Copy Board Files Error]', err);
-          showToast(err.message || '複製檔案清單失敗', 'danger');
+            if (typeof GM_getValue !== 'undefined') {
+                raw = GM_getValue(QA_QUEUE_KEY, null);
+            } else {
+                const val = localStorage.getItem(QA_QUEUE_KEY);
+                raw = val ? JSON.parse(val) : null;
+            }
+        } catch (e) {
+            console.error('⚠️ [AI Copy] QA Queue 讀取失敗:', e);
         }
-      });
 
 
-      const closeBtn = document.createElement('button');
-      closeBtn.className = 'gist-qatp-board-close';
-      closeBtn.textContent = '✕';
-      closeBtn.title = '關閉看板 (可至設定中重新啟用)';
-      closeBtn.addEventListener('click', () => {
-        board.remove();
-      });
+        if (!raw || typeof raw !== 'object' || !raw.items) {
+            raw = { lastUpdated: Date.now(), items: {} };
+        }
 
 
-      header.appendChild(title);
-      header.appendChild(copyBtn);
-      header.appendChild(closeBtn);
-      board.appendChild(header);
-
-
-      const list = document.createElement('ul');
-      list.id = 'gist-qatp-board-list';
-      list.className = 'gist-qatp-board-list';
-      board.appendChild(list);
-
-
-      document.body.appendChild(board);
-
-
-      let savedPos = null;
-      try {
-        savedPos = GM_getValue(STORAGE_BOARD_POS_KEY, null);
-      } catch (e) {}
-
-
-      applyBoardPosition(board, savedPos);
-      bindBoardDrag(board);
+        // TTL 逾時自滅檢查 (依設定時長計算)
+        const ttlHours = globalConfig.qaQueueSettings?.ttlHours || 2;
+        const ttlMs = ttlHours * 60 * 60 * 1000;
+        if (Date.now() - (raw.lastUpdated || 0) > ttlMs) {
+            raw = { lastUpdated: Date.now(), items: {} };
+            setQaQueue(raw);
+        }
+        return raw;
     }
 
 
-    const titleEl = document.getElementById('gist-qatp-board-title');
-    if (titleEl) {
-      titleEl.textContent = `📁 ${files.length} 個檔案`;
+    function setQaQueue(queueData) {
+        try {
+            if (typeof GM_setValue !== 'undefined') {
+                GM_setValue(QA_QUEUE_KEY, queueData);
+            } else {
+                localStorage.setItem(QA_QUEUE_KEY, JSON.stringify(queueData));
+            }
+        } catch (e) {
+            console.error('⚠️ [AI Copy] QA Queue 寫入失敗:', e);
+        }
     }
 
 
-    const listEl = document.getElementById('gist-qatp-board-list');
-    if (listEl) {
-      listEl.textContent = '';
-      if (files.length === 0) {
-        const emptyItem = document.createElement('li');
-        emptyItem.className = 'gist-qatp-board-item';
-        emptyItem.style.color = '#8b949e';
-        emptyItem.textContent = '(尚無檔案)';
-        listEl.appendChild(emptyItem);
-      } else {
-        files.forEach((name) => {
-          const li = document.createElement('li');
-          li.className = 'gist-qatp-board-item';
+    function clearQaQueue() {
+        const emptyQueue = { lastUpdated: Date.now(), items: {} };
+        setQaQueue(emptyQueue);
+        updateGearIndicator();
+    }
 
 
-          const bullet = document.createElement('span');
-          bullet.className = 'gist-qatp-board-bullet';
-          bullet.textContent = '•';
+    function updateGearIndicator() {
+        const queue = getQaQueue();
+        const count = Object.keys(queue.items || {}).length;
+        const gearBtns = document.querySelectorAll('.ai-copy-gear-btn');
+        const summaryKey = globalConfig.qaQueueSettings?.summaryHotkey || 'F7';
 
 
-          const link = document.createElement('a');
-          link.className = 'gist-qatp-board-link';
-          link.setAttribute('role', 'button');
-          link.textContent = name;
-          link.title = `點擊平滑導航至 ${name}`;
-          link.addEventListener('click', (e) => {
+        gearBtns.forEach(btn => {
+            if (count > 0) {
+                btn.classList.add('ai-copy-gear-active');
+                btn.title = `【QA 採集中：已暫存 ${count} 站】點擊開啟管理器，右鍵強制清空佇列 (按 ${summaryKey} 總結匯出)`;
+            } else {
+                btn.classList.remove('ai-copy-gear-active');
+                btn.title = '開啟參數設定管理器 (右鍵可清空 QA 採集佇列)';
+            }
+        });
+    }
+
+
+    // ==========================================
+    // 1. Toast 幾何定位與雙態切換工具
+    // ==========================================
+    let isToastPositioningMode = false;
+
+
+    function applyToastPosition(toast) {
+        const pos = globalConfig.toastPosition;
+        if (pos && pos.left && pos.top) {
+            toast.style.left = pos.left;
+            toast.style.top = pos.top;
+            toast.style.bottom = 'auto';
+            toast.style.right = 'auto';
+            toast.dataset.hasCustomPos = 'true';
+        } else {
+            toast.style.bottom = '80px';
+            toast.style.right = '24px';
+            toast.style.left = 'auto';
+            toast.style.top = 'auto';
+            toast.dataset.hasCustomPos = 'false';
+        }
+    }
+
+
+    function showToast(message, isError = false, duration = 2200) {
+        if (isToastPositioningMode) return; // 處於拖曳定位模式時不被覆蓋
+
+
+        let toast = document.getElementById('ai-copy-toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'ai-copy-toast';
+            toast.className = 'ai-copy-toast-node';
+            document.body.appendChild(toast);
+        }
+
+
+        applyToastPosition(toast);
+        const customBg = globalConfig.toastSettings?.background || DEFAULT_CONFIG.toastSettings.background;
+        const customFontSize = globalConfig.toastSettings?.fontSize || 18;
+
+
+        toast.textContent = message;
+        toast.style.fontSize = `${customFontSize}px`;
+        toast.style.setProperty('background', isError ? 'rgba(220, 38, 38, 0.95)' : customBg, 'important');
+        toast.style.pointerEvents = 'none'; // 平時點擊強制穿透
+        toast.style.opacity = '1';
+        toast.style.transform = 'none';
+
+
+        if (toast._timer) clearTimeout(toast._timer);
+        toast._timer = setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(10px)';
+        }, duration);
+    }
+
+
+    function toggleToastPositioningMode() {
+        let toast = document.getElementById('ai-copy-toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'ai-copy-toast';
+            toast.className = 'ai-copy-toast-node';
+            document.body.appendChild(toast);
+        }
+
+
+        const toastBtns = document.querySelectorAll('.ai-copy-toast-btn');
+
+
+        if (!isToastPositioningMode) {
+            // 進入長亮拖曳定位模式
+            isToastPositioningMode = true;
+            toastBtns.forEach(b => b.classList.add('ai-copy-toast-btn-active'));
+
+
+            if (toast._timer) clearTimeout(toast._timer);
+
+
+            applyToastPosition(toast);
+            const customBg = globalConfig.toastSettings?.background || DEFAULT_CONFIG.toastSettings.background;
+            const customFontSize = globalConfig.toastSettings?.fontSize || 18;
+
+
+            toast.textContent = '🍞 [Toast 預覽] 按住本框可自由拖曳定位，完成後再次點擊 🍞 鎖定';
+            toast.style.fontSize = `${customFontSize}px`;
+            toast.style.setProperty('background', customBg, 'important');
+
+
+            // 實體解鎖：強制關閉過渡與清除 transform，杜絕平移死鎖與每按一次就位移
+            toast.classList.add('ai-copy-toast-active');
+            toast.classList.add('ai-copy-is-dragging');
+            toast.style.setProperty('pointer-events', 'auto', 'important');
+            toast.style.opacity = '1';
+            toast.style.transform = 'none';
+
+
+            // 視窗絕對座標原位鎖定（杜絕 auto 與累加偏誤）
+            const curRect = toast.getBoundingClientRect();
+            toast.style.left = `${Math.round(curRect.left)}px`;
+            toast.style.top = `${Math.round(curRect.top)}px`;
+            toast.style.right = 'auto';
+            toast.style.bottom = 'auto';
+
+
+            setupDraggableUI(toast, toast, false, null, true);
+        } else {
+            // 退出並物理鎖定座標
+            isToastPositioningMode = false;
+            toastBtns.forEach(b => b.classList.remove('ai-copy-toast-btn-active'));
+            toast.classList.remove('ai-copy-toast-active');
+            toast.classList.remove('ai-copy-is-dragging');
+            toast.style.setProperty('pointer-events', 'none', 'important');
+
+
+            // 100% 物理左上角真理座標記錄，絕不二次加上或扣除 width/2
+            const rect = toast.getBoundingClientRect();
+            globalConfig.toastPosition = {
+                left: `${Math.round(rect.left)}px`,
+                top: `${Math.round(rect.top)}px`
+            };
+            Storage.set(globalConfig);
+
+
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(10px)';
+
+
+            setTimeout(() => {
+                showToast('📍 Toast 提示位置已成功鎖定！');
+            }, 80);
+        }
+    }
+
+
+    function copyToClipboard(text) {
+        if (typeof GM_setClipboard !== 'undefined') {
+            GM_setClipboard(text, 'text');
+        } else if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text);
+        } else {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+        }
+    }
+
+
+    // ==========================================
+    // 2. 雲端 JSON 同步引擎 (Google Docs 純內容覆蓋，座標絕對隔離)
+    // ==========================================
+    function getGoogleDocRawUrl(url) {
+        if (!url) return '';
+        const docMatch = url.match(/\/document\/d\/([a-zA-Z0-9-_]+)/);
+        if (docMatch && docMatch[1]) {
+            return `https://docs.google.com/document/d/${docMatch[1]}/export?format=txt`;
+        }
+        return url;
+    }
+
+
+    function getSafeDocLinkUrl(rawUrl) {
+        if (!rawUrl) return '#';
+        const trimmed = rawUrl.trim();
+        if (trimmed.startsWith('https://') || trimmed.startsWith('http://')) {
+            return trimmed;
+        }
+        return '#';
+    }
+
+
+    function isHtmlResponse(text) {
+        if (!text) return false;
+        const lower = text.toLowerCase();
+        return lower.includes('<!doctype html>') || lower.includes('<html') || lower.includes('accounts.google.com');
+    }
+
+
+    function sanitizeJsonString(text) {
+        if (!text) return '';
+        return text
+            .trim()
+            .replace(/^\uFEFF/, '')
+            .replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"')
+            .replace(/[\u2018\u2019\u201A\u201B\u2032\u2035]/g, "'")
+            .replace(/\u00a0/g, ' ');
+    }
+
+
+    function fetchCloudData(url) {
+        return fetch(url, { credentials: 'omit' })
+            .then(res => {
+                if (!res.ok) throw new Error("HTTP 狀態碼: " + res.status);
+                return res.text();
+            })
+            .catch(err => {
+                return new Promise((resolve, reject) => {
+                    if (typeof GM_xmlhttpRequest !== 'undefined') {
+                        GM_xmlhttpRequest({
+                            method: "GET",
+                            url: url,
+                            anonymous: true,
+                            onload: (res) => {
+                                if (res.status >= 200 && res.status < 300) resolve(res.responseText);
+                                else reject(new Error("備用連線狀態碼: " + res.status));
+                            },
+                            onerror: () => reject(new Error("雲端連線失敗，請檢查網址與共享權限。"))
+                        });
+                    } else {
+                        reject(err);
+                    }
+                });
+            });
+    }
+
+
+    async function syncFromJsonDoc(onSuccessCallback) {
+        const url = globalConfig.jsonSyncUrl;
+        if (!url || !url.trim()) {
+            showToast('⚠️ 請先填入 Google Doc 雲端同步連結！', true);
+            return;
+        }
+
+
+        showToast('⏳ 正在從 Google Docs 同步配置...');
+        try {
+            const rawUrl = getGoogleDocRawUrl(url.trim());
+            const rawText = await fetchCloudData(rawUrl);
+
+
+            if (isHtmlResponse(rawText)) {
+                alert('⚠️ 同步失敗！\n此 Google Doc 處於非共享狀態，請至雲端將共用權限設為「知道連結的任何人均可檢視」。');
+                showToast('❌ 雲端檔案非共享狀態！', true);
+                return;
+            }
+
+
+            const cleanedText = sanitizeJsonString(rawText);
+            const parsed = JSON.parse(cleanedText);
+
+
+            if (!parsed || typeof parsed !== 'object') {
+                throw new Error('解析結果非合法 JSON 物件');
+            }
+
+
+            if (confirm('確定使用此雲端配置「覆蓋」純內容設定嗎？\n(為防止按鈕跑位，本機懸浮卡片、小光球、Toast 座標與排版佈局將 100% 嚴格保留)')) {
+                const preservedUiPos = globalConfig.uiPosition;
+                const preservedOrbPos = globalConfig.orbPosition;
+                const preservedToastPos = globalConfig.toastPosition;
+                const preservedToastAnchor = globalConfig.toastSettings?.anchor;
+                const preservedCollapsed = globalConfig.isCollapsed;
+                const preservedSliceLayout = globalConfig.aiStudioSettings?.sliceLayout;
+                const preservedPurplePos = globalConfig.aiStudioSettings?.purplePosition;
+                const preservedModuleId = globalConfig.aiStudioSettings?.activeModuleId;
+                const preservedQaSettings = globalConfig.qaQueueSettings;
+
+
+                globalConfig = sanitizeConfig(parsed);
+
+
+                globalConfig.uiPosition = preservedUiPos;
+                globalConfig.orbPosition = preservedOrbPos;
+                globalConfig.toastPosition = preservedToastPos;
+                if (preservedToastAnchor && globalConfig.toastSettings) {
+                    globalConfig.toastSettings.anchor = preservedToastAnchor;
+                }
+                globalConfig.isCollapsed = preservedCollapsed;
+                if (preservedSliceLayout) globalConfig.aiStudioSettings.sliceLayout = preservedSliceLayout;
+                if (preservedPurplePos) globalConfig.aiStudioSettings.purplePosition = preservedPurplePos;
+                if (preservedModuleId) globalConfig.aiStudioSettings.activeModuleId = preservedModuleId;
+                if (preservedQaSettings) globalConfig.qaQueueSettings = preservedQaSettings;
+
+
+                Storage.set(globalConfig);
+                if (typeof onSuccessCallback === 'function') onSuccessCallback();
+                showToast('🎉 雲端內容配置已成功同步覆蓋 (本機座標完好保留)！');
+            }
+        } catch (err) {
+            console.error('❌ [AI Copy] 雲端 JSON 同步失敗:', err);
+            alert(`❌ 雲端 JSON 同步失敗：\n${err.message}\n\n可能原因：\n1. Google Doc 內容非合法 JSON 格式。\n2. 檔案未開啟公開檢視權限。`);
+            showToast('❌ JSON 解析或同步失敗！', true);
+        }
+    }
+
+
+    // ==========================================
+    // 3. 全域 DOM 雜訊與雙軌開放式清洗管線
+    // ==========================================
+    const UNIVERSAL_NOISE_SELECTORS = [
+        '.katex-mathml', '.MathJax_Preview',
+        '.line-numbers', '.line-numbers-rows', '.gutter', '.linenumber', '[class*="line-number"]',
+        'button', 'svg', 'mat-icon', 'span.material-symbols-outlined',
+        '.copy-code-button', '.table-action-btn', '.action-btn', '[class*="action-bar"]',
+        '[class*="toolbar"]', '[class*="feedback"]', '.actions-container', 'ms-turn-actions',
+        '[data-testid*="copy"]', '[aria-label*="複製"]', '[aria-label*="朗讀"]',
+        '[aria-label*="好"]', '[aria-label*="不好"]', '[aria-label*="Read Aloud"]',
+        '[aria-label*="Copy"]', '[aria-label*="Copy code"]', '.text-xs.text-gray-500', '.text-gray-400',
+        '[class*="table-tool"]', '[class*="table-header"]', '[class*="sheet-copy"]',
+        '.ds-greeting', '.welcome-card', '.suggest-box', '.chat-recommend-prompt',
+        '.thinking-box', '.think-container', '.tool-call-wrap', '.answer-info-right',
+        '[data-testid*="citation"]', '.citation', '[class*="citation"]', '.group-hover\\:visible',
+        `#${UI_CONTAINER_ID}`, `#${FLOATING_ORB_ID}`, '#ai-copy-toast', `#${MODAL_OVERLAY_ID}`, '.ai-copy-toast-node'
+    ];
+
+
+    function cleanUniversalNoise(node) {
+        if (!node || node.nodeType !== Node.ELEMENT_NODE) return node;
+        UNIVERSAL_NOISE_SELECTORS.forEach(sel => {
+            node.querySelectorAll(sel).forEach(el => el.remove());
+        });
+        return node;
+    }
+
+
+    function applyNoiseStrings(text, rawStrings) {
+        if (!text || !rawStrings || !rawStrings.trim()) return text;
+        let result = text;
+        const lines = rawStrings.split('\n');
+        lines.forEach(line => {
+            const rule = line.trim();
+            if (!rule || rule.startsWith('#') || rule.startsWith('//')) return;
+            result = result.replaceAll(rule, '');
+        });
+        return result;
+    }
+
+
+    function findRegexClosingSlash(rule) {
+        if (!rule || rule.length <= 1 || !rule.startsWith('/')) return -1;
+        for (let i = rule.length - 1; i >= 1; i--) {
+            if (rule[i] === '/') {
+                let slashCount = 0;
+                for (let j = i - 1; j >= 0; j--) {
+                    if (rule[j] === '\\') {
+                        slashCount++;
+                    } else {
+                        break;
+                    }
+                }
+                if (slashCount % 2 === 0) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+
+    function applyNoiseRegexes(text, rawRegexes) {
+        if (!text || !rawRegexes || !rawRegexes.trim()) return text;
+        let result = text;
+        const lines = rawRegexes.split('\n');
+        lines.forEach(line => {
+            const rule = line.trim();
+            if (!rule || rule.startsWith('#') || rule.startsWith('//')) return;
+
+
+            try {
+                if (rule.startsWith('/') && rule.length > 1) {
+                    const lastSlashIndex = findRegexClosingSlash(rule);
+
+
+                    if (lastSlashIndex > 0) {
+                        const patternStr = rule.substring(1, lastSlashIndex);
+                        const flagsStr = rule.substring(lastSlashIndex + 1) || 'g';
+                        const regex = new RegExp(patternStr, flagsStr);
+                        result = result.replace(regex, '');
+                    } else {
+                        result = result.replaceAll(rule, '');
+                    }
+                } else {
+                    result = result.replaceAll(rule, '');
+                }
+            } catch (regexErr) {
+                console.warn('⚠️ [AI Copy] 自訂正則規則語法無效，已自動跳過:', rule, regexErr);
+            }
+        });
+        return result;
+    }
+
+
+    function sanitizeMarkdownArtifacts(text) {
+        if (!text) return '';
+        let result = text;
+        const settings = globalConfig.noiseSettings || DEFAULT_CONFIG.noiseSettings;
+        const order = settings.pipelineOrder || 'string_first';
+
+
+        if (order === 'string_first') {
+            result = applyNoiseStrings(result, settings.customNoiseStrings);
+            result = applyNoiseRegexes(result, settings.customNoiseRegexes);
+        } else {
+            result = applyNoiseRegexes(result, settings.customNoiseRegexes);
+            result = applyNoiseStrings(result, settings.customNoiseStrings);
+        }
+
+
+        return result.replace(/\n{3,}/g, '\n\n').trim();
+    }
+
+
+    // ==========================================
+    // 4. AI Studio 多引擎降級容錯提取 (Multi-Engine Chain)
+    // ==========================================
+    async function tryAiStudioNativeMenuCopy() {
+        try {
+            const buttons = Array.from(document.querySelectorAll('button[aria-label="View more actions"], button[mattooltip="View more actions"], button.mat-mdc-menu-trigger'));
+            const validButtons = buttons.filter(b => {
+                if (b.closest('ms-playground-toolbar') || b.closest(`#${UI_CONTAINER_ID}`) || b.closest(`#${FLOATING_ORB_ID}`)) return false;
+                const turn = b.closest('ms-chat-turn, [data-turn-role="Model"]');
+                return !!turn;
+            });
+
+
+            if (validButtons.length === 0) return null;
+            const targetMoreBtn = validButtons[validButtons.length - 1];
+
+
+            targetMoreBtn.click();
+
+
+            let targetMenuItem = null;
+            for (let i = 0; i < 15; i++) {
+                await new Promise(r => setTimeout(r, 30));
+                const overlay = document.querySelector('.cdk-overlay-container');
+                if (overlay) {
+                    const menuItems = Array.from(overlay.querySelectorAll('button[role="menuitem"], .mat-mdc-menu-item'));
+                    targetMenuItem = menuItems.find(item => {
+                        const txt = item.textContent || '';
+                        return txt.includes('Copy as markdown') || txt.includes('複製為 Markdown') || txt.includes('Markdown');
+                    });
+                    if (targetMenuItem) break;
+                }
+            }
+
+
+            if (!targetMenuItem) {
+                document.body.click();
+                return null;
+            }
+
+
+            targetMenuItem.click();
+            await new Promise(r => setTimeout(r, 120));
+
+
+            if (navigator.clipboard && navigator.clipboard.readText) {
+                const readMd = await navigator.clipboard.readText();
+                if (readMd && readMd.trim().length > 0) {
+                    return readMd.trim();
+                }
+            }
+            return null;
+        } catch (e) {
+            console.warn('⚠️ [AI Copy] AI Studio 原生選單提取異常:', e);
+            try { document.body.click(); } catch (_) {}
+            return null;
+        }
+    }
+
+
+    async function getAiStudioLastTurnMarkdown() {
+        try {
+            const allTurns = Array.from(document.querySelectorAll('ms-chat-turn'));
+            const modelTurns = allTurns.filter(turn => {
+                if (turn.closest(`#${UI_CONTAINER_ID}`) || turn.closest(`#${FLOATING_ORB_ID}`) || turn.id === UI_CONTAINER_ID) return false;
+                const role = turn.getAttribute('data-turn-role') || turn.getAttribute('data-role');
+                if (role && role.toLowerCase() === 'model') return true;
+                const isModel = turn.querySelector('[data-turn-role="Model"], [data-role="model"], .model-turn-container');
+                const isUser = turn.querySelector('[data-turn-role="User"], [data-role="user"]');
+                return !!isModel && !isUser;
+            });
+
+
+            if (modelTurns.length === 0) return null;
+            const lastTurn = modelTurns[modelTurns.length - 1];
+
+
+            let textarea = lastTurn.querySelector('textarea');
+            if (textarea && textarea.value) {
+                return textarea.value;
+            }
+
+
+            let editBtn = lastTurn.querySelector('button[aria-label*="Edit"], button[aria-label*="edit"], button[mattooltip*="Edit"], button[mattooltip*="edit"]');
+            if (!editBtn) {
+                const buttons = Array.from(lastTurn.querySelectorAll('button'));
+                editBtn = buttons.find(b => {
+                    const txt = b.innerText || b.getAttribute('aria-label') || '';
+                    return txt.includes('Edit') || txt.includes('編輯') || txt.includes('edit');
+                });
+            }
+
+
+            if (!editBtn) return null;
+
+
+            editBtn.click();
+
+
+            for (let i = 0; i < 15; i++) {
+                await new Promise(r => setTimeout(r, 20));
+                textarea = lastTurn.querySelector('textarea');
+                if (textarea && typeof textarea.value === 'string' && textarea.value.length > 0) {
+                    break;
+                }
+            }
+
+
+            let resultText = '';
+            if (textarea && textarea.value) {
+                resultText = textarea.value;
+            }
+
+
+            const allTurnButtons = Array.from(lastTurn.querySelectorAll('button'));
+            const cancelBtn = allTurnButtons.find(b => {
+                const txt = (b.innerText || b.getAttribute('aria-label') || '').toLowerCase();
+                return txt.includes('cancel') || txt.includes('取消') || txt.includes('close');
+            });
+
+
+            if (cancelBtn) {
+                cancelBtn.click();
+            } else {
+                editBtn.click();
+            }
+
+
+            return resultText || null;
+        } catch (e) {
+            console.warn('⚠️ [AI Copy] 模擬編輯提取異常:', e);
+            return null;
+        }
+    }
+
+
+    // ==========================================
+    // 5. DOM 轉 Markdown 核心引擎
+    // ==========================================
+    function parseTableToMarkdown(tableEl) {
+        const tableClone = tableEl.cloneNode(true);
+        cleanUniversalNoise(tableClone);
+
+
+        const rows = Array.from(tableClone.querySelectorAll('tr'));
+        if (rows.length === 0) return '';
+
+
+        let md = '\n\n';
+        const headers = [];
+        const headerCells = rows[0].querySelectorAll('th, td');
+
+
+        headerCells.forEach(cell => {
+            const cellText = cell.textContent.replace(/[\r\n]+/g, ' ').replace(/\|/g, '\\|').trim();
+            headers.push(cellText || ' ');
+        });
+
+
+        md += '| ' + headers.join(' | ') + ' |\n';
+        md += '| ' + headers.map(() => '---').join(' | ') + ' |\n';
+
+
+        for (let i = 1; i < rows.length; i++) {
+            const cells = Array.from(rows[i].querySelectorAll('td, th'));
+            if (cells.length > 0) {
+                const rowData = cells.map(c => {
+                    return c.textContent
+                        .replace(/[\r\n]+/g, '<br>')
+                        .replace(/\|/g, '\\|')
+                        .trim() || ' ';
+                });
+                md += '| ' + rowData.join(' | ') + ' |\n';
+            }
+        }
+        return md + '\n\n';
+    }
+
+
+    function parseCodeBlock(codeContainer) {
+        let language = codeContainer.getAttribute('data-language') || codeContainer.getAttribute('data-lang') || codeContainer.getAttribute('language') || codeContainer.getAttribute('lang') || '';
+
+
+        if (!language) {
+            const shell = codeContainer.closest('.codeblock-shell') || codeContainer.querySelector('.codeblock-shell');
+            if (shell) language = shell.getAttribute('data-lang') || '';
+        }
+
+
+        const langSpan = codeContainer.querySelector('.segment-code-lang, [class*="code-lang"], [class*="lang"]');
+        if (langSpan && langSpan.textContent && !language) {
+            language = langSpan.textContent.trim();
+        }
+
+
+        const headerEl = codeContainer.querySelector('[class*="header"], [class*="title"], [class*="code-nav"], [class*="tools"]');
+        if (headerEl && !language) {
+            language = headerEl.textContent
+                .replace(/(複製|下载|下載|copy|download|text|code)/gi, '')
+                .replace(/[\r\n\t]+/g, '')
+                .trim();
+        }
+
+
+        const preEl = codeContainer.tagName.toLowerCase() === 'pre' ? codeContainer : codeContainer.querySelector('pre');
+        const codeEl = preEl ? (preEl.querySelector('code') || preEl) : (codeContainer.querySelector('code') || codeContainer);
+
+
+        if (!language && preEl) {
+            const match = (preEl.className || '').match(/(?:language-|lang-)([a-zA-Z0-9_+-]+)/);
+            if (match) language = match[1];
+        }
+        if (!language && codeEl) {
+            const match = (codeEl.className || '').match(/(?:language-|lang-)([a-zA-Z0-9_+-]+)/);
+            if (match) language = match[1];
+        }
+
+
+        let rawCodeText = '';
+        const cmLines = Array.from(codeContainer.querySelectorAll('.cm-line'));
+        const standardLines = Array.from((codeEl || codeContainer).querySelectorAll('.code-line, [class*="line-content"], .view-line'));
+
+
+        if (cmLines.length > 0) {
+            rawCodeText = cmLines.map(ln => ln.textContent || '').join('\n');
+        } else if (standardLines.length > 0) {
+            rawCodeText = standardLines.map(ln => ln.textContent || ln.innerText || '').join('\n');
+        } else {
+            rawCodeText = (codeEl || codeContainer).textContent || '';
+        }
+
+
+        const cleanCodeText = rawCodeText
+            .replace(/^content_expand_less/g, '')
+            .replace(/^content_copy/g, '')
+            .replace(/\r\n/g, '\n')
+            .trim();
+
+
+        return `\n\n\`\`\`${language}\n${cleanCodeText}\n\`\`\`\n\n`;
+    }
+
+
+    function convertNodeToMarkdown(node) {
+        if (!node) return '';
+        if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+        if (node.nodeType !== Node.ELEMENT_NODE) return '';
+
+
+        const tagName = node.tagName.toLowerCase();
+        const className = typeof node.className === 'string' ? node.className : '';
+
+
+        const isCodeBlock = (tagName === 'div' && (className.includes('segment-code') || className.includes('code-block') || className.includes('codeContainer') || className.includes('syntax-highlighter') || className.includes('monaco-editor') || className.includes('cm-editor') || className.includes('cm-content') || className.includes('codeblock-shell')) && !className.includes('inline') && !className.includes('codespan')) ||
+                            (tagName === 'ms-code-block') ||
+                            (tagName === 'pre' && (className.includes('shiki') || (!node.closest('.segment-code') && !node.closest('[class*="code-block"]'))));
+
+
+        if (isCodeBlock) {
+            if (node.dataset.processedByAiCopy) return '';
+            node.dataset.processedByAiCopy = 'true';
+            return parseCodeBlock(node);
+        }
+
+
+        if (tagName === 'code' || className.includes('segment-code-inline') || className.includes('qwen-markdown-codespan') || className.includes('codespan')) {
+            if (!node.closest('.segment-code') && !node.closest('pre') && !node.closest('[class*="code-block"]') && !node.closest('.monaco-editor') && !node.closest('.cm-editor') && !node.closest('.codeblock-shell')) {
+                return ` \`${node.textContent.trim()}\` `;
+            }
+        }
+
+
+        if (tagName === 'table') {
+            return parseTableToMarkdown(node);
+        }
+
+
+        if (/^h[1-6]$/.test(tagName)) {
+            const level = parseInt(tagName[1], 10);
+            return `\n\n${'#'.repeat(level)} ${getChildMarkdown(node).trim()}\n\n`;
+        }
+
+
+        if (tagName === 'ul' || tagName === 'ol') {
+            const isOrdered = tagName === 'ol';
+            let itemsMd = '';
+            let index = 1;
+            Array.from(node.children).forEach(child => {
+                if (child.tagName.toLowerCase() === 'li') {
+                    itemsMd += `${isOrdered ? `${index++}. ` : '* '}${getChildMarkdown(child).trim()}\n`;
+                }
+            });
+            return `\n\n${itemsMd}\n\n`;
+        }
+
+
+        if (tagName === 'strong' || tagName === 'b') return `**${getChildMarkdown(node)}**`;
+        if (tagName === 'em' || tagName === 'i') return `*${getChildMarkdown(node)}*`;
+        if (tagName === 'del' || tagName === 's') return `~~${getChildMarkdown(node)}~~`;
+        if (tagName === 'a') return `[${getChildMarkdown(node)}](${node.getAttribute('href') || '#'})`;
+        if (tagName === 'p') return `\n\n${getChildMarkdown(node)}\n\n`;
+        if (tagName === 'blockquote') {
+            const content = getChildMarkdown(node).trim();
+            return '\n\n' + content.split('\n').map(l => `> ${l}`).join('\n') + '\n\n';
+        }
+        if (tagName === 'br') return '\n';
+
+
+        return getChildMarkdown(node);
+    }
+
+
+    function getChildMarkdown(node) {
+        let result = '';
+        node.childNodes.forEach(child => {
+            result += convertNodeToMarkdown(child);
+        });
+        return result;
+    }
+
+
+    function domToMarkdown(element, cleanNodeFn) {
+        if (!element) return '';
+        const cleaned = cleanNodeFn ? cleanNodeFn(element) : element.cloneNode(true);
+        cleanUniversalNoise(cleaned);
+
+
+        const md = convertNodeToMarkdown(cleaned);
+        cleaned.querySelectorAll('[data-processed-by-ai-copy]').forEach(el => delete el.dataset.processedByAiCopy);
+        return sanitizeMarkdownArtifacts(md);
+    }
+
+
+    // ==========================================
+    // 5.1 Z.AI Live DOM 結構化 Markdown 轉譯器
+    // ==========================================
+    function parseZaiProseToMarkdown(node) {
+        if (!node) return '';
+        if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+        if (node.nodeType !== Node.ELEMENT_NODE) return '';
+
+
+        const tag = node.tagName.toLowerCase();
+        const className = typeof node.className === 'string' ? node.className : '';
+
+
+        // 1. 雜訊過濾
+        if (tag === 'button' || tag === 'svg' || className.includes('copy-code-button')) {
+            return '';
+        }
+
+
+        // 2. 表格轉譯
+        if (tag === 'table') {
+            const rows = Array.from(node.querySelectorAll('tr'));
+            if (rows.length === 0) return '';
+            let md = '\n\n';
+            const headers = [];
+            const headerCells = rows[0].querySelectorAll('th, td');
+            headerCells.forEach(cell => {
+                const cellText = cell.textContent.replace(/[\r\n]+/g, ' ').replace(/\|/g, '\\|').trim();
+                headers.push(cellText || ' ');
+            });
+            md += '| ' + headers.join(' | ') + ' |\n';
+            md += '| ' + headers.map(() => '---').join(' | ') + ' |\n';
+            for (let i = 1; i < rows.length; i++) {
+                const cells = Array.from(rows[i].querySelectorAll('td, th'));
+                if (cells.length > 0) {
+                    const rowData = cells.map(c => {
+                        return c.textContent
+                            .replace(/[\r\n]+/g, '<br>')
+                            .replace(/\|/g, '\\|')
+                            .trim() || ' ';
+                    });
+                    md += '| ' + rowData.join(' | ') + ' |\n';
+                }
+            }
+            return md + '\n\n';
+        }
+
+
+        // 3. 標題轉譯
+        if (/^h[1-6]$/.test(tag)) {
+            const level = parseInt(tag[1], 10);
+            return `\n\n${'#'.repeat(level)} ${walkZaiChildren(node).trim()}\n\n`;
+        }
+
+
+        // 4. 代碼區塊 (pre)
+        if (tag === 'pre') {
+            const codeEl = node.querySelector('code') || node;
+            let lang = '';
+            const match = (codeEl.className || node.className || '').match(/(?:language-|lang-)(\w+)/);
+            if (match) lang = match[1];
+            return `\n\n\`\`\`${lang}\n${codeEl.textContent.trim()}\n\`\`\`\n\n`;
+        }
+
+
+        // 5. 行內代碼
+        if (tag === 'code' && !node.closest('pre')) {
+            return ` \`${node.textContent.trim()}\` `;
+        }
+
+
+        // 6. 段落與容器
+        if (tag === 'p' || tag === 'div') {
+            const text = walkZaiChildren(node).trim();
+            return text ? `\n\n${text}\n\n` : '';
+        }
+
+
+        // 7. 區塊引用
+        if (tag === 'blockquote') {
+            const text = walkZaiChildren(node).trim();
+            return '\n\n' + text.split('\n').map(l => `> ${l}`).join('\n') + '\n\n';
+        }
+
+
+        // 8. 清單
+        if (tag === 'ul' || tag === 'ol') {
+            const isOrdered = tag === 'ol';
+            let itemsMd = '';
+            let index = 1;
+            Array.from(node.children).forEach(child => {
+                if (child.tagName.toLowerCase() === 'li') {
+                    itemsMd += `${isOrdered ? `${index++}. ` : '* '}${walkZaiChildren(child).trim()}\n`;
+                }
+            });
+            return `\n\n${itemsMd}\n\n`;
+        }
+
+
+        // 9. 行內強調與折行
+        if (tag === 'strong' || tag === 'b') return `**${walkZaiChildren(node)}**`;
+        if (tag === 'em' || tag === 'i') return `*${walkZaiChildren(node)}*`;
+        if (tag === 'del' || tag === 's') return `~~${walkZaiChildren(node)}~~`;
+        if (tag === 'a') return `[${walkZaiChildren(node)}](${node.getAttribute('href') || '#'})`;
+        if (tag === 'br') return '\n';
+
+
+        // 10. 平滑透傳
+        return walkZaiChildren(node);
+    }
+
+
+    function walkZaiChildren(node) {
+        let res = '';
+        node.childNodes.forEach(c => {
+            res += parseZaiProseToMarkdown(c);
+        });
+        return res;
+    }
+
+
+    // ==========================================
+    // 6. 平台適配器 (Adapters Pattern - 10 大站點陣容)
+    // ==========================================
+    const Adapters = {
+        ChatGPT: {
+            id: 'chatgpt',
+            name: 'ChatGPT',
+            isMatch: () => location.hostname.includes('chatgpt.com') || location.hostname.includes('openai.com'),
+            getAiNodes: () => {
+                const rawAssistantNodes = Array.from(document.querySelectorAll('[data-message-author-role="assistant"]'));
+                return rawAssistantNodes.filter(node => {
+                    return node.innerText && node.innerText.trim().length > 0;
+                }).map(node => {
+                    return node.querySelector('.markdown') || node;
+                });
+            },
+            getUserNodes: () => {
+                const rawUserNodes = Array.from(document.querySelectorAll('[data-message-author-role="user"]'));
+                return rawUserNodes.filter(node => node.innerText && node.innerText.trim().length > 0);
+            },
+            cleanNode: (node) => {
+                const clone = node.cloneNode(true);
+                clone.querySelectorAll('.katex').forEach(katexEl => {
+                    const texAnno = katexEl.querySelector('annotation[encoding="application/x-tex"]');
+                    if (texAnno) {
+                        const isDisplay = katexEl.classList.contains('katex-display') || katexEl.parentElement?.classList.contains('katex-display');
+                        const tex = texAnno.textContent.trim();
+                        const textNode = document.createTextNode(isDisplay ? `\n$$\n${tex}\n$$\n` : ` $${tex}$ `);
+                        const target = (katexEl.parentElement && katexEl.parentElement.classList.contains('katex-display')) ? katexEl.parentElement : katexEl;
+                        target.parentNode.replaceChild(textNode, target);
+                    }
+                });
+
+
+                clone.querySelectorAll('[data-testid*="attachment"], [class*="attachment"]').forEach(attEl => {
+                    const title = attEl.innerText.trim();
+                    const textNode = document.createTextNode(`\n[📎 附加檔案: ${title || '文字附件'}]\n`);
+                    attEl.parentNode.replaceChild(textNode, attEl);
+                });
+
+
+                cleanUniversalNoise(clone);
+                return clone;
+            }
+        },
+        DeepSeek: {
+            id: 'deepseek',
+            name: 'DeepSeek',
+            isMatch: () => location.hostname.includes('deepseek.com'),
+            getAiNodes: () => {
+                const candidates = Array.from(document.querySelectorAll('.ds-markdown, .ds-assistant-message-main-content'));
+                return candidates.filter(node => {
+                    const isGreeting = node.closest('.ds-greeting') || node.classList.contains('ds-greeting');
+                    const hasText = node.innerText && node.innerText.trim().length > 0;
+                    return !isGreeting && hasText;
+                });
+            },
+            getUserNodes: () => {
+                const nodes = Array.from(document.querySelectorAll('.ds-user-message, [class*="user-message"], [class*="user-content"]'));
+                return nodes.filter(n => n.innerText && n.innerText.trim().length > 0);
+            },
+            cleanNode: (node) => {
+                const clone = node.cloneNode(true);
+                cleanUniversalNoise(clone);
+                clone.querySelectorAll('button, svg, .ds-icon').forEach(el => el.remove());
+                return clone;
+            }
+        },
+        Qwen: {
+            id: 'qwen',
+            name: '通義千問',
+            isMatch: () => location.hostname.includes('qwen.ai') || location.hostname.includes('aliyun.com'),
+            getAiNodes: () => {
+                const rawNodes = Array.from(document.querySelectorAll('.response-message-content, [class*="response-message-content"], .markdown-body'));
+                return rawNodes.filter(node => {
+                    const isUserChild = node.closest('.user-message-content, [class*="user-message"]');
+                    const isWelcome = node.closest('.welcome-card, [class*="welcome"]');
+                    const isActionBar = node.closest('[class*="action"], [class*="toolbar"], [class*="footer"]');
+                    const hasText = node.innerText && node.innerText.trim().length > 0;
+                    return !isUserChild && !isWelcome && !isActionBar && hasText;
+                });
+            },
+            getUserNodes: () => {
+                const rawNodes = Array.from(document.querySelectorAll('.user-message-content, [class*="user-message-content"]'));
+                return rawNodes.filter(node => node.innerText && node.innerText.trim().length > 0);
+            },
+            cleanNode: (node) => {
+                const clone = node.cloneNode(true);
+                cleanUniversalNoise(clone);
+                const unwantedSelectors = [
+                    '.think', '.reasoning', '[class*="think"]', '[class*="reasoning"]'
+                ];
+                unwantedSelectors.forEach(sel => {
+                    clone.querySelectorAll(sel).forEach(el => el.remove());
+                });
+                return clone;
+            }
+        },
+        Kimi: {
+            id: 'kimi',
+            name: 'Kimi',
+            isMatch: () => location.hostname.includes('kimi.ai') || location.hostname.includes('moonshot.cn') || location.hostname.includes('kimi.com'),
+            getAiNodes: () => {
+                const rawSegments = Array.from(document.querySelectorAll('.segment-assistant'));
+                const validNodes = [];
+                rawSegments.forEach(s => {
+                    const isRecommend = s.closest('.chat-recommend-prompt') || s.querySelector('.chat-recommend-prompt');
+                    if (isRecommend) return;
+
+
+                    const content = s.querySelector('.segment-content') || s;
+                    const text = content.innerText ? content.innerText.trim() : '';
+                    if (text.length > 0) {
+                        validNodes.push(content);
+                    }
+                });
+                return validNodes;
+            },
+            getUserNodes: () => {
+                const rawNodes = Array.from(document.querySelectorAll('.segment-user'));
+                return rawNodes.map(s => s.querySelector('.segment-content') || s).filter(n => n.innerText && n.innerText.trim().length > 0);
+            },
+            cleanNode: (node) => {
+                const clone = node.cloneNode(true);
+                cleanUniversalNoise(clone);
+                const unwantedSelectors = [
+                    '.toolcall-container', '.thinking-container', '.block-container',
+                    '.segment-assistant-actions-content', '.table-action-btn',
+                    '[class*="table-tool"]', '[class*="table-header"]'
+                ];
+                unwantedSelectors.forEach(sel => {
+                    clone.querySelectorAll(sel).forEach(el => el.remove());
+                });
+                return clone;
+            }
+        },
+        Zhipu: {
+            id: 'zhipu',
+            name: '智譜',
+            isMatch: () => location.hostname.includes('chatglm.cn') || location.hostname.includes('bigmodel.cn'),
+            getAiNodes: () => {
+                const items = Array.from(document.querySelectorAll('.chat-content .chat-item, .chat-item, [class*="chat-item"]'));
+                const aiItems = items.filter(it => {
+                    if (it.closest(`#${UI_CONTAINER_ID}`) || it.closest(`#${FLOATING_ORB_ID}`)) return false;
+                    const isUser = it.classList.contains('user') || it.querySelector('.user-msg, [class*="user-icon"]');
+                    return !isUser;
+                });
+
+
+                const nodes = [];
+                aiItems.forEach(it => {
+                    const content = it.querySelector('.content-wrap, .markdown-body, [class*="content"]') || it;
+                    if (content.innerText && content.innerText.trim().length > 0) {
+                        nodes.push(content);
+                    }
+                });
+                return nodes;
+            },
+            getUserNodes: () => {
+                const items = Array.from(document.querySelectorAll('.chat-content .chat-item, .chat-item, [class*="chat-item"]'));
+                const userItems = items.filter(it => {
+                    return it.classList.contains('user') || it.querySelector('.user-msg, [class*="user-icon"]');
+                });
+                return userItems.filter(n => n.innerText && n.innerText.trim().length > 0);
+            },
+            getMarkdownAsync: async (node) => {
+                try {
+                    const copyBtns = Array.from(document.querySelectorAll('.chat-content .chat-item:last-child .answer-info-right span[name*="复制"], .answer-info-right .icon-copy, .chat-item:last-child [class*="copy"]'));
+                    if (copyBtns.length > 0) {
+                        const targetBtn = copyBtns[copyBtns.length - 1];
+                        targetBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                        await new Promise(r => setTimeout(r, 150));
+                        if (navigator.clipboard && navigator.clipboard.readText) {
+                            const clipText = await navigator.clipboard.readText();
+                            if (clipText && clipText.trim().length > 0) {
+                                return sanitizeMarkdownArtifacts(clipText);
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.warn('⚠️ [AI Copy] 智譜原生代理複製異常，降級至 DOM 轉譯:', err);
+                }
+                return domToMarkdown(node, Adapters.Zhipu.cleanNode);
+            },
+            cleanNode: (node) => {
+                const clone = node.cloneNode(true);
+                cleanUniversalNoise(clone);
+                const unwanted = [
+                    '.thinking-box', '.think-container', '.tool-call-wrap',
+                    '.answer-info-right', '.code-lang-label', '.copy-btn'
+                ];
+                unwanted.forEach(sel => clone.querySelectorAll(sel).forEach(el => el.remove()));
+                return clone;
+            }
+        },
+        AiStudio: {
+            id: 'aistudio',
+            name: 'Gemini',
+            isMatch: () => location.hostname.includes('aistudio.google.com'),
+            getAiNodes: () => {
+                const candidates = Array.from(document.querySelectorAll('ms-chat-turn, [data-turn-role="Model"], ms-prompt-renderer ms-chat-turn'));
+                const modelNodes = [];
+
+
+                candidates.forEach(el => {
+                    if (el.closest(`#${UI_CONTAINER_ID}`) || el.closest(`#${FLOATING_ORB_ID}`) || el.id === UI_CONTAINER_ID) return;
+
+
+                    const parentTurn = el.closest('ms-chat-turn') || el.closest('[data-turn-role="Model"]') || el;
+                    const role = parentTurn.getAttribute('data-turn-role') || parentTurn.getAttribute('data-role');
+                    if (role && role.toLowerCase() === 'user') return;
+
+
+                    if (!modelNodes.includes(parentTurn) && parentTurn.innerText && parentTurn.innerText.trim().length > 0) {
+                        modelNodes.push(parentTurn);
+                    }
+                });
+
+
+                return modelNodes;
+            },
+            getUserNodes: () => [],
+            getMarkdownAsync: async (node) => {
+                const settings = globalConfig.aiStudioSettings || DEFAULT_CONFIG.aiStudioSettings;
+                const engine = settings.primaryEngine || 'native_menu';
+
+
+                if (engine === 'native_menu') {
+                    const menuMd = await tryAiStudioNativeMenuCopy();
+                    if (menuMd && menuMd.trim().length > 0) return sanitizeMarkdownArtifacts(menuMd);
+                    console.warn('⚠️ [AI Copy] 原生選單代理失敗，降級至模擬編輯...');
+                }
+
+
+                if (engine === 'pencil_edit' || engine === 'native_menu') {
+                    const editMd = await getAiStudioLastTurnMarkdown();
+                    if (editMd && editMd.trim().length > 0) return sanitizeMarkdownArtifacts(editMd);
+                    console.warn('⚠️ [AI Copy] 模擬編輯提取失敗，降級至 DOM 轉譯...');
+                }
+
+
+                return domToMarkdown(node, Adapters.AiStudio.cleanNode);
+            },
+            cleanNode: (node) => {
+                const clone = node.cloneNode(true);
+                cleanUniversalNoise(clone);
+                const unwantedSelectors = [
+                    'ms-turn-actions', '.turn-actions', '.run-button', 'ms-chat-turn-options',
+                    '[data-turn-role="User"]', '.user-turn-header', '.thumb-container'
+                ];
+                unwantedSelectors.forEach(sel => {
+                    clone.querySelectorAll(sel).forEach(el => el.remove());
+                });
+                return clone;
+            }
+        },
+        Mistral: {
+            id: 'mistral',
+            name: 'Mistral',
+            isMatch: () => location.hostname.includes('console.mistral.ai'),
+            getAiNodes: () => {
+                const proseCandidates = Array.from(document.querySelectorAll('[role="article"] .prose, div.prose.max-w-none, .prose'));
+                const validNodes = proseCandidates.filter(el => {
+                    if (el.closest(`#${UI_CONTAINER_ID}`) || el.closest(`#${FLOATING_ORB_ID}`)) return false;
+                    const text = el.innerText ? el.innerText.trim() : '';
+                    return text.length > 0;
+                });
+                return validNodes;
+            },
+            getUserNodes: () => [],
+            cleanNode: (node) => {
+                const clone = node.cloneNode(true);
+                cleanUniversalNoise(clone);
+                clone.querySelectorAll('button[aria-label*="Copy code"], button[aria-label="Copy code to clipboard"]').forEach(b => b.remove());
+                clone.querySelectorAll('div, span, p').forEach(el => {
+                    if (el.children.length === 0 && (el.innerText || '').trim() === 'Assistant') {
+                        el.remove();
+                    }
+                });
+                return clone;
+            }
+        },
+        Perplexity: {
+            id: 'perplexity',
+            name: 'Perplexity',
+            isMatch: () => location.hostname.includes('perplexity.ai'),
+            getAiNodes: () => {
+                const candidates = Array.from(document.querySelectorAll('div.prose[data-renderer="lm"], .prose.dark\\:prose-invert, [data-testid*="answer"], div.prose'));
+                return candidates.filter(el => {
+                    if (el.closest(`#${UI_CONTAINER_ID}`) || el.closest(`#${FLOATING_ORB_ID}`)) return false;
+                    const isUser = el.closest('[class*="user-bubble"], [class*="query"], .group\\/user-bubble');
+                    const text = el.innerText ? el.innerText.trim() : '';
+                    return !isUser && text.length > 0;
+                });
+            },
+            getUserNodes: () => {
+                const nodes = Array.from(document.querySelectorAll('[class*="user-bubble"], div.group\\/user-bubble, div[class*="query"]'));
+                return nodes.filter(n => n.innerText && n.innerText.trim().length > 0);
+            },
+            cleanNode: (node) => {
+                const clone = node.cloneNode(true);
+                cleanUniversalNoise(clone);
+                clone.querySelectorAll('[data-testid*="citation"], .citation, [class*="citation"]').forEach(el => el.remove());
+                return clone;
+            }
+        },
+        Zai: {
+            id: 'zai',
+            name: 'Z.AI',
+            isMatch: () => location.hostname.includes('chat.z.ai'),
+            getAiNodes: () => {
+                const candidates = Array.from(document.querySelectorAll('.chat-assistant .markdown-prose, #response-content-container, div.chat-assistant, .chat-assistant'));
+                return candidates.filter(el => {
+                    if (el.closest(`#${UI_CONTAINER_ID}`) || el.closest(`#${FLOATING_ORB_ID}`)) return false;
+                    const isUser = el.closest('.chat-user, .user-message') || el.classList.contains('chat-user');
+                    const text = el.innerText ? el.innerText.trim() : '';
+                    return !isUser && text.length > 0;
+                });
+            },
+            getUserNodes: () => {
+                const nodes = Array.from(document.querySelectorAll('div.user-message .chat-user.markdown-prose, div.user-message, .chat-user'));
+                return nodes.filter(n => n.innerText && n.innerText.trim().length > 0);
+            },
+            getMarkdownAsync: async (node) => {
+                try {
+                    const allButtons = Array.from(document.querySelectorAll('button'));
+                    const validButtons = allButtons.filter(b => {
+                        if (b.closest('pre')) return false;
+                        const cName = b.className || '';
+                        if (typeof cName === 'string' && (cName.includes('copy-code') || cName.includes('absolute'))) return false;
+
+
+                        const pathEl = b.querySelector('path');
+                        if (!pathEl) return false;
+                        const d = pathEl.getAttribute('d') || '';
+                        return d.startsWith('M12.668');
+                    });
+
+
+                    if (validButtons.length > 0) {
+                        const targetBtn = validButtons[validButtons.length - 1];
+                        targetBtn.click();
+                        await new Promise(r => setTimeout(r, 200));
+
+
+                        if (navigator.clipboard && navigator.clipboard.readText) {
+                            const clipText = await navigator.clipboard.readText();
+                            if (clipText && clipText.trim().length > 0) {
+                                return sanitizeMarkdownArtifacts(clipText);
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.warn('⚠️ [AI Copy] Z.AI 原生代理複製失敗，降級至 DOM 轉譯:', err);
+                }
+                return domToMarkdown(node, Adapters.Zai.cleanNode);
+            },
+            cleanNode: (node) => {
+                const clone = node.cloneNode(true);
+                cleanUniversalNoise(clone);
+                clone.querySelectorAll('.copy-code-button, button.invisible, button.group-hover\\:visible').forEach(el => el.remove());
+                return clone;
+            }
+        },
+        MiniMax: {
+            id: 'minimax',
+            name: 'MiniMax',
+            isMatch: () => location.hostname.includes('agent.minimax.io') || location.hostname.includes('minimax.io'),
+            getAiNodes: () => {
+                const rawNodes = Array.from(document.querySelectorAll('[data-role="assistant"] .mavis-chat-markdown-flow, [data-testid="message-item"][data-role="assistant"] .mavis-chat-markdown-flow, .mavis-chat-markdown-flow'));
+                return rawNodes.filter(node => {
+                    if (node.closest(`#${UI_CONTAINER_ID}`) || node.closest(`#${FLOATING_ORB_ID}`)) return false;
+                    return node.innerText && node.innerText.trim().length > 0;
+                });
+            },
+            getUserNodes: () => {
+                const rawNodes = Array.from(document.querySelectorAll('.message-container-user-text, [data-role="user"] .message-container-user-text'));
+                return rawNodes.filter(node => node.innerText && node.innerText.trim().length > 0);
+            },
+            cleanNode: (node) => {
+                const clone = node.cloneNode(true);
+                cleanUniversalNoise(clone);
+                clone.querySelectorAll('button, svg, .ant-dropdown, [class*="action-bar"]').forEach(el => el.remove());
+                return clone;
+            }
+        }
+    };
+
+
+    function getCurrentAdapter() {
+        if (Adapters.ChatGPT.isMatch()) return Adapters.ChatGPT;
+        if (Adapters.DeepSeek.isMatch()) return Adapters.DeepSeek;
+        if (Adapters.Qwen.isMatch()) return Adapters.Qwen;
+        if (Adapters.Kimi.isMatch()) return Adapters.Kimi;
+        if (Adapters.Zhipu.isMatch()) return Adapters.Zhipu;
+        if (Adapters.AiStudio.isMatch()) return Adapters.AiStudio;
+        if (Adapters.Mistral.isMatch()) return Adapters.Mistral;
+        if (Adapters.Perplexity.isMatch()) return Adapters.Perplexity;
+        if (Adapters.Zai.isMatch()) return Adapters.Zai;
+        if (Adapters.MiniMax.isMatch()) return Adapters.MiniMax;
+        return null;
+    }
+
+
+    // ==========================================
+    // 7. 切片雙引擎、Z.AI 與 MiniMax 預覽提取管線
+    // ==========================================
+    function isZaiPreviewActive() {
+        // 1. Z.AI 右側抽屜 Markdown Prose
+        const proseViewers = Array.from(document.querySelectorAll('.markdown-prose, [class*="markdown-prose"]'));
+        for (const p of proseViewers) {
+            const rect = p.getBoundingClientRect();
+            if (rect.left > window.innerWidth * 0.35 && rect.width > 200) {
+                const txt = (p.innerText || p.textContent || '').trim();
+                if (txt.length > 50) return true;
+            }
+        }
+
+
+        // 2. DOCX Viewer
+        const docxViewer = document.querySelector('.DocxViewer, div.docx-wrapper, section.docx');
+        if (docxViewer) {
+            const rect = docxViewer.getBoundingClientRect();
+            if (rect.width > 100 && rect.height > 100) return true;
+        }
+
+
+        // 3. CodeMirror 6
+        const cmViewers = Array.from(document.querySelectorAll('.cm-editor, .cm-content'));
+        for (const cm of cmViewers) {
+            const rect = cm.getBoundingClientRect();
+            if (rect.width > 200 && rect.height > 200 && rect.right > window.innerWidth * 0.5) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+
+    function isMiniMaxPreviewActive() {
+        const previewers = Array.from(document.querySelectorAll('div[data-testid="previewer-content"], div[data-testid="markdown-view"]'));
+        for (const p of previewers) {
+            const rect = p.getBoundingClientRect();
+            if (rect.width > 200 && rect.height > 200) return true;
+        }
+        return false;
+    }
+
+
+    function parseDocxToMarkdown(viewerEl) {
+        if (!viewerEl) return '';
+        const clone = viewerEl.cloneNode(true);
+        cleanUniversalNoise(clone);
+
+
+        function walkDocxNode(node) {
+            if (!node) return '';
+            if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+            if (node.nodeType !== Node.ELEMENT_NODE) return '';
+
+
+            const tag = node.tagName.toLowerCase();
+            if (tag === 'table') {
+                return parseTableToMarkdown(node);
+            }
+            if (/^h[1-6]$/.test(tag)) {
+                const level = parseInt(tag[1], 10);
+                return `\n\n${'#'.repeat(level)} ${walkDocxChildren(node).trim()}\n\n`;
+            }
+            if (tag === 'p' || tag === 'div') {
+                const text = walkDocxChildren(node).trim();
+                return text ? `\n\n${text}\n\n` : '';
+            }
+            if (tag === 'br') return '\n';
+            if (tag === 'ul' || tag === 'ol') {
+                const isOrdered = tag === 'ol';
+                let itemsMd = '';
+                let index = 1;
+                Array.from(node.children).forEach(child => {
+                    if (child.tagName.toLowerCase() === 'li') {
+                        itemsMd += `${isOrdered ? `${index++}. ` : '* '}${walkDocxChildren(child).trim()}\n`;
+                    }
+                });
+                return `\n\n${itemsMd}\n\n`;
+            }
+            if (tag === 'strong' || tag === 'b') return `**${walkDocxChildren(node)}**`;
+            if (tag === 'em' || tag === 'i') return `*${walkDocxChildren(node)}*`;
+            return walkDocxChildren(node);
+        }
+
+
+        function walkDocxChildren(node) {
+            let res = '';
+            node.childNodes.forEach(c => { res += walkDocxNode(c); });
+            return res;
+        }
+
+
+        const rawMd = walkDocxNode(clone);
+        return rawMd.replace(/\n{3,}/g, '\n\n').trim();
+    }
+
+
+    function getZaiPreviewText() {
+        // 1. 優先檢索右側抽屜 Markdown Prose
+        const proseViewers = Array.from(document.querySelectorAll('.markdown-prose, [class*="markdown-prose"]'));
+        for (const p of proseViewers) {
+            const rect = p.getBoundingClientRect();
+            if (rect.left > window.innerWidth * 0.35 && rect.width > 200) {
+                const md = parseZaiProseToMarkdown(p).replace(/\n{3,}/g, '\n\n').trim();
+                if (md && md.length > 30) return md;
+            }
+        }
+
+
+        // 2. DOCX Viewer
+        const docxViewer = document.querySelector('.DocxViewer, div.docx-wrapper, section.docx');
+        if (docxViewer) {
+            const rect = docxViewer.getBoundingClientRect();
+            if (rect.width > 100 && rect.height > 100) {
+                const mdText = parseDocxToMarkdown(docxViewer);
+                return mdText ? mdText.trim() : '';
+            }
+        }
+
+
+        // 3. CodeMirror 6
+        const cmViewers = Array.from(document.querySelectorAll('.cm-editor, .cm-content'));
+        for (const cm of cmViewers) {
+            const rect = cm.getBoundingClientRect();
+            if (rect.width > 200 && rect.height > 200 && rect.right > window.innerWidth * 0.5) {
+                const cmLines = Array.from(cm.querySelectorAll('.cm-line'));
+                let codeText = '';
+                if (cmLines.length > 0) {
+                    codeText = cmLines.map(ln => ln.textContent || '').join('\n');
+                } else {
+                    codeText = cm.innerText || cm.textContent || '';
+                }
+                return codeText ? codeText.trim() : '';
+            }
+        }
+        return '';
+    }
+
+
+    function closeZaiPreviewDrawer() {
+        const candidates = Array.from(document.querySelectorAll('button, [role="button"]'));
+        const closeBtn = candidates.find(btn => {
+            const rect = btn.getBoundingClientRect();
+            if (rect.left <= window.innerWidth * 0.5 || rect.top > 120) return false;
+            const txt = (btn.textContent || btn.getAttribute('aria-label') || btn.getAttribute('title') || '').trim();
+            if (/close|關閉|关闭|exit/i.test(txt)) return true;
+            const svgPath = btn.querySelector('svg path');
+            if (svgPath) {
+                const d = svgPath.getAttribute('d') || '';
+                if (d.includes('M6 18') || d.includes('M18 6') || d.includes('19 6.41') || d.includes('6.41 19')) {
+                    return true;
+                }
+            }
+            return false;
+        });
+        if (closeBtn) {
+            closeBtn.click();
+            return true;
+        }
+        return false;
+    }
+
+
+    async function getZaiDeliverableText() {
+        const isDrawerOpen = isZaiPreviewActive();
+
+
+        // 1. 定位最新回覆輪次 (Last AI Turn)
+        const aiNodes = Adapters.Zai.getAiNodes();
+        let lastTurnContainer = null;
+        if (aiNodes.length > 0) {
+            const lastAiNode = aiNodes[aiNodes.length - 1];
+            lastTurnContainer = lastAiNode.closest('.chat-assistant, [class*="chat-assistant"]') || lastAiNode.parentElement;
+        }
+
+
+        // 2. 檢索最新一輪內部是否具備預覽按鈕
+        let targetBtn = null;
+        if (lastTurnContainer) {
+            const allButtons = Array.from(lastTurnContainer.querySelectorAll('button, [role="button"]'));
+            const previewButtons = allButtons.filter(b => {
+                const txt = (b.textContent || '').trim();
+                const aria = b.getAttribute('aria-label') || '';
+                const title = b.getAttribute('title') || '';
+                return /^(预览|預覽)$/i.test(txt) || title.includes('预览') || title.includes('預覽') || aria.includes('预览') || aria.includes('預覽');
+            });
+            if (previewButtons.length > 0) {
+                targetBtn = previewButtons[previewButtons.length - 1];
+            }
+        }
+
+
+        // 3. 判定無成果物出口：若無按鈕且抽屜未開，判定此輪為純文字對話，返回 null
+        if (!targetBtn && !isDrawerOpen) {
+            return null;
+        }
+
+
+        // 4. 舊抽屜銷毀清場：若抽屜開啟且有新預覽按鈕，先關閉並讓步 250ms
+        if (isDrawerOpen && targetBtn) {
+            closeZaiPreviewDrawer();
+            await new Promise(r => setTimeout(r, 250));
+        }
+
+
+        // 5. 抽屜已開啟且無新按鈕：直接提取當前抽屜內容
+        if (!targetBtn && isDrawerOpen) {
+            const currentText = getZaiPreviewText();
+            return (currentText && currentText.trim()) ? currentText : null;
+        }
+
+
+        // 6. 觸發開門與輪詢
+        showToast('⏳ 正在自動開啟 Z.AI 成果物抽屜...');
+        targetBtn.click();
+
+
+        const startTime = Date.now();
+        let text = '';
+        while (Date.now() - startTime < 10000) {
+            await new Promise(r => setTimeout(r, 200));
+            text = getZaiPreviewText();
+            if (text && text.length > 50) {
+                break;
+            }
+        }
+
+
+        if (text && text.length > 0) {
+            await new Promise(r => setTimeout(r, 200));
+        }
+
+
+        const finalText = text || getZaiPreviewText();
+        return (finalText && finalText.trim()) ? finalText : null;
+    }
+
+
+    async function handleZaiPreviewAction() {
+        const text = await getZaiDeliverableText();
+        if (!text || !text.trim()) {
+            showToast('⚠️ 右側無檔案預覽，已為您複製最後對話內容！', false, 2600);
+            await handleCopyAction('SINGLE_CLEAN');
+            return;
+        }
+        copyToClipboard(text);
+        showToast(`✅ 已複製右側預覽 (共 ${text.length} 字)！`);
+    }
+
+
+    function injectMiniMaxFiberBridge() {
+        if (document.getElementById('minimax-fiber-bridge')) return;
+        const script = document.createElement('script');
+        script.id = 'minimax-fiber-bridge';
+        script.textContent = `(${function () {
+            window.addEventListener('__MINIMAX_EXTRACT_REQUEST__', () => {
+                const root = document.querySelector('div[data-testid="markdown-view"]') || document.querySelector('div[data-testid="previewer-content"]');
+                if (!root) {
+                    window.dispatchEvent(new CustomEvent('__MINIMAX_EXTRACT_RESPONSE__', {
+                        detail: { success: false, markdown: '', fromFiber: false, msg: '未偵測到成果物容器' }
+                    }));
+                    return;
+                }
+
+                let rawMarkdown = '';
+                let fromFiber = false;
+
+                try {
+                    const fiberKey = Object.keys(root).find(k => k.startsWith('__reactFiber$'));
+                    if (fiberKey) {
+                        let current = root[fiberKey];
+                        let depth = 0;
+                        while (current && depth < 30) {
+                            if (current.memoizedProps) {
+                                for (const key of Object.keys(current.memoizedProps)) {
+                                    const val = current.memoizedProps[key];
+                                    if (typeof val === 'string' && val.length > 100 && /(^#|\n#|\*\*|> )/.test(val)) {
+                                        rawMarkdown = val;
+                                        fromFiber = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (fromFiber) break;
+
+                            if (current.memoizedState) {
+                                let s = current.memoizedState;
+                                while (s) {
+                                    if (typeof s.memoizedState === 'string' && s.memoizedState.length > 100 && /(^#|\n#|\*\*|> )/.test(s.memoizedState)) {
+                                        rawMarkdown = s.memoizedState;
+                                        fromFiber = true;
+                                        break;
+                                    }
+                                    s = s.next;
+                                }
+                            }
+                            if (fromFiber) break;
+
+                            current = current.return;
+                            depth++;
+                        }
+                    }
+                } catch (err) {
+                    console.warn('[AI Copy] Fiber 提取異常:', err);
+                }
+
+                if (!rawMarkdown) {
+                    rawMarkdown = (root.innerText || root.textContent || '').trim();
+                }
+
+                window.dispatchEvent(new CustomEvent('__MINIMAX_EXTRACT_RESPONSE__', {
+                    detail: { success: true, markdown: rawMarkdown, fromFiber: fromFiber, msg: '' }
+                }));
+            });
+        }.toString()})();`;
+        (document.head || document.documentElement).appendChild(script);
+    }
+
+
+    async function getMiniMaxDeliverableText() {
+        injectMiniMaxFiberBridge();
+        const isDrawerOpen = isMiniMaxPreviewActive();
+
+
+        if (isDrawerOpen) {
+            const closeBtn = document.querySelector('button[data-testid="file-tab-close"], div[data-testid="file-panel-close-button"]');
+            if (closeBtn) {
+                closeBtn.click();
+                await new Promise(r => setTimeout(r, 200));
+            }
+        }
+
+
+        const allButtons = Array.from(document.querySelectorAll('button'));
+        const openButtons = allButtons.filter(b => (b.textContent || '').includes('Open file'));
+
+
+        if (openButtons.length === 0) return null;
+
+
+        const matchedBtn = openButtons.slice().reverse().find(b => {
+            const card = b.closest('[class*="card"], [class*="message"], [data-role="assistant"]') || b.parentElement;
+            const txt = card ? card.textContent : '';
+            return /QA|審查|驗收|報告|MD|Artifact/i.test(txt);
+        });
+
+
+        const targetBtn = matchedBtn || openButtons[openButtons.length - 1];
+        showToast('⏳ 正在自動開啟成果物抽屜...');
+        targetBtn.click();
+
+
+        const startTime = Date.now();
+        let isReady = false;
+
+
+        while (Date.now() - startTime < 10000) {
+            const drawer = document.querySelector('div[data-testid="markdown-view"], div[data-testid="previewer-content"]');
+            if (drawer) {
+                const txt = (drawer.innerText || drawer.textContent || '').trim();
+                if (txt.length > 30) {
+                    isReady = true;
+                    break;
+                }
+            }
+            await new Promise(r => setTimeout(r, 200));
+        }
+
+
+        if (!isReady) return null;
+
+
+        let extractResult = null;
+        try {
+            extractResult = await new Promise((resolve) => {
+                const timer = setTimeout(() => {
+                    window.removeEventListener('__MINIMAX_EXTRACT_RESPONSE__', onResponse);
+                    resolve({ success: false, markdown: '', fromFiber: false, msg: '提取超時' });
+                }, 3000);
+
+
+                function onResponse(e) {
+                    clearTimeout(timer);
+                    window.removeEventListener('__MINIMAX_EXTRACT_RESPONSE__', onResponse);
+                    resolve(e.detail || { success: false, markdown: '', fromFiber: false });
+                }
+
+
+                window.addEventListener('__MINIMAX_EXTRACT_RESPONSE__', onResponse);
+                window.dispatchEvent(new CustomEvent('__MINIMAX_EXTRACT_REQUEST__'));
+            });
+        } catch (e) {
+            console.warn('⚠️ [AI Copy] Fiber 橋接通訊異常:', e);
+        }
+
+
+        let contentText = '';
+        let fromFiber = false;
+
+
+        if (extractResult && extractResult.success && extractResult.markdown) {
+            contentText = extractResult.markdown;
+            fromFiber = !!extractResult.fromFiber;
+        } else {
+            const fallbackEl = document.querySelector('div[data-testid="markdown-view"], div[data-testid="previewer-content"]');
+            contentText = fallbackEl ? (fallbackEl.innerText || fallbackEl.textContent || '').trim() : '';
+        }
+
+
+        if (contentText && contentText.trim()) {
+            await new Promise(r => setTimeout(r, 1800));
+        }
+
+
+        return { contentText, fromFiber };
+    }
+
+
+    async function handleMiniMaxDeliverableCopyAction() {
+        const result = await getMiniMaxDeliverableText();
+        if (!result || !result.contentText || !result.contentText.trim()) {
+            showToast('⚠️ 未能提取到有效的成果物內容！', true, 3000);
+            return;
+        }
+
+
+        const { contentText, fromFiber } = result;
+        // 綠鍵純淨化回歸，不拼接 Profile 前後綴
+        copyToClipboard(contentText.trim());
+        showToast(`✅ 已成功複製成果物 (${fromFiber ? '無損 Raw MD' : '降級文本'}，共 ${contentText.length} 字)！`);
+    }
+
+
+    async function getAssistantMarkdownText(adapter) {
+        const aiNodes = adapter.getAiNodes();
+        if (aiNodes.length === 0) return '';
+        const lastAi = aiNodes[aiNodes.length - 1];
+
+
+        let markdownText = '';
+        if (typeof adapter.getMarkdownAsync === 'function') {
+            markdownText = await adapter.getMarkdownAsync(lastAi);
+        } else {
+            markdownText = domToMarkdown(lastAi, adapter.cleanNode);
+        }
+
+
+        if (!markdownText || !markdownText.trim()) {
+            markdownText = adapter.cleanNode(lastAi).innerText.trim();
+        }
+        return markdownText;
+    }
+
+
+    function executeSingleMatchSlice(fullText, singlePattern, isCodeBlockTarget) {
+        if (!singlePattern || !singlePattern.trim()) return null;
+        try {
+            let patternStr = singlePattern.trim();
+            let flagsStr = 'i';
+
+
+            if (patternStr.startsWith('/') && patternStr.length > 1) {
+                const lastSlashIndex = findRegexClosingSlash(patternStr);
+                if (lastSlashIndex > 0) {
+                    flagsStr = patternStr.substring(lastSlashIndex + 1);
+                    patternStr = patternStr.substring(1, lastSlashIndex);
+                }
+            }
+
+
+            // 代碼塊目標解耦 i 旗標，強制補齊 g
+            if (isCodeBlockTarget && !flagsStr.includes('g')) {
+                flagsStr += 'g';
+            }
+
+
+            let regex = new RegExp(patternStr, flagsStr);
+
+
+            if (isCodeBlockTarget && regex.global) {
+                const matches = Array.from(fullText.matchAll(regex));
+                if (matches.length > 0) {
+                    let maxLen = -1;
+                    let bestMatch = '';
+                    matches.forEach(m => {
+                        const candidate = (typeof m[1] !== 'undefined') ? m[1] : m[0];
+                        if (candidate && candidate.length > maxLen) {
+                            maxLen = candidate.length;
+                            bestMatch = candidate;
+                        }
+                    });
+                    if (maxLen >= 0) return bestMatch;
+                }
+            } else {
+                const match = fullText.match(regex);
+                if (match) {
+                    return (typeof match[1] !== 'undefined') ? match[1] : match[0];
+                }
+            }
+        } catch (err) {
+            console.warn('⚠️ [AI Copy] 切片正則解析異常:', err, singlePattern);
+        }
+        return null;
+    }
+
+
+    function executeMatchSlice(fullText, rawPattern, isCodeBlockTarget) {
+        if (!rawPattern || !rawPattern.trim()) return null;
+        if (rawPattern.includes('\n')) {
+            const lines = rawPattern.split('\n');
+            for (let line of lines) {
+                line = line.trim();
+                if (!line || line.startsWith('#') || line.startsWith('//')) continue;
+                const res = executeSingleMatchSlice(fullText, line, isCodeBlockTarget);
+                if (res !== null) return res;
+            }
+            return null;
+        }
+        return executeSingleMatchSlice(fullText, rawPattern, isCodeBlockTarget);
+    }
+
+
+    function sanitizeAffixText(text) {
+        if (!text) return '';
+        let result = text
+            .replace(/^\uFEFF/, '')
+            .replace(/\r\n/g, '\n')
+            .replace(/\r/g, '\n')
+            .replace(/\u00a0/g, ' ');
+
+
+        result = result.replace(/^[ \t]*[—―─_–-]{2,}[ \t]*$/gm, '---');
+        result = result.trimEnd();
+        result = result.replace(/[—―─]{1,2}-?$/g, '---');
+
+
+        if (result.length > 0) {
+            result += '\n\n';
+        }
+        return result;
+    }
+
+
+    async function resolveAffixContent(rawAffixStr, affixType = '前綴') {
+        if (typeof rawAffixStr !== 'string' || !rawAffixStr) return '';
+        const trimmed = rawAffixStr.trim();
+        if (!trimmed) return '';
+
+
+        const isUrl = /^[^\S\r\n]*https?:\/\/[^\s]+[^\S\r\n]*$/i.test(rawAffixStr);
+        if (!isUrl) {
+            return rawAffixStr;
+        }
+
+
+        showToast(`⏳ 正在從雲端載入${affixType}...`);
+        try {
+            const rawUrl = getGoogleDocRawUrl(trimmed);
+            const rawText = await fetchCloudData(rawUrl);
+
+
+            if (isHtmlResponse(rawText)) {
+                showToast(`⚠️ 雲端${affixType}檔案非共享狀態，已跳過！`, true);
+                return '';
+            }
+            return sanitizeAffixText(rawText);
+        } catch (err) {
+            console.warn(`⚠️ [AI Copy] 雲端${affixType}載入失敗:`, err);
+            showToast(`⚠️ 雲端${affixType}載入失敗，已跳過`, true);
+            return '';
+        }
+    }
+
+
+    async function handleSliceCopyAction(btnDef) {
+        const adapter = getCurrentAdapter();
+        if (!adapter) {
+            showToast('⚠️ 未辨識出目前運行的 AI 平台！', true);
+            return;
+        }
+
+
+        if (!btnDef || !btnDef.enabled) {
+            showToast('⚠️ 切片規則不存在或未啟用！', true);
+            return;
+        }
+
+
+        const fullText = await getAssistantMarkdownText(adapter);
+        if (!fullText || !fullText.trim()) {
+            showToast('⚠️ 未找到回覆內容！', true);
+            return;
+        }
+
+
+        const rawPattern = (btnDef.pattern || '').trim();
+        const rawPrefix = (typeof btnDef.prefix === 'string') ? btnDef.prefix : '';
+        const rawSuffix = (typeof btnDef.suffix === 'string') ? btnDef.suffix : '';
+
+
+        const resolvedPrefix = await resolveAffixContent(rawPrefix, '前綴');
+
+
+        let safePrefix = resolvedPrefix;
+        if (safePrefix && safePrefix.trim().length > 0 && !safePrefix.endsWith('\n')) {
+            safePrefix += '\n\n';
+        }
+
+
+        if (btnDef.autoDivider === true && safePrefix && safePrefix.trim().length > 0) {
+            const trimmedPrefix = safePrefix.trimEnd();
+            const prefixLines = trimmedPrefix.split('\n').filter(l => l.trim().length > 0);
+            const lastLine = prefixLines.length > 0 ? prefixLines[prefixLines.length - 1].trim() : '';
+            const dividerRegex = /^(?:[-=*_~—–─]{2,}|[-=*_~—–─]{2,}.+[-=*_~—–─]{2,})$/;
+
+
+            if (!dividerRegex.test(lastLine)) {
+                safePrefix = safePrefix.trimEnd() + '\n\n---\n\n';
+            }
+        }
+
+
+        let safeSuffix = rawSuffix;
+        if (safeSuffix === '\n' || safeSuffix === '\n\n') {
+            // 原樣保留純換行，不經 resolveAffixContent 避免被 trimEnd 抹除
+        } else if (safeSuffix) {
+            safeSuffix = await resolveAffixContent(safeSuffix, '後綴');
+            if (safeSuffix && safeSuffix.trim().length > 0 && !safeSuffix.startsWith('\n')) {
+                safeSuffix = '\n\n' + safeSuffix;
+            }
+        }
+
+
+        let finalSuffix = safeSuffix;
+        if (btnDef.id === 'm1_btn_3' && !finalSuffix) {
+            finalSuffix = '\n\n';
+        }
+
+
+        if (btnDef.mode === 'replace') {
+            let targetText = fullText;
+            if (rawPattern) {
+                try {
+                    let regex = null;
+                    if (rawPattern.startsWith('/') && rawPattern.length > 1) {
+                        const lastSlashIndex = findRegexClosingSlash(rawPattern);
+                        if (lastSlashIndex > 0) {
+                            const p = rawPattern.substring(1, lastSlashIndex);
+                            const f = rawPattern.substring(lastSlashIndex + 1);
+                            regex = new RegExp(p, f);
+                        } else {
+                            regex = new RegExp(rawPattern, 'gi');
+                        }
+                    } else {
+                        regex = new RegExp(rawPattern, 'gi');
+                    }
+                    targetText = fullText.replace(regex, btnDef.replaceValue || '');
+                } catch (e) {
+                    console.warn('⚠️ [AI Copy] 替換正則解析失敗:', e);
+                }
+            }
+            const finalPayload = `${safePrefix}${targetText.trim()}${finalSuffix}`;
+            copyToClipboard(finalPayload);
+            showToast(`🧹 已局部清洗：「${btnDef.name}」！`);
+            return;
+        }
+
+
+        let targetText = null;
+        let usedFallback = false;
+
+
+        if (rawPattern) {
+            targetText = executeMatchSlice(fullText, rawPattern, !!btnDef.isCodeBlockTarget);
+        }
+
+
+        if (targetText === null && btnDef.fallbackPattern && btnDef.fallbackPattern.trim()) {
+            targetText = executeMatchSlice(fullText, btnDef.fallbackPattern.trim(), !!btnDef.isCodeBlockTarget);
+            if (targetText !== null) {
+                usedFallback = true;
+            }
+        }
+
+
+        if (targetText !== null) {
+            const finalPayload = `${safePrefix}${targetText.trim()}${finalSuffix.endsWith('\n') ? finalSuffix : (finalSuffix + '\n\n')}`;
+            copyToClipboard(finalPayload);
+
+
+            if (safePrefix && safePrefix.trim()) {
+                showToast(`✂️ 已截取 (含專屬前綴)：「${btnDef.name}」！`);
+            } else if (usedFallback) {
+                showToast(`🛟 已由備援正則截取：「${btnDef.name}」！`);
+            } else {
+                showToast(`✂️ 已精準截取：「${btnDef.name}」！`);
+            }
+        } else {
+            const fallbackAction = globalConfig.aiStudioSettings?.fallbackAction || 'warn_block';
+            if (fallbackAction === 'warn_block') {
+                showToast(`🛑 截取失敗：未找到「${btnDef.name}」目標錨點！`, true, 4000);
+            } else if (fallbackAction === 'lenient_full') {
+                // 寬容降級雙換行保底
+                const finalPayload = `${safePrefix}${fullText.trim()}${finalSuffix.endsWith('\n') ? finalSuffix : (finalSuffix + '\n\n')}`;
+                copyToClipboard(finalPayload);
+                showToast(`⚠️ 未在回覆中找到目標錨點，已複製全量文本！`);
+            } else if (fallbackAction === 'custom_string') {
+                const placeholder = globalConfig.aiStudioSettings?.fallbackCustomText || '[ERROR: 錨點切片未命中]';
+                const finalPayload = `${safePrefix}${placeholder}${safeSuffix}`;
+                copyToClipboard(finalPayload);
+                showToast(`⚠️ 未命中目標錨點，已複製失敗佔位字串！`);
+            }
+        }
+    }
+
+
+    // ==========================================
+    // 7.1 跨站點採集多態提取 (Z.AI 智能階梯降級支援)
+    // ==========================================
+    async function extractSiteTextByAction(adapter, action) {
+        let rawText = null;
+
+
+        if (action === 'PREVIEW' || action === 'PREVIEW_CLEAN') {
+            if (adapter.id === 'zai') {
+                const deliverableText = await getZaiDeliverableText();
+                if (deliverableText && deliverableText.trim()) {
+                    rawText = deliverableText;
+                } else {
+                    // 平滑階梯降級提取最新對話
+                    rawText = await getAssistantMarkdownText(adapter);
+                }
+            } else if (adapter.id === 'minimax') {
+                const res = await getMiniMaxDeliverableText();
+                if (!res || !res.contentText || !res.contentText.trim()) {
+                    showToast('⚠️ MiniMax 成果物抽屜未開啟或加載逾時！', true);
+                    return null;
+                }
+                rawText = res.contentText.trim();
+            } else {
+                rawText = await getAssistantMarkdownText(adapter);
+            }
+        } else {
+            rawText = await getAssistantMarkdownText(adapter);
+        }
+
+
+        if (!rawText || !rawText.trim()) return null;
+
+
+        // 純淨模式：絕不附加前後綴
+        if (action === 'SINGLE_CLEAN' || action === 'PREVIEW_CLEAN') {
+            return rawText.trim();
+        }
+
+
+        // 一般模式 (SINGLE / PREVIEW)：裝配 Profile 前後綴
+        const activeProfile = globalConfig.profiles?.[globalConfig.activeProfileId];
+        let prefix = '';
+        let suffix = '\n\n';
+
+
+        if (activeProfile && activeProfile.enabled) {
+            if (activeProfile.enablePrefix !== false) {
+                const pText = (activeProfile.prefixes && activeProfile.prefixes[adapter.id]) || '';
+                prefix = pText ? (pText.endsWith('\n') ? pText : pText + '\n') : '';
+            }
+            if (activeProfile.enableSuffix !== false) {
+                suffix = (activeProfile.suffixes && activeProfile.suffixes[adapter.id]) ?? '\n\n';
+            }
+        }
+
+
+        return `${prefix}${rawText.trim()}${suffix}`;
+    }
+
+
+    async function handleCopyAction(mode) {
+        const adapter = getCurrentAdapter();
+        if (!adapter) {
+            showToast('⚠️ 未辨識出目前運行的 AI 平台！', true);
+            return;
+        }
+
+
+        const activeProfile = globalConfig.profiles?.[globalConfig.activeProfileId];
+        let prefix = '';
+        let suffix = '';
+
+
+        if (mode === 'SINGLE' || mode === 'FULL_THREAD') {
+            if (activeProfile && activeProfile.enabled) {
+                if (activeProfile.enablePrefix !== false) {
+                    const pText = (activeProfile.prefixes && activeProfile.prefixes[adapter.id]) || '';
+                    prefix = pText ? (pText.endsWith('\n') ? pText : pText + '\n') : '';
+                }
+                if (activeProfile.enableSuffix !== false) {
+                    suffix = (activeProfile.suffixes && activeProfile.suffixes[adapter.id]);
+                    if (typeof suffix === 'undefined') suffix = '\n\n';
+                }
+            }
+        }
+
+
+        if (mode === 'SINGLE' || mode === 'SINGLE_CLEAN') {
+            const markdownText = await getAssistantMarkdownText(adapter);
+            if (!markdownText || !markdownText.trim()) {
+                showToast(`⚠️ 未找到 ${adapter.name} 的回覆內容！`, true);
+                return;
+            }
+
+
+            let finalText = '';
+            if (mode === 'SINGLE_CLEAN') {
+                finalText = markdownText;
+            } else {
+                finalText = `${prefix}${markdownText}${suffix}`;
+            }
+
+
+            copyToClipboard(finalText);
+            const isClean = mode === 'SINGLE_CLEAN';
+            showToast(`✅ 已複製 ${adapter.name} ${isClean ? '乾淨回覆 (無前後綴)' : '最後回覆'}！${(!isClean && (prefix || suffix)) ? ' (含自訂格式)' : ''}`);
+
+
+        } else if (mode === 'FULL_THREAD') {
+            if (adapter.id === 'aistudio' || adapter.id === 'mistral') {
+                showToast(`⚠️ ${adapter.name} 專用模式僅支援複製最後回覆！`, true);
+                return;
+            }
+
+
+            const aiNodes = adapter.getAiNodes();
+            const userNodes = adapter.getUserNodes();
+
+
+            const allMessages = [];
+            userNodes.forEach(node => allMessages.push({ node, isUser: true }));
+            aiNodes.forEach(node => allMessages.push({ node, isUser: false }));
+
+
+            allMessages.sort((a, b) => (a.node.compareDocumentPosition(b.node) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1);
+
+
+            if (allMessages.length === 0) {
+                showToast('⚠️ 未找到對話內容！', true);
+                return;
+            }
+
+
+            let fullText = '';
+            for (const msg of allMessages) {
+                if (msg.isUser) {
+                    fullText += `### 👤 User:\n${msg.node.innerText.trim()}\n\n---\n\n`;
+                } else {
+                    let text = domToMarkdown(msg.node, adapter.cleanNode);
+                    if (!text || !text.trim()) text = adapter.cleanNode(msg.node).innerText.trim();
+                    fullText += `### 🤖 ${adapter.name}:\n${text}\n\n========================================\n\n`;
+                }
+            }
+
+
+            const body = fullText.trim();
+            const finalText = `${prefix}${body}${suffix}`;
+            copyToClipboard(finalText);
+            showToast(`✅ 已複製 ${adapter.name} 全對話歷史！${(prefix || suffix) ? ' (含自訂格式)' : ''}`);
+        }
+    }
+
+
+    // ==========================================
+    // 7.2 跨站點採集入庫、滿額自動總結與滾動更新管線
+    // ==========================================
+    async function handleCaptureAction() {
+        const adapter = getCurrentAdapter();
+        if (!adapter) {
+            showToast('⚠️ 未辨識出目前運行的 AI 平台！', true);
+            return;
+        }
+
+
+        const siteId = adapter.id;
+        const siteLabel = ALL_SITE_DEFS[siteId]?.label || adapter.name;
+        const action = globalConfig.qaQueueSettings?.siteActions?.[siteId] || 'SINGLE';
+
+
+        showToast(`⏳ 正在採集 ${siteLabel}...`);
+        const extractedText = await extractSiteTextByAction(adapter, action);
+
+
+        if (!extractedText || !extractedText.trim()) {
+            showToast(`⚠️ ${siteLabel} 提取內容為空！`, true);
+            return;
+        }
+
+
+        const activeProfile = globalConfig.profiles?.[globalConfig.activeProfileId];
+        const affixTag = (activeProfile && activeProfile.enabled && activeProfile.prefixes?.[siteId]) ? activeProfile.prefixes[siteId].trim() : action;
+
+
+        const queue = getQaQueue();
+        queue.items[siteId] = {
+            siteId: siteId,
+            siteLabel: siteLabel,
+            action: action,
+            affixTag: affixTag,
+            content: extractedText.trim() + '\n\n',
+            timestamp: Date.now()
+        };
+        queue.lastUpdated = Date.now();
+        setQaQueue(queue);
+
+
+        updateGearIndicator();
+
+
+        const count = Object.keys(queue.items).length;
+        const targetCount = globalConfig.qaQueueSettings?.targetCount ?? 5;
+        const keepQueue = globalConfig.qaQueueSettings?.keepQueueOnAutoSummary ?? false;
+
+
+        // 滿額 N 站自動總結 / 滾動更新管線
+        if (targetCount > 0 && count >= targetCount) {
+            const items = Object.values(queue.items || {});
+            const siteOrder = globalConfig.siteTabOrder || ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
+            items.sort((a, b) => {
+                let idxA = siteOrder.indexOf(a.siteId);
+                let idxB = siteOrder.indexOf(b.siteId);
+                if (idxA === -1) idxA = 999;
+                if (idxB === -1) idxB = 999;
+                return idxA - idxB;
+            });
+
+
+            const mergedText = items.map(it => it.content.trim()).join('\n\n===\n\n') + '\n\n';
+            copyToClipboard(mergedText);
+
+
+            if (keepQueue) {
+                showToast(`🎉 [滿額滾動更新] 已將 ${count} 站總結寫入剪貼簿！(佇列已保留，後續採集將自動追加)`, false, 3500);
+            } else {
+                clearQaQueue();
+                showToast(`🎉 [滿額自動總結] 已合併複製 ${count} 站總結至剪貼簿！佇列已清空。`, false, 3500);
+            }
+            return;
+        }
+
+
+        const summaryKey = globalConfig.qaQueueSettings?.summaryHotkey || 'F7';
+        showToast(`📥 [佇列已採集 ${count} 站] ${siteLabel} (${affixTag}) 已暫存！ (按 ${summaryKey} 總結複製)`, false, 2800);
+    }
+
+
+    function handleSummaryAction() {
+        const queue = getQaQueue();
+        const items = Object.values(queue.items || {});
+        const count = items.length;
+
+
+        if (count === 0) {
+            showToast('ℹ️ 採集佇列目前為空，請先在 AI 頁面按採集熱鍵！', true, 2500);
+            return;
+        }
+
+
+        const siteOrder = globalConfig.siteTabOrder || ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
+        items.sort((a, b) => {
+            let idxA = siteOrder.indexOf(a.siteId);
+            let idxB = siteOrder.indexOf(b.siteId);
+            if (idxA === -1) idxA = 999;
+            if (idxB === -1) idxB = 999;
+            return idxA - idxB;
+        });
+
+
+        const mergedText = items.map(it => it.content.trim()).join('\n\n===\n\n') + '\n\n';
+        copyToClipboard(mergedText);
+
+
+        clearQaQueue();
+        showToast(`🎉 已合併複製 ${count} 站 QA 總結至剪貼簿！佇列已清空。`, false, 3200);
+    }
+
+
+    // ==========================================
+    // 8. 模組雙向輪播與膠囊調度體系 (Carousel & Capsule)
+    // ==========================================
+    const MODULE_SEQUENCE = ['module_1', 'module_2', 'module_3'];
+    let lastWheelTimestamp = 0;
+
+
+    function switchModule(direction = 'next') {
+        const curMod = globalConfig.aiStudioSettings?.activeModuleId || 'module_1';
+        let idx = MODULE_SEQUENCE.indexOf(curMod);
+        if (idx === -1) idx = 0;
+
+
+        if (direction === 'next') {
+            idx = (idx + 1) % MODULE_SEQUENCE.length;
+        } else {
+            idx = (idx - 1 + MODULE_SEQUENCE.length) % MODULE_SEQUENCE.length;
+        }
+
+
+        const targetModId = MODULE_SEQUENCE[idx];
+        globalConfig.aiStudioSettings.activeModuleId = targetModId;
+        Storage.set(globalConfig);
+
+
+        const modDef = globalConfig.aiStudioSettings.modules[targetModId];
+        showToast(`🔄 已切換至：【${modDef.badgeText}】${modDef.name}`, false, 1800);
+        mountUI(true);
+    }
+
+
+    // ==========================================
+    // 9. UI 樣式注入 (含 Toast 定位、狀態燈號、穿透契約、微光虛線輪廓與綠鍵永駐)
+    // ==========================================
+    function injectStyles() {
+        const css = `
+            #${UI_CONTAINER_ID} {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                font-size: 13px;
+                color: #f3f4f6;
+                z-index: 2147483640;
+                position: fixed;
+            }
+
+            /* UX 穿透契約：消除空氣牆 */
+            #${UI_CONTAINER_ID},
+            .ai-copy-btn-bar,
+            .ai-copy-btn-bar-staircase,
+            .ai-copy-left-col,
+            .ai-copy-right-col,
+            .ai-copy-main-row,
+            .ai-copy-sub-row,
+            .ai-copy-sub-row-single,
+            .ai-copy-sub-row-grid,
+            .ai-copy-grid-row {
+                pointer-events: none !important;
+            }
+            .ai-copy-btn,
+            .ai-copy-btn-docx,
+            .ai-copy-btn-purple,
+            .ai-copy-capsule-btn,
+            .ai-copy-icon-btn,
+            .ai-copy-btn-slice,
+            .ai-copy-drag-handle,
+            #${FLOATING_ORB_ID} {
+                pointer-events: auto !important;
+            }
+
+            /* 拖曳中微光輪廓樣式 */
+            .ai-copy-is-dragging {
+                outline: 1.5px dashed rgba(138, 180, 248, 0.7) !important;
+                outline-offset: 3px;
+                background: rgba(15, 23, 42, 0.25) !important;
+                border-radius: 8px;
+                box-shadow: 0 0 16px rgba(138, 180, 248, 0.15) !important;
+            }
+
+            /* 齒輪佇列動態活躍燈號 */
+            .ai-copy-gear-active {
+                background: #f59e0b !important;
+                color: #ffffff !important;
+                border: 1px solid rgba(255, 255, 255, 0.4) !important;
+                box-shadow: 0 0 10px rgba(245, 158, 11, 0.7), 0 4px 12px rgba(0,0,0,0.4) !important;
+                animation: ai-copy-pulse 2s infinite ease-in-out;
+            }
+            @keyframes ai-copy-pulse {
+                0%, 100% { filter: brightness(1); }
+                50% { filter: brightness(1.2); }
+            }
+
+            /* Toast 定位按鈕長亮活躍外發光 */
+            .ai-copy-toast-btn-active {
+                background: #6b21a8 !important;
+                color: #ffffff !important;
+                border: 1px solid rgba(255, 255, 255, 0.5) !important;
+                box-shadow: 0 0 10px rgba(168, 85, 247, 0.8), 0 4px 12px rgba(0,0,0,0.4) !important;
+            }
+
+            #${FLOATING_ORB_ID} {
+                width: 36px;
+                height: 36px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: grab;
+                user-select: none;
+                z-index: 2147483640;
+                position: fixed;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                font-size: 11px;
+                font-weight: bold;
+                color: #ffffff;
+                text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+                border: 1.5px solid rgba(255, 255, 255, 0.8);
+                transition: transform 0.2s ease, box-shadow 0.2s ease;
+            }
+            #${FLOATING_ORB_ID}:hover {
+                transform: scale(1.08);
+            }
+            #${FLOATING_ORB_ID}:active {
+                cursor: grabbing;
+            }
+
+            .ai-copy-btn-bar {
+                display: flex;
+                flex-direction: column;
+                align-items: flex-end;
+                gap: 6px;
+            }
+
+            .ai-copy-btn-bar-staircase {
+                display: flex;
+                flex-direction: row;
+                align-items: flex-start;
+                gap: 8px;
+            }
+
+            .ai-copy-drag-handle {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 18px;
+                height: 26px;
+                color: #9ca3af;
+                font-size: 14px;
+                cursor: grab;
+                user-select: none;
+                transition: color 0.15s ease;
+            }
+            .ai-copy-drag-handle:hover {
+                color: #f3f4f6;
+            }
+            .ai-copy-drag-handle:active {
+                cursor: grabbing;
+            }
+
+            .ai-copy-left-col {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                align-items: flex-end;
+            }
+            .ai-copy-right-col {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                align-items: flex-start;
+            }
+
+            .ai-copy-main-row {
+                display: flex;
+                gap: 8px;
+                align-items: center;
+            }
+
+            .ai-copy-sub-row {
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: flex-end;
+                gap: 6px;
+                max-width: 420px;
+            }
+            .ai-copy-sub-row-single {
+                display: flex;
+                flex-direction: row;
+                flex-wrap: nowrap;
+                justify-content: flex-end;
+                gap: 6px;
+            }
+            .ai-copy-sub-row-grid {
+                display: flex;
+                flex-direction: column;
+                align-items: flex-end;
+                gap: 6px;
+            }
+            .ai-copy-grid-row {
+                display: flex;
+                flex-direction: row;
+                gap: 6px;
+                justify-content: flex-end;
+            }
+
+            .ai-copy-btn {
+                background: #2563eb;
+                color: #ffffff;
+                border: none;
+                padding: 8px 14px;
+                border-radius: 20px;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                transition: background 0.2s ease, opacity 0.2s ease, filter 0.2s ease;
+                user-select: none;
+                white-space: nowrap;
+            }
+            .ai-copy-btn:hover { background: #1d4ed8; }
+
+            .ai-copy-btn-docx {
+                background: #10b981 !important;
+                color: #ffffff !important;
+                border: none;
+                padding: 8px 14px;
+                border-radius: 20px;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                transition: background 0.2s ease, opacity 0.2s ease, filter 0.2s ease;
+                user-select: none;
+                white-space: nowrap;
+                opacity: 1 !important;
+                filter: none !important;
+            }
+            .ai-copy-btn-docx:hover { background: #059669 !important; }
+            .ai-copy-btn-docx:active { background: #047857 !important; }
+
+            .ai-copy-btn-purple {
+                background: #7c3aed;
+                color: #ffffff;
+                border: none;
+                padding: 7px 13px;
+                border-radius: 20px;
+                font-size: 12px;
+                font-weight: 600;
+                cursor: pointer;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                transition: background 0.2s ease;
+                user-select: none;
+                white-space: nowrap;
+            }
+            .ai-copy-btn-purple:hover { background: #6d28d9; }
+
+            .ai-copy-capsule-btn {
+                border: 1px solid rgba(255,255,255,0.3);
+                padding: 4px 10px;
+                height: 26px;
+                border-radius: 13px;
+                font-size: 12px;
+                font-weight: bold;
+                color: #ffffff;
+                cursor: pointer;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                transition: transform 0.15s ease, filter 0.15s ease;
+                user-select: none;
+                white-space: nowrap;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .ai-copy-capsule-btn:hover {
+                filter: brightness(1.15);
+                transform: translateY(-1px);
+            }
+
+            .ai-copy-icon-btn {
+                background: #374151;
+                color: #ffffff;
+                border: none;
+                height: 28px;
+                padding: 0 9px;
+                border-radius: 14px;
+                font-size: 13px;
+                cursor: pointer;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                transition: background 0.2s ease, box-shadow 0.2s ease;
+                user-select: none;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .ai-copy-icon-btn:hover { background: #4b5563; }
+
+            .ai-copy-btn-slice {
+                border: none;
+                padding: 7px 12px;
+                border-radius: 20px;
+                font-size: 12px;
+                font-weight: 600;
+                color: #ffffff;
+                cursor: pointer;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                transition: background 0.2s ease;
+                user-select: none;
+                white-space: nowrap;
+            }
+            .ai-copy-slice-0 { background: #059669; }
+            .ai-copy-slice-0:hover { background: #047857; }
+            .ai-copy-slice-1 { background: #d97706; }
+            .ai-copy-slice-1:hover { background: #b45309; }
+            .ai-copy-slice-2 { background: #0891b2; }
+            .ai-copy-slice-2:hover { background: #0e7490; }
+            .ai-copy-slice-3 { background: #e11d48; }
+            .ai-copy-slice-3:hover { background: #be123c; }
+            .ai-copy-slice-4 { background: #4f46e5; }
+            .ai-copy-slice-4:hover { background: #4338ca; }
+
+            /* 移除 background 的 !important，支援動態行內樣式覆寫 */
+            .ai-copy-toast-node {
+                position: fixed;
+                bottom: 80px;
+                right: 24px;
+                background: linear-gradient(135deg, rgba(88, 28, 135, 0.95), rgba(124, 58, 237, 0.92));
+                color: #ffffff !important;
+                padding: 10px 18px;
+                border-radius: 8px;
+                box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4), 0 0 12px rgba(124, 58, 237, 0.3) !important;
+                font-size: 18px;
+                font-weight: 600;
+                z-index: 2147483647;
+                opacity: 0;
+                transition: opacity 0.3s ease, transform 0.3s ease;
+                transform: translate(-50%, 10px);
+                pointer-events: none; /* 平日消除空氣牆 */
+                user-select: none;
+                white-space: nowrap;
+            }
+
+            /* Toast 進入定位/拖曳模式時的提權解鎖 */
+            .ai-copy-toast-node.ai-copy-toast-active {
+                pointer-events: auto !important;
+                cursor: grab !important;
+                transition: none !important; /* 拖曳時強制關閉過渡動畫，杜絕位移延遲 */
+            }
+            .ai-copy-toast-node.ai-copy-toast-active:active {
+                cursor: grabbing !important;
+            }
+
+            /* Modal 彈窗樣式 */
+            #${MODAL_OVERLAY_ID} {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100vw;
+                height: 100vh;
+                background: rgba(0, 0, 0, 0.75);
+                z-index: 2147483647;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            }
+
+            #ai-copy-modal {
+                width: 820px;
+                max-width: 95vw;
+                height: 620px;
+                max-height: 90vh;
+                background: #202124;
+                color: #e8eaed;
+                border: 1px solid #5f6368;
+                border-radius: 8px;
+                display: flex;
+                flex-direction: column;
+                box-shadow: 0 12px 24px rgba(0,0,0,0.6);
+                overflow: hidden;
+            }
+
+            .ai-copy-modal-header {
+                padding: 14px 16px;
+                border-bottom: 1px solid #5f6368;
+                font-size: 15px;
+                font-weight: bold;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                background: #1e1f20;
+            }
+            .ai-copy-close-x {
+                background: none;
+                border: none;
+                color: #9aa0a6;
+                font-size: 20px;
+                cursor: pointer;
+                line-height: 1;
+            }
+            .ai-copy-close-x:hover { color: #fff; }
+
+            .ai-copy-modal-body {
+                display: flex;
+                flex: 1;
+                overflow: hidden;
+            }
+
+            .ai-copy-modal-sidebar-tabs {
+                width: 165px;
+                min-width: 155px;
+                background: #1e1f20;
+                border-right: 1px solid #5f6368;
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+                padding: 10px 0;
+                flex-shrink: 0;
+            }
+            .ai-copy-side-tab {
+                background: transparent;
+                border: none;
+                color: #9aa0a6;
+                text-align: left;
+                padding: 11px 16px;
+                font-size: 13px;
+                cursor: pointer;
+                border-left: 3px solid transparent;
+                transition: all 0.2s;
+                font-weight: bold;
+                outline: none;
+                white-space: nowrap;
+            }
+            .ai-copy-side-tab:hover {
+                background: rgba(255, 255, 255, 0.04);
+                color: #fff;
+            }
+            .ai-copy-side-tab.active {
+                color: #8ab4f8;
+                background: rgba(138, 180, 248, 0.08);
+                border-left-color: #8ab4f8;
+            }
+
+            .ai-copy-modal-content-pane {
+                flex: 1;
+                padding: 16px;
+                overflow-y: auto;
+                background: #202124;
+                color: #e8eaed;
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+                box-sizing: border-box;
+            }
+            .ai-copy-modal-content-pane::-webkit-scrollbar { width: 6px; }
+            .ai-copy-modal-content-pane::-webkit-scrollbar-thumb {
+                background: #4b5563;
+                border-radius: 3px;
+            }
+
+            .ai-copy-modal-footer {
+                padding: 10px 16px;
+                border-top: 1px solid #5f6368;
+                display: flex;
+                justify-content: flex-end;
+                background: #1e1f20;
+            }
+
+            .ai-copy-btn-primary {
+                background: #8ab4f8;
+                color: #202124;
+                border: none;
+                padding: 6px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 13px;
+                cursor: pointer;
+                transition: background 0.2s;
+            }
+            .ai-copy-btn-primary:hover { background: #aecbfa; }
+
+            .ai-copy-btn-secondary {
+                background: #3c4043;
+                color: #e8eaed;
+                border: 1px solid #5f6368;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-size: 12px;
+                cursor: pointer;
+                transition: background 0.2s;
+            }
+            .ai-copy-btn-secondary:hover { background: #4b5563; }
+
+            .ai-copy-card-subtabs {
+                display: flex;
+                gap: 4px;
+                align-items: center;
+            }
+            .ai-copy-card-subtab-btn {
+                height: 24px;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 0 8px;
+                cursor: pointer;
+                transition: all 0.2s;
+                white-space: nowrap;
+                user-select: none;
+                background: transparent;
+                color: #9aa0a6;
+                border: 1px solid #5f6368;
+            }
+            .ai-copy-card-subtab-btn:hover {
+                color: #ffffff;
+                background: rgba(255, 255, 255, 0.05);
+            }
+            .ai-copy-card-subtab-btn.active {
+                background: rgba(138, 180, 248, 0.15);
+                color: #8ab4f8;
+                border-color: #8ab4f8;
+            }
+        `;
+
+
+        if (typeof GM_addStyle !== 'undefined') {
+            GM_addStyle(css);
+        } else {
+            const style = document.createElement('style');
+            style.textContent = css;
+            (document.head || document.documentElement).appendChild(style);
+        }
+    }
+
+
+    // ==========================================
+    // 10. 座標管理、視窗邊界限制與 5px 動靜分離
+    // ==========================================
+    function clampContainerToViewport(container) {
+        if (!container) return;
+        const rect = container.getBoundingClientRect();
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+
+
+        let currentLeft = rect.left;
+        let currentTop = rect.top;
+
+
+        if (rect.bottom > vh - 10) {
+            currentTop = Math.max(10, vh - rect.height - 10);
+        }
+        if (currentTop < 10) {
+            currentTop = 10;
+        }
+        if (rect.right > vw - 10) {
+            currentLeft = Math.max(10, vw - rect.width - 10);
+        }
+        if (currentLeft < 10) {
+            currentLeft = 10;
+        }
+
+
+        container.style.left = `${currentLeft}px`;
+        container.style.top = `${currentTop}px`;
+        container.style.right = 'auto';
+        container.style.bottom = 'auto';
+    }
+
+
+    function applySavedPosition(container, adapter, isOrb = false) {
+        const savedPos = isOrb ? globalConfig.orbPosition : globalConfig.uiPosition;
+        if (savedPos && savedPos.left && savedPos.top) {
+            Object.assign(container.style, {
+                position: 'fixed',
+                left: savedPos.left,
+                top: savedPos.top,
+                right: 'auto',
+                bottom: 'auto'
+            });
+            requestAnimationFrame(() => clampContainerToViewport(container));
+        } else {
+            const isAiStudio = adapter && adapter.id === 'aistudio';
+            const isMistral = adapter && adapter.id === 'mistral';
+
+
+            let defaultBottom = '24px';
+            let defaultRight = '24px';
+
+
+            if (isAiStudio) {
+                defaultBottom = '80px';
+                defaultRight = '24px';
+            } else if (isMistral) {
+                defaultBottom = '90px';
+                defaultRight = '28px';
+            }
+
+
+            Object.assign(container.style, {
+                position: 'fixed',
+                bottom: defaultBottom,
+                right: defaultRight,
+                left: 'auto',
+                top: 'auto'
+            });
+        }
+    }
+
+
+    function resetUiPosition() {
+        delete globalConfig.uiPosition;
+        delete globalConfig.orbPosition;
+        delete globalConfig.toastPosition;
+        Storage.set(globalConfig);
+
+
+        const container = document.getElementById(UI_CONTAINER_ID);
+        const orb = document.getElementById(FLOATING_ORB_ID);
+        const toast = document.getElementById('ai-copy-toast');
+        const adapter = getCurrentAdapter();
+
+
+        if (container) applySavedPosition(container, adapter, false);
+        if (orb) applySavedPosition(orb, adapter, true);
+        if (toast) {
+            applyToastPosition(toast);
+            toast.style.transform = 'none';
+        }
+
+
+        showToast('📍 浮動列、小光球與 Toast 位置已完全重置！');
+    }
+
+
+    let isPointerDragging = false;
+
+
+    function setupDraggableUI(container, dragHandle, isOrb = false, onClickCallback = null, isToast = false) {
+        let isMoving = false;
+        let startX = 0, startY = 0;
+        let initialLeft = 0, initialTop = 0;
+
+
+        function onMouseMove(moveEvent) {
+            const dx = moveEvent.clientX - startX;
+            const dy = moveEvent.clientY - startY;
+
+
+            if (!isMoving && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
+                isMoving = true;
+                isPointerDragging = true;
+                container.classList.add('ai-copy-is-dragging');
+            }
+
+
+            if (isMoving) {
+                let newLeft = initialLeft + dx;
+                let newTop = initialTop + dy;
+
+
+                container.style.left = `${newLeft}px`;
+                container.style.top = `${newTop}px`;
+                container.style.right = 'auto';
+                container.style.bottom = 'auto';
+
+
+                clampContainerToViewport(container);
+            }
+        }
+
+
+        function onMouseUp() {
+            if (!isToast) {
+                container.classList.remove('ai-copy-is-dragging');
+            }
+
+
+            window.removeEventListener('mousemove', onMouseMove);
+            window.removeEventListener('mouseup', onMouseUp);
+
+
+            setTimeout(() => { isPointerDragging = false; }, 50);
+
+
+            if (isMoving) {
+                const preventClickOnce = (clickEvent) => {
+                    clickEvent.stopPropagation();
+                    clickEvent.preventDefault();
+                };
+                window.addEventListener('click', preventClickOnce, { capture: true, once: true });
+
+
+                clampContainerToViewport(container);
+
+
+                const finalRect = container.getBoundingClientRect();
+                const newPos = {
+                    left: `${finalRect.left}px`,
+                    top: `${finalRect.top}px`
+                };
+
+
+                if (isOrb) {
+                    globalConfig.orbPosition = newPos;
+                } else if (isToast) {
+                    globalConfig.toastPosition = newPos;
+                } else {
+                    globalConfig.uiPosition = newPos;
+                }
+                Storage.set(globalConfig);
+                if (!isToast) showToast('📍 位置已儲存！');
+            } else {
+                if (typeof onClickCallback === 'function' && isOrb) {
+                    onClickCallback();
+                }
+            }
+        }
+
+
+        dragHandle.addEventListener('mousedown', (e) => {
+            if (['INPUT', 'TEXTAREA', 'SELECT', 'OPTION'].includes(e.target.tagName)) return;
+            if (e.button !== 0) return;
+
+
+            window.removeEventListener('mousemove', onMouseMove);
+            window.removeEventListener('mouseup', onMouseUp);
+
+
+            isMoving = false;
+            isPointerDragging = false;
+            startX = e.clientX;
+            startY = e.clientY;
+
+
+            // 若為 Toast 拖曳，前置清除 transform 避免與 left/top 雙重疊加卡死
+            if (isToast) {
+                container.style.transform = 'none';
+            }
+
+
+            const rect = container.getBoundingClientRect();
+            initialLeft = rect.left;
+            initialTop = rect.top;
+
+
+            // 確保絕對數值化 left/top，消除 auto 或百分比干擾
+            container.style.left = `${initialLeft}px`;
+            container.style.top = `${initialTop}px`;
+            container.style.right = 'auto';
+            container.style.bottom = 'auto';
+
+
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('mouseup', onMouseUp);
+        });
+    }
+
+
+    // ==========================================
+    // 11. 自包含居中 7 分頁雙欄 Modal 管理器
+    // ==========================================
+    let currentPrefixTab = 'aistudio';
+    let currentSuffixTab = 'aistudio';
+    let currentModuleTab = 'module_1';
+
+
+    function openManager() {
+        if (document.getElementById(MODAL_OVERLAY_ID)) return;
+
+
+        const overlay = document.createElement('div');
+        overlay.id = MODAL_OVERLAY_ID;
+
+
+        const modal = document.createElement('div');
+        modal.id = 'ai-copy-modal';
+
+
+        // 1. Header
+        const header = document.createElement('div');
+        header.className = 'ai-copy-modal-header';
+
+
+        const title = document.createElement('span');
+        title.textContent = '⚙️ AI 雙模式乾淨複製器 - 參數設定管理器 v4.3.3';
+
+
+        const btnCloseX = document.createElement('button');
+        btnCloseX.className = 'ai-copy-close-x';
+        btnCloseX.textContent = '✕';
+        btnCloseX.title = '關閉';
+        btnCloseX.onclick = () => overlay.remove();
+
+
+        header.appendChild(title);
+        header.appendChild(btnCloseX);
+
+
+        // 2. Body (雙欄)
+        const body = document.createElement('div');
+        body.className = 'ai-copy-modal-body';
+
+
+        const sidebar = document.createElement('div');
+        sidebar.className = 'ai-copy-modal-sidebar-tabs';
+
+
+        const contentPane = document.createElement('div');
+        contentPane.className = 'ai-copy-modal-content-pane';
+
+
+        const menuTabs = [
+            { id: 'pane_prefix', label: '🏷️ 前綴設定' },
+            { id: 'pane_suffix', label: '🔚 後綴封尾' },
+            { id: 'pane_reorder', label: '🔢 站點排序' },
+            { id: 'pane_rules', label: '🧹 排除規則' },
+            { id: 'pane_ui', label: '🎨 介面排版' },
+            { id: 'pane_aistudio', label: '⚡ AI Studio 專用' },
+            { id: 'pane_cloud', label: '🌐 雲端匯出' }
+        ];
+
+
+        let activePaneId = 'pane_prefix';
+        const sideTabBtns = {};
+
+
+        function renderActivePane() {
+            menuTabs.forEach(t => {
+                if (sideTabBtns[t.id]) {
+                    if (t.id === activePaneId) sideTabBtns[t.id].classList.add('active');
+                    else sideTabBtns[t.id].classList.remove('active');
+                }
+            });
+
+
+            while (contentPane.firstChild) contentPane.removeChild(contentPane.firstChild);
+
+
+            if (activePaneId === 'pane_prefix') renderPanePrefix(contentPane);
+            else if (activePaneId === 'pane_suffix') renderPaneSuffix(contentPane);
+            else if (activePaneId === 'pane_reorder') renderPaneReorder(contentPane);
+            else if (activePaneId === 'pane_rules') renderPaneRules(contentPane);
+            else if (activePaneId === 'pane_ui') renderPaneUI(contentPane);
+            else if (activePaneId === 'pane_aistudio') renderPaneAiStudio(contentPane);
+            else if (activePaneId === 'pane_cloud') renderPaneCloud(contentPane);
+        }
+
+
+        menuTabs.forEach(t => {
+            const btn = document.createElement('button');
+            btn.className = 'ai-copy-side-tab';
+            btn.textContent = t.label;
+            btn.onclick = () => {
+                activePaneId = t.id;
+                renderActivePane();
+            };
+            sideTabBtns[t.id] = btn;
+            sidebar.appendChild(btn);
+        });
+
+
+        // 3. Footer
+        const footer = document.createElement('div');
+        footer.className = 'ai-copy-modal-footer';
+
+
+        const btnDone = document.createElement('button');
+        btnDone.className = 'ai-copy-btn-primary';
+        btnDone.textContent = '完成並關閉';
+        btnDone.onclick = () => overlay.remove();
+
+
+        footer.appendChild(btnDone);
+
+
+        body.appendChild(sidebar);
+        body.appendChild(contentPane);
+        modal.appendChild(header);
+        modal.appendChild(body);
+        modal.appendChild(footer);
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+
+        overlay.onclick = (e) => {
+            if (e.target === overlay) overlay.remove();
+        };
+
+
+        renderActivePane();
+    }
+
+
+    function createProfileSelectorRow(onProfileChangeCallback) {
+        const row = document.createElement('div');
+        row.style.cssText = 'display: flex; gap: 8px; align-items: center; justify-content: space-between;';
+
+
+        const select = document.createElement('select');
+        Object.assign(select.style, {
+            flex: '1',
+            backgroundColor: '#2d2f31',
+            color: '#8ab4f8',
+            border: '1px solid #5f6368',
+            borderRadius: '4px',
+            padding: '6px 8px',
+            fontSize: '13px',
+            fontWeight: '600',
+            cursor: 'pointer'
+        });
+
+
+        function populateOptions() {
+            while (select.firstChild) select.removeChild(select.firstChild);
+            Object.values(globalConfig.profiles || {}).forEach(p => {
+                if (!p) return;
+                const opt = document.createElement('option');
+                opt.value = p.id;
+                opt.textContent = p.name || p.id;
+                if (p.id === globalConfig.activeProfileId) opt.selected = true;
+                select.appendChild(opt);
+            });
+        }
+        populateOptions();
+
+
+        select.onchange = () => {
+            globalConfig.activeProfileId = select.value;
+            Storage.set(globalConfig);
+            if (typeof onProfileChangeCallback === 'function') onProfileChangeCallback();
+        };
+
+
+        const btnRename = document.createElement('button');
+        btnRename.textContent = '✏️ 重命名';
+        btnRename.className = 'ai-copy-btn-secondary';
+        btnRename.onclick = () => {
+            const activeP = globalConfig.profiles?.[globalConfig.activeProfileId];
+            if (!activeP) return;
+            const newName = prompt('請輸入此模式的新名稱：', activeP.name);
+            if (newName && newName.trim()) {
+                activeP.name = newName.trim();
+                Storage.set(globalConfig);
+                populateOptions();
+                showToast('✅ 模式名稱已更新！');
+            }
+        };
+
+
+        row.appendChild(select);
+        row.appendChild(btnRename);
+        return row;
+    }
+
+
+    function renderPanePrefix(container) {
+        const profileRow = createProfileSelectorRow(() => renderPanePrefix(container));
+        container.appendChild(profileRow);
+
+
+        const curP = globalConfig.profiles[globalConfig.activeProfileId];
+
+
+        const enableLabel = document.createElement('label');
+        enableLabel.style.cssText = 'display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; font-size: 13px; color: #e8eaed;';
+        const enableCheck = document.createElement('input');
+        enableCheck.type = 'checkbox';
+        enableCheck.checked = curP.enablePrefix !== false;
+        enableCheck.onchange = () => {
+            curP.enablePrefix = enableCheck.checked;
+            Storage.set(globalConfig);
+            showToast(enableCheck.checked ? '✅ 已啟用前綴功能' : '⏸️ 已停用前綴功能');
+        };
+        const enableTxt = document.createElement('span');
+        enableTxt.textContent = '啟用此模式之前綴 (Prefix)';
+        enableLabel.appendChild(enableCheck);
+        enableLabel.appendChild(enableTxt);
+        container.appendChild(enableLabel);
+
+
+        const tabsRow = document.createElement('div');
+        tabsRow.style.cssText = 'display: flex; flex-wrap: wrap; gap: 4px; background: #1e1f20; padding: 6px; border-radius: 6px; border: 1px solid #5f6368; box-sizing: border-box;';
+
+
+        const tabBtns = {};
+        const siteOrder = globalConfig.siteTabOrder || ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
+        if (!siteOrder.includes(currentPrefixTab)) currentPrefixTab = siteOrder[0];
+
+
+        const textarea = document.createElement('textarea');
+        textarea.rows = 4;
+        textarea.placeholder = '請輸入前綴字串，支援換行 (如: 1st)';
+        Object.assign(textarea.style, {
+            width: '100%',
+            backgroundColor: '#2d2f31',
+            color: '#f9fafb',
+            border: '1px solid #5f6368',
+            borderRadius: '4px',
+            padding: '8px',
+            fontSize: '12px',
+            resize: 'vertical',
+            boxSizing: 'border-box',
+            fontFamily: 'monospace'
+        });
+
+
+        function refreshActiveSiteData() {
+            textarea.value = (curP.prefixes && curP.prefixes[currentPrefixTab]) || '';
+            siteOrder.forEach(siteId => {
+                const btn = tabBtns[siteId];
+                if (btn) {
+                    if (siteId === currentPrefixTab) {
+                        btn.style.background = '#8ab4f8';
+                        btn.style.color = '#202124';
+                    } else {
+                        btn.style.background = 'transparent';
+                        btn.style.color = '#9aa0a6';
+                    }
+                }
+            });
+        }
+
+
+        siteOrder.forEach(siteId => {
+            const def = ALL_SITE_DEFS[siteId] || { id: siteId, label: siteId };
+            const btn = document.createElement('button');
+            btn.textContent = def.label;
+            btn.style.cssText = 'flex: 1 1 calc(20% - 4px); min-width: 68px; height: 28px; border: none; padding: 0 4px; font-size: 11px; font-weight: bold; border-radius: 4px; cursor: pointer; transition: all 0.2s; white-space: nowrap; text-align: center;';
+            btn.onclick = () => {
+                currentPrefixTab = siteId;
+                refreshActiveSiteData();
+            };
+            tabBtns[siteId] = btn;
+            tabsRow.appendChild(btn);
+        });
+
+
+        textarea.oninput = () => {
+            if (!curP.prefixes) curP.prefixes = {};
+            curP.prefixes[currentPrefixTab] = textarea.value;
+            Storage.set(globalConfig);
+        };
+
+
+        refreshActiveSiteData();
+        container.appendChild(tabsRow);
+        container.appendChild(textarea);
+    }
+
+
+    function renderPaneSuffix(container) {
+        const profileRow = createProfileSelectorRow(() => renderPaneSuffix(container));
+        container.appendChild(profileRow);
+
+
+        const curP = globalConfig.profiles[globalConfig.activeProfileId];
+
+
+        const enableLabel = document.createElement('label');
+        enableLabel.style.cssText = 'display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; font-size: 13px; color: #e8eaed;';
+        const enableCheck = document.createElement('input');
+        enableCheck.type = 'checkbox';
+        enableCheck.checked = curP.enableSuffix !== false;
+        enableCheck.onchange = () => {
+            curP.enableSuffix = enableCheck.checked;
+            Storage.set(globalConfig);
+            showToast(enableCheck.checked ? '✅ 已啟用後綴功能' : '⏸️ 已停用後綴功能');
+        };
+        const enableTxt = document.createElement('span');
+        enableTxt.textContent = '啟用此模式之後綴 (Suffix - 預設雙換行防粘黏)';
+        enableLabel.appendChild(enableCheck);
+        enableLabel.appendChild(enableTxt);
+        container.appendChild(enableLabel);
+
+
+        const tabsRow = document.createElement('div');
+        tabsRow.style.cssText = 'display: flex; flex-wrap: wrap; gap: 4px; background: #1e1f20; padding: 6px; border-radius: 6px; border: 1px solid #5f6368; box-sizing: border-box;';
+
+
+        const tabBtns = {};
+        const siteOrder = globalConfig.siteTabOrder || ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
+        if (!siteOrder.includes(currentSuffixTab)) currentSuffixTab = siteOrder[0];
+
+
+        const textarea = document.createElement('textarea');
+        textarea.rows = 4;
+        textarea.placeholder = '請輸入後綴字串，支援換行 (預設為 \\n\\n)';
+        Object.assign(textarea.style, {
+            width: '100%',
+            backgroundColor: '#2d2f31',
+            color: '#f9fafb',
+            border: '1px solid #5f6368',
+            borderRadius: '4px',
+            padding: '8px',
+            fontSize: '12px',
+            resize: 'vertical',
+            boxSizing: 'border-box',
+            fontFamily: 'monospace'
+        });
+
+
+        function refreshActiveSiteData() {
+            textarea.value = (curP.suffixes && curP.suffixes[currentSuffixTab]) ?? '\n\n';
+            siteOrder.forEach(siteId => {
+                const btn = tabBtns[siteId];
+                if (btn) {
+                    if (siteId === currentSuffixTab) {
+                        btn.style.background = '#8ab4f8';
+                        btn.style.color = '#202124';
+                    } else {
+                        btn.style.background = 'transparent';
+                        btn.style.color = '#9aa0a6';
+                    }
+                }
+            });
+        }
+
+
+        siteOrder.forEach(siteId => {
+            const def = ALL_SITE_DEFS[siteId] || { id: siteId, label: siteId };
+            const btn = document.createElement('button');
+            btn.textContent = def.label;
+            btn.style.cssText = 'flex: 1 1 calc(20% - 4px); min-width: 68px; height: 28px; border: none; padding: 0 4px; font-size: 11px; font-weight: bold; border-radius: 4px; cursor: pointer; transition: all 0.2s; white-space: nowrap; text-align: center;';
+            btn.onclick = () => {
+                currentSuffixTab = siteId;
+                refreshActiveSiteData();
+            };
+            tabBtns[siteId] = btn;
+            tabsRow.appendChild(btn);
+        });
+
+
+        textarea.oninput = () => {
+            if (!curP.suffixes) curP.suffixes = {};
+            curP.suffixes[currentSuffixTab] = textarea.value;
+            Storage.set(globalConfig);
+        };
+
+
+        refreshActiveSiteData();
+        container.appendChild(tabsRow);
+        container.appendChild(textarea);
+    }
+
+
+    function renderPaneReorder(container) {
+        const desc = document.createElement('div');
+        desc.style.cssText = 'font-size: 12px; color: #9aa0a6; line-height: 1.4;';
+        const capKey = globalConfig.qaQueueSettings?.captureHotkey || 'F4';
+        desc.textContent = `請設定 10 大站點之權重序號與【${capKey} 快捷採集模式】。點擊下方按鈕後，前後綴與總結匯出順序將依序號嚴格排列：`;
+        container.appendChild(desc);
+
+
+        const listContainer = document.createElement('div');
+        listContainer.style.cssText = 'display: flex; flex-direction: column; gap: 8px; margin-top: 4px;';
+
+
+        const inputsMap = [];
+        const siteOrder = globalConfig.siteTabOrder || ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
+        const siteActions = globalConfig.qaQueueSettings?.siteActions || {};
+
+
+        siteOrder.forEach((siteId, index) => {
+            const def = ALL_SITE_DEFS[siteId] || { id: siteId, label: siteId };
+            const row = document.createElement('div');
+            row.style.cssText = 'display: flex; align-items: center; justify-content: space-between; background: #1e1f20; padding: 6px 12px; border-radius: 6px; border: 1px solid #3c4043; gap: 8px;';
+
+
+            const label = document.createElement('span');
+            label.style.cssText = 'font-weight: 600; font-size: 13px; min-width: 110px;';
+            label.textContent = `${def.label} (${siteId})`;
+
+
+            // 4 態採集動作下拉選單
+            const actionSelect = document.createElement('select');
+            actionSelect.style.cssText = 'height: 26px; font-size: 11px; background: #2d2f31; color: #8ab4f8; border: 1px solid #5f6368; border-radius: 4px; padding: 2px 6px; cursor: pointer; flex: 1;';
+
+
+            const optSingle = document.createElement('option');
+            optSingle.value = 'SINGLE';
+            optSingle.textContent = '📋 複製最後回覆 (含前後綴)';
+            const optClean = document.createElement('option');
+            optClean.value = 'SINGLE_CLEAN';
+            optClean.textContent = '🧹 乾淨最後回覆 (無前後綴)';
+            const optPreview = document.createElement('option');
+            optPreview.value = 'PREVIEW';
+            optPreview.textContent = '📄 複製右側預覽 (含前後綴)';
+            const optPreviewClean = document.createElement('option');
+            optPreviewClean.value = 'PREVIEW_CLEAN';
+            optPreviewClean.textContent = '📄 乾淨右側預覽 (無前後綴)';
+
+
+            actionSelect.appendChild(optSingle);
+            actionSelect.appendChild(optClean);
+            actionSelect.appendChild(optPreview);
+            actionSelect.appendChild(optPreviewClean);
+
+
+            const curAct = siteActions[siteId] || 'SINGLE';
+            actionSelect.value = curAct;
+
+
+            actionSelect.onchange = () => {
+                if (!globalConfig.qaQueueSettings) globalConfig.qaQueueSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.qaQueueSettings));
+                if (!globalConfig.qaQueueSettings.siteActions) globalConfig.qaQueueSettings.siteActions = {};
+                globalConfig.qaQueueSettings.siteActions[siteId] = actionSelect.value;
+                Storage.set(globalConfig);
+            };
+
+
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.value = index + 1;
+            input.min = '1';
+            input.max = '99';
+            Object.assign(input.style, {
+                width: '50px',
+                backgroundColor: '#2d2f31',
+                color: '#8ab4f8',
+                border: '1px solid #5f6368',
+                borderRadius: '4px',
+                padding: '4px 6px',
+                textAlign: 'center',
+                fontWeight: 'bold'
+            });
+
+
+            inputsMap.push({ siteId, inputEl: input, originalIndex: index });
+
+
+            row.appendChild(label);
+            row.appendChild(actionSelect);
+            row.appendChild(input);
+            listContainer.appendChild(row);
+        });
+
+
+        container.appendChild(listContainer);
+
+
+        const btnReorder = document.createElement('button');
+        btnReorder.className = 'ai-copy-btn-primary';
+        btnReorder.textContent = '🔢 依照數值重排';
+        btnReorder.style.cssText = 'margin-top: 8px; padding: 8px; width: 100%;';
+        btnReorder.onclick = () => {
+            const sortedData = inputsMap.map(item => {
+                const valStr = item.inputEl.value.trim();
+                let parsedVal = parseInt(valStr, 10);
+                if (isNaN(parsedVal)) parsedVal = 999;
+                return {
+                    siteId: item.siteId,
+                    typedValue: parsedVal,
+                    originalIndex: item.originalIndex
+                };
+            });
+
+
+            sortedData.sort((a, b) => {
+                if (a.typedValue !== b.typedValue) return a.typedValue - b.typedValue;
+                return a.originalIndex - b.originalIndex;
+            });
+
+
+            globalConfig.siteTabOrder = sortedData.map(d => d.siteId);
+            Storage.set(globalConfig);
+            renderPaneReorder(container);
+            showToast('🔢 站點頁籤與總結匯出順序已成功重排！');
+        };
+
+
+        container.appendChild(btnReorder);
+    }
+
+
+    function renderPaneRules(container) {
+        if (!globalConfig.noiseSettings) {
+            globalConfig.noiseSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.noiseSettings));
+        }
+
+
+        const orderRow = document.createElement('div');
+        orderRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #1e1f20; padding: 8px 12px; border-radius: 6px; border: 1px solid #3c4043;';
+
+
+        const orderLabel = document.createElement('span');
+        orderLabel.style.cssText = 'font-weight: 600; font-size: 13px; color: #8ab4f8;';
+        orderLabel.textContent = '⚙️ 清洗執行順序：';
+
+
+        const orderSelect = document.createElement('select');
+        Object.assign(orderSelect.style, {
+            backgroundColor: '#2d2f31',
+            color: '#e8eaed',
+            border: '1px solid #5f6368',
+            borderRadius: '4px',
+            padding: '4px 8px',
+            fontSize: '12px',
+            fontWeight: '600',
+            cursor: 'pointer'
+        });
+
+
+        const optStrFirst = document.createElement('option');
+        optStrFirst.value = 'string_first';
+        optStrFirst.textContent = '字串清洗優先 ➔ 正則清洗 (預設推薦)';
+        if (globalConfig.noiseSettings.pipelineOrder === 'string_first') optStrFirst.selected = true;
+
+
+        const optRegFirst = document.createElement('option');
+        optRegFirst.value = 'regex_first';
+        optRegFirst.textContent = '正則清洗優先 ➔ 字串清洗';
+        if (globalConfig.noiseSettings.pipelineOrder === 'regex_first') optRegFirst.selected = true;
+
+
+        orderSelect.appendChild(optStrFirst);
+        orderSelect.appendChild(optRegFirst);
+
+
+        orderSelect.onchange = () => {
+            globalConfig.noiseSettings.pipelineOrder = orderSelect.value;
+            Storage.set(globalConfig);
+            showToast('⚙️ 已更新清洗執行順序！');
+        };
+
+
+        orderRow.appendChild(orderLabel);
+        orderRow.appendChild(orderSelect);
+        container.appendChild(orderRow);
+
+
+        const strTitle = document.createElement('div');
+        strTitle.style.cssText = 'font-weight: 600; color: #9aa0a6; font-size: 12px; margin-top: 4px;';
+        strTitle.textContent = '🔤 免轉義純字串排除清單 (每行一條，精確消除)：';
+
+
+        const strTextarea = document.createElement('textarea');
+        strTextarea.rows = 5;
+        strTextarea.placeholder = '\n# 支援 # 與 // 註解';
+        strTextarea.value = globalConfig.noiseSettings.customNoiseStrings || '';
+        Object.assign(strTextarea.style, {
+            width: '100%',
+            backgroundColor: '#2d2f31',
+            color: '#f9fafb',
+            border: '1px solid #5f6368',
+            borderRadius: '4px',
+            padding: '8px',
+            fontSize: '12px',
+            resize: 'vertical',
+            boxSizing: 'border-box',
+            fontFamily: 'monospace'
+        });
+
+
+        strTextarea.oninput = () => {
+            globalConfig.noiseSettings.customNoiseStrings = strTextarea.value;
+            Storage.set(globalConfig);
+        };
+
+
+        container.appendChild(strTitle);
+        container.appendChild(strTextarea);
+
+
+        const regTitle = document.createElement('div');
+        regTitle.style.cssText = 'font-weight: 600; color: #9aa0a6; font-size: 12px; margin-top: 4px;';
+        regTitle.textContent = '⚡ 高階正則表達式清單 (每行一條 /pattern/flags)：';
+
+
+        const regTextarea = document.createElement('textarea');
+        regTextarea.rows = 5;
+        regTextarea.placeholder = '/[^\\n]*尖峰時段使用量較高[，,][^\\n]*(?:升級即可使用|思考|快速|請稍後再試)[^\\n]*\\n?/gi\n/(?:試算表|表格)\\s*(?:複製|下載)/gi\n# 支援 # 與 // 註解';
+        regTextarea.value = globalConfig.noiseSettings.customNoiseRegexes || '';
+        Object.assign(regTextarea.style, {
+            width: '100%',
+            backgroundColor: '#2d2f31',
+            color: '#f9fafb',
+            border: '1px solid #5f6368',
+            borderRadius: '4px',
+            padding: '8px',
+            fontSize: '12px',
+            resize: 'vertical',
+            boxSizing: 'border-box',
+            fontFamily: 'monospace'
+        });
+
+
+        regTextarea.oninput = () => {
+            globalConfig.noiseSettings.customNoiseRegexes = regTextarea.value;
+            Storage.set(globalConfig);
+        };
+
+
+        container.appendChild(regTitle);
+        container.appendChild(regTextarea);
+    }
+
+
+    function renderPaneUI(container) {
+        const title = document.createElement('div');
+        title.style.cssText = 'font-weight: 600; color: #9aa0a6; font-size: 12px;';
+        title.textContent = '按鈕顯示與佈局設定 (全域)：';
+
+
+        const showCleanLabel = document.createElement('label');
+        showCleanLabel.style.cssText = 'display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; font-size: 13px;';
+        const showCleanCheck = document.createElement('input');
+        showCleanCheck.type = 'checkbox';
+        showCleanCheck.checked = globalConfig.uiSettings.showCleanSingle;
+        showCleanCheck.onchange = () => {
+            globalConfig.uiSettings.showCleanSingle = showCleanCheck.checked;
+            Storage.set(globalConfig);
+            mountUI(true);
+        };
+        const showCleanText = document.createElement('span');
+        showCleanText.textContent = '顯示「乾淨最後回覆 (紫)」';
+        showCleanLabel.appendChild(showCleanCheck);
+        showCleanLabel.appendChild(showCleanText);
+
+
+        const showFullLabel = document.createElement('label');
+        showFullLabel.style.cssText = 'display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; font-size: 13px;';
+        const showFullCheck = document.createElement('input');
+        showFullCheck.type = 'checkbox';
+        showFullCheck.checked = globalConfig.uiSettings.showFullThread;
+        showFullCheck.onchange = () => {
+            globalConfig.uiSettings.showFullThread = showFullCheck.checked;
+            Storage.set(globalConfig);
+            mountUI(true);
+        };
+        const showFullText = document.createElement('span');
+        showFullText.textContent = '顯示「複製全對話串 (藍)」';
+        showFullLabel.appendChild(showFullCheck);
+        showFullLabel.appendChild(showFullText);
+
+
+        const purplePosRow = document.createElement('div');
+        purplePosRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px;';
+        const purplePosLabel = document.createElement('span');
+        purplePosLabel.textContent = '全域紫鍵排列位置：';
+        purplePosLabel.style.fontSize = '13px';
+        const purplePosSelect = document.createElement('select');
+        Object.assign(purplePosSelect.style, {
+            backgroundColor: '#2d2f31',
+            color: '#e8eaed',
+            border: '1px solid #5f6368',
+            borderRadius: '4px',
+            padding: '4px 8px',
+            fontSize: '12px',
+            cursor: 'pointer'
+        });
+
+
+        const optBottom = document.createElement('option');
+        optBottom.value = 'bottom';
+        optBottom.textContent = '置底換行 (2行 - 預設推薦)';
+        if (globalConfig.uiSettings.purplePosition === 'bottom') optBottom.selected = true;
+
+
+        const optRight = document.createElement('option');
+        optRight.value = 'right';
+        optRight.textContent = '靠右橫排 (1行)';
+        if (globalConfig.uiSettings.purplePosition === 'right') optRight.selected = true;
+
+
+        purplePosSelect.appendChild(optBottom);
+        purplePosSelect.appendChild(optRight);
+
+
+        purplePosSelect.onchange = () => {
+            globalConfig.uiSettings.purplePosition = purplePosSelect.value;
+            Storage.set(globalConfig);
+            mountUI(true);
+        };
+
+
+        purplePosRow.appendChild(purplePosLabel);
+        purplePosRow.appendChild(purplePosSelect);
+
+
+        container.appendChild(title);
+        container.appendChild(showCleanLabel);
+        container.appendChild(showFullLabel);
+        container.appendChild(purplePosRow);
+
+
+        // Toast 提示外觀設定 GroupBox
+        const toastGroup = document.createElement('div');
+        toastGroup.style.cssText = 'background: #1e1f20; padding: 10px 12px; border-radius: 6px; border: 1px solid #3c4043; display: flex; flex-direction: column; gap: 8px; margin-top: 6px;';
+
+
+        const toastTitle = document.createElement('div');
+        toastTitle.style.cssText = 'font-weight: 600; font-size: 13px; color: #c084fc;';
+        toastTitle.textContent = '🍞 Toast 提示通知外觀與位置設定：';
+
+
+        const toastSettingRow = document.createElement('div');
+        toastSettingRow.style.cssText = 'display: flex; gap: 12px; align-items: center; justify-content: space-between;';
+
+
+        // 1. 背景顏色自訂與原生拾色器
+        const colorBox = document.createElement('div');
+        colorBox.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+        
+        const colorLbl = document.createElement('span');
+        colorLbl.style.cssText = 'font-size: 12px; color: #e8eaed;';
+        colorLbl.textContent = '🎨 提示背景色：';
+
+
+        const colorPick = document.createElement('input');
+        colorPick.type = 'color';
+        const curBg = globalConfig.toastSettings?.background || '#7c3aed';
+        const hexMatch = curBg.match(/#([0-9a-f]{6}|[0-9a-f]{3})/i);
+        colorPick.value = hexMatch ? hexMatch[0] : '#7c3aed';
+        colorPick.style.cssText = 'width: 26px; height: 26px; border: none; padding: 0; background: transparent; cursor: pointer; border-radius: 4px;';
+        colorPick.title = '點擊選擇 Toast 背景色';
+
+
+        const btnDefaultGrad = document.createElement('button');
+        btnDefaultGrad.textContent = '經典淡紫';
+        btnDefaultGrad.className = 'ai-copy-btn-secondary';
+        btnDefaultGrad.style.cssText = 'padding: 2px 6px; font-size: 11px;';
+        btnDefaultGrad.onclick = () => {
+            if (!globalConfig.toastSettings) globalConfig.toastSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.toastSettings));
+            globalConfig.toastSettings.background = 'linear-gradient(135deg, rgba(88, 28, 135, 0.95), rgba(124, 58, 237, 0.92))';
+            Storage.set(globalConfig);
+            showToast('🎨 已恢復為經典淡紫漸變色！');
+        };
+
+
+        colorPick.onchange = (e) => {
+            if (!globalConfig.toastSettings) globalConfig.toastSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.toastSettings));
+            globalConfig.toastSettings.background = e.target.value;
+            Storage.set(globalConfig);
+            showToast('🎨 已更新 Toast 背景顏色！');
+        };
+
+
+        colorBox.appendChild(colorLbl);
+        colorBox.appendChild(colorPick);
+        colorBox.appendChild(btnDefaultGrad);
+
+
+        // 2. 字體大小
+        const fontBox = document.createElement('div');
+        fontBox.style.cssText = 'display: flex; align-items: center; gap: 6px;';
+        const fontLbl = document.createElement('span');
+        fontLbl.style.cssText = 'font-size: 12px; color: #e8eaed;';
+        fontLbl.textContent = '字體大小 (px)：';
+        const fontInput = document.createElement('input');
+        fontInput.type = 'number';
+        fontInput.min = '12';
+        fontInput.max = '24';
+        fontInput.value = globalConfig.toastSettings?.fontSize || 18;
+        fontInput.style.cssText = 'width: 48px; background: #2d2f31; color: #c084fc; border: 1px solid #5f6368; border-radius: 4px; padding: 3px 6px; font-size: 12px; text-align: center; font-weight: bold;';
+        fontInput.oninput = () => {
+            if (!globalConfig.toastSettings) globalConfig.toastSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.toastSettings));
+            const val = parseInt(fontInput.value, 10);
+            globalConfig.toastSettings.fontSize = isNaN(val) ? 18 : val;
+            Storage.set(globalConfig);
+        };
+        fontBox.appendChild(fontLbl);
+        fontBox.appendChild(fontInput);
+
+
+        toastSettingRow.appendChild(colorBox);
+        toastSettingRow.appendChild(fontBox);
+
+
+        const toastDragHint = document.createElement('div');
+        toastDragHint.style.cssText = 'font-size: 11px; color: #9aa0a6; line-height: 1.4;';
+        toastDragHint.textContent = '💡 提示：點擊主懸浮列工具列的 🍞 按鈕可進入自由拖曳模式，長亮調整視窗定位座標！';
+
+
+        toastGroup.appendChild(toastTitle);
+        toastGroup.appendChild(toastSettingRow);
+        toastGroup.appendChild(toastDragHint);
+        container.appendChild(toastGroup);
+
+
+        // QA 採集暫存雙熱鍵與滿額總結設定 GroupBox
+        const hotkeyGroup = document.createElement('div');
+        hotkeyGroup.style.cssText = 'background: #1e1f20; padding: 10px 12px; border-radius: 6px; border: 1px solid #3c4043; display: flex; flex-direction: column; gap: 8px; margin-top: 6px;';
+
+
+        const hotkeyTitle = document.createElement('div');
+        hotkeyTitle.style.cssText = 'font-weight: 600; font-size: 13px; color: #8ab4f8;';
+        hotkeyTitle.textContent = '⌨️ 跨站點 QA 採集、滿額自動總結與雙熱鍵：';
+
+
+        const hotkeysRow = document.createElement('div');
+        hotkeysRow.style.cssText = 'display: flex; gap: 12px; align-items: center; justify-content: space-between;';
+
+
+        // 採集熱鍵
+        const capBox = document.createElement('div');
+        capBox.style.cssText = 'display: flex; align-items: center; gap: 6px;';
+        const capLbl = document.createElement('span');
+        capLbl.style.cssText = 'font-size: 12px; color: #e8eaed;';
+        capLbl.textContent = '📥 採集熱鍵：';
+        const capInput = document.createElement('input');
+        capInput.type = 'text';
+        capInput.placeholder = '留空停用';
+        capInput.value = globalConfig.qaQueueSettings?.captureHotkey ?? 'F4';
+        capInput.style.cssText = 'width: 100px; background: #2d2f31; color: #8ab4f8; border: 1px solid #5f6368; border-radius: 4px; padding: 3px 6px; font-size: 12px; text-align: center; font-weight: bold;';
+        capInput.oninput = () => {
+            if (!globalConfig.qaQueueSettings) globalConfig.qaQueueSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.qaQueueSettings));
+            globalConfig.qaQueueSettings.captureHotkey = capInput.value.trim();
+            Storage.set(globalConfig);
+        };
+        capBox.appendChild(capLbl);
+        capBox.appendChild(capInput);
+
+
+        // 總結熱鍵
+        const sumBox = document.createElement('div');
+        sumBox.style.cssText = 'display: flex; align-items: center; gap: 6px;';
+        const sumLbl = document.createElement('span');
+        sumLbl.style.cssText = 'font-size: 12px; color: #e8eaed;';
+        sumLbl.textContent = '🎉 總結熱鍵：';
+        const sumInput = document.createElement('input');
+        sumInput.type = 'text';
+        sumInput.placeholder = '留空停用';
+        sumInput.value = globalConfig.qaQueueSettings?.summaryHotkey ?? 'F7';
+        sumInput.style.cssText = 'width: 100px; background: #2d2f31; color: #8ab4f8; border: 1px solid #5f6368; border-radius: 4px; padding: 3px 6px; font-size: 12px; text-align: center; font-weight: bold;';
+        sumInput.oninput = () => {
+            if (!globalConfig.qaQueueSettings) globalConfig.qaQueueSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.qaQueueSettings));
+            globalConfig.qaQueueSettings.summaryHotkey = sumInput.value.trim();
+            Storage.set(globalConfig);
+        };
+        sumBox.appendChild(sumLbl);
+        sumBox.appendChild(sumInput);
+
+
+        hotkeysRow.appendChild(capBox);
+        hotkeysRow.appendChild(sumBox);
+
+
+        // 滿額站點與滾動更新設定
+        const autoSummaryRow = document.createElement('div');
+        autoSummaryRow.style.cssText = 'display: flex; gap: 12px; align-items: center; justify-content: space-between; border-top: 1px dashed #3c4043; padding-top: 6px;';
+
+
+        const targetBox = document.createElement('div');
+        targetBox.style.cssText = 'display: flex; align-items: center; gap: 6px;';
+        const targetLbl = document.createElement('span');
+        targetLbl.style.cssText = 'font-size: 12px; color: #e8eaed;';
+        targetLbl.textContent = '滿額自動總結站數：';
+        const targetInput = document.createElement('input');
+        targetInput.type = 'number';
+        targetInput.min = '0';
+        targetInput.max = '10';
+        targetInput.value = globalConfig.qaQueueSettings?.targetCount ?? 5;
+        targetInput.style.cssText = 'width: 48px; background: #2d2f31; color: #8ab4f8; border: 1px solid #5f6368; border-radius: 4px; padding: 3px 6px; font-size: 12px; text-align: center; font-weight: bold;';
+        targetInput.oninput = () => {
+            if (!globalConfig.qaQueueSettings) globalConfig.qaQueueSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.qaQueueSettings));
+            const val = parseInt(targetInput.value, 10);
+            globalConfig.qaQueueSettings.targetCount = isNaN(val) ? 0 : val;
+            Storage.set(globalConfig);
+        };
+        targetBox.appendChild(targetLbl);
+        targetBox.appendChild(targetInput);
+
+
+        const keepQueueLabel = document.createElement('label');
+        keepQueueLabel.style.cssText = 'display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; font-size: 12px; color: #e8eaed;';
+        const keepQueueCheck = document.createElement('input');
+        keepQueueCheck.type = 'checkbox';
+        keepQueueCheck.checked = globalConfig.qaQueueSettings?.keepQueueOnAutoSummary ?? false;
+        keepQueueCheck.onchange = () => {
+            if (!globalConfig.qaQueueSettings) globalConfig.qaQueueSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.qaQueueSettings));
+            globalConfig.qaQueueSettings.keepQueueOnAutoSummary = keepQueueCheck.checked;
+            Storage.set(globalConfig);
+            showToast(keepQueueCheck.checked ? '✅ 已啟用滿額滾動更新模式 (保留佇列)' : '⏸️ 已切換為滿額放出即焚模式');
+        };
+        keepQueueLabel.appendChild(keepQueueCheck);
+        keepQueueLabel.appendChild(document.createTextNode('達標總結後保留佇列 (滾動更新)'));
+
+
+        autoSummaryRow.appendChild(targetBox);
+        autoSummaryRow.appendChild(keepQueueLabel);
+
+
+        const hotkeyHint = document.createElement('div');
+        hotkeyHint.style.cssText = 'font-size: 11px; color: #9aa0a6; line-height: 1.4;';
+        hotkeyHint.textContent = '💡 支援逗號分隔多熱鍵 (如: F4, ^F4)；支援輸入框全域穿透；若留空欄位則 100% 釋放攔截，交由桌面 AHK。';
+
+
+        hotkeyGroup.appendChild(hotkeyTitle);
+        hotkeyGroup.appendChild(hotkeysRow);
+        hotkeyGroup.appendChild(autoSummaryRow);
+        hotkeyGroup.appendChild(hotkeyHint);
+
+
+        container.appendChild(hotkeyGroup);
+    }
+
+
+    function renderPaneAiStudio(container) {
+        while (container.firstChild) {
+            container.removeChild(container.firstChild);
+        }
+
+
+        if (!globalConfig.aiStudioSettings) {
+            globalConfig.aiStudioSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.aiStudioSettings));
+        }
+        const settings = globalConfig.aiStudioSettings;
+
+
+        // 1. 首選引擎
+        const engineRow = document.createElement('div');
+        engineRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #1e1f20; padding: 8px 12px; border-radius: 6px; border: 1px solid #3c4043;';
+        const engineLabel = document.createElement('span');
+        engineLabel.style.cssText = 'font-weight: 600; font-size: 13px; color: #8ab4f8;';
+        engineLabel.textContent = '⚡ 首選提取引擎：';
+        const engineSelect = document.createElement('select');
+        Object.assign(engineSelect.style, {
+            backgroundColor: '#2d2f31', color: '#e8eaed', border: '1px solid #5f6368', borderRadius: '4px', padding: '4px 8px', fontSize: '12px', fontWeight: '600', cursor: 'pointer'
+        });
+        [
+            { id: 'native_menu', txt: '原生選單代理 (Copy as md ➔ 鉛筆 ➔ DOM)' },
+            { id: 'pencil_edit', txt: '鉛筆編輯模擬 (Pencil ➔ DOM)' },
+            { id: 'dom_parser', txt: '純 DOM 解析清洗' }
+        ].forEach(e => {
+            const opt = document.createElement('option');
+            opt.value = e.id;
+            opt.textContent = e.txt;
+            if (settings.primaryEngine === e.id) opt.selected = true;
+            engineSelect.appendChild(opt);
+        });
+        engineSelect.onchange = () => {
+            settings.primaryEngine = engineSelect.value;
+            Storage.set(globalConfig);
+            showToast('⚡ 已更新 AI Studio 首選引擎！');
+        };
+        engineRow.appendChild(engineLabel);
+        engineRow.appendChild(engineSelect);
+        container.appendChild(engineRow);
+
+
+        // 2. 佈局與排列
+        const layoutRow = document.createElement('div');
+        layoutRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #1e1f20; padding: 8px 12px; border-radius: 6px; border: 1px solid #3c4043;';
+        const layoutLabel = document.createElement('span');
+        layoutLabel.style.cssText = 'font-weight: 600; font-size: 13px; color: #8ab4f8;';
+        layoutLabel.textContent = '🎨 按鈕排列佈局：';
+        const layoutSelect = document.createElement('select');
+        Object.assign(layoutSelect.style, {
+            backgroundColor: '#2d2f31', color: '#e8eaed', border: '1px solid #5f6368', borderRadius: '4px', padding: '4px 8px', fontSize: '12px', fontWeight: '600', cursor: 'pointer'
+        });
+        [
+            { id: 'staircase', txt: '直排階梯雙欄 (預設推薦，適合寬螢幕)' },
+            { id: 'grid_3_2', txt: '3+2 雙排網格' },
+            { id: 'single_row', txt: '橫向單排展開 (緊湊單排)' }
+        ].forEach(l => {
+            const opt = document.createElement('option');
+            opt.value = l.id;
+            opt.textContent = l.txt;
+            if (settings.sliceLayout === l.id) opt.selected = true;
+            layoutSelect.appendChild(opt);
+        });
+        layoutSelect.onchange = () => {
+            settings.sliceLayout = layoutSelect.value;
+            Storage.set(globalConfig);
+            mountUI(true);
+            showToast('🎨 已更新排版佈局！');
+        };
+        layoutRow.appendChild(layoutLabel);
+        layoutRow.appendChild(layoutSelect);
+        container.appendChild(layoutRow);
+
+
+        // 3. 滾輪範圍與失敗處置
+        const controlRow = document.createElement('div');
+        controlRow.style.cssText = 'display: flex; gap: 12px;';
+
+
+        const wheelCol = document.createElement('div');
+        wheelCol.style.cssText = 'flex: 1; display: flex; flex-direction: column; gap: 4px; background: #1e1f20; padding: 8px 10px; border-radius: 6px; border: 1px solid #3c4043;';
+        const wheelLabel = document.createElement('span');
+        wheelLabel.style.cssText = 'font-size: 12px; color: #8ab4f8; font-weight: bold;';
+        wheelLabel.textContent = '🎡 滾輪切換區域：';
+        const wheelSelect = document.createElement('select');
+        Object.assign(wheelSelect.style, {
+            backgroundColor: '#2d2f31', color: '#e8eaed', border: '1px solid #5f6368', borderRadius: '4px', padding: '4px', fontSize: '11px'
+        });
+        [
+            { id: 'capsule_only', txt: '僅限模組色標膠囊 (預設推薦)' },
+            { id: 'control_group', txt: '控制群組 (齒輪+膠囊)' },
+            { id: 'entire_toolbar', txt: '整個懸浮工具列' }
+        ].forEach(w => {
+            const opt = document.createElement('option');
+            opt.value = w.id;
+            opt.textContent = w.txt;
+            if (settings.wheelSwitchScope === w.id) opt.selected = true;
+            wheelSelect.appendChild(opt);
+        });
+        wheelSelect.onchange = () => {
+            settings.wheelSwitchScope = wheelSelect.value;
+            Storage.set(globalConfig);
+            showToast('🎡 已更新滾輪觸發範圍！');
+        };
+        wheelCol.appendChild(wheelLabel);
+        wheelCol.appendChild(wheelSelect);
+
+
+        const fbCol = document.createElement('div');
+        fbCol.style.cssText = 'flex: 1; display: flex; flex-direction: column; gap: 4px; background: #1e1f20; padding: 8px 10px; border-radius: 6px; border: 1px solid #3c4043;';
+        const fbLabel = document.createElement('span');
+        fbLabel.style.cssText = 'font-size: 12px; color: #8ab4f8; font-weight: bold;';
+        fbLabel.textContent = '🛡️ 切片未命中處置：';
+        const fbSelect = document.createElement('select');
+        Object.assign(fbSelect.style, {
+            backgroundColor: '#2d2f31', color: '#e8eaed', border: '1px solid #5f6368', borderRadius: '4px', padding: '4px', fontSize: '11px'
+        });
+        [
+            { id: 'warn_block', txt: '🛑 嚴格阻斷並警報 (預設推薦)' },
+            { id: 'lenient_full', txt: '⚠️ 寬容降級複製全量' },
+            { id: 'custom_string', txt: '📝 填入自訂佔位字串' }
+        ].forEach(f => {
+            const opt = document.createElement('option');
+            opt.value = f.id;
+            opt.textContent = f.txt;
+            if (settings.fallbackAction === f.id) opt.selected = true;
+            fbSelect.appendChild(opt);
+        });
+        fbSelect.onchange = () => {
+            settings.fallbackAction = fbSelect.value;
+            Storage.set(globalConfig);
+            showToast('🛡️ 已更新切片未命中策略！');
+            renderPaneAiStudio(container);
+        };
+        fbCol.appendChild(fbLabel);
+        fbCol.appendChild(fbSelect);
+
+
+        controlRow.appendChild(wheelCol);
+        controlRow.appendChild(fbCol);
+        container.appendChild(controlRow);
+
+
+        if (settings.fallbackAction === 'custom_string') {
+            const customInput = document.createElement('input');
+            customInput.type = 'text';
+            customInput.placeholder = '自訂未命中時寫入剪貼簿之預覽字串';
+            customInput.value = settings.fallbackCustomText || '';
+            Object.assign(customInput.style, {
+                width: '100%', backgroundColor: '#2d2f31', color: '#f9fafb', border: '1px solid #5f6368', borderRadius: '4px', padding: '4px 8px', fontSize: '11px', boxSizing: 'border-box'
+            });
+            customInput.oninput = () => {
+                settings.fallbackCustomText = customInput.value;
+                Storage.set(globalConfig);
+            };
+            container.appendChild(customInput);
+        }
+
+
+        // 4. 中層：3 模組切換導覽條
+        const modNav = document.createElement('div');
+        modNav.style.cssText = 'display: flex; gap: 8px; margin-top: 4px;';
+
+
+        ['module_1', 'module_2', 'module_3'].forEach(mKey => {
+            const m = settings.modules[mKey];
+            const modCard = document.createElement('div');
+            modCard.style.cssText = `flex: 1; background: #1e1f20; border: 2px solid ${mKey === currentModuleTab ? '#8ab4f8' : '#3c4043'}; border-radius: 6px; padding: 6px 8px; cursor: pointer; display: flex; flex-direction: column; gap: 4px;`;
+
+
+            const headRow = document.createElement('div');
+            headRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between;';
+
+
+            const nameTxt = document.createElement('span');
+            nameTxt.style.cssText = 'font-size: 12px; font-weight: bold; color: #fff;';
+            nameTxt.textContent = m.name;
+
+
+            const colorPick = document.createElement('input');
+            colorPick.type = 'color';
+            colorPick.value = m.badgeColor;
+            colorPick.style.cssText = 'width: 22px; height: 22px; border: none; padding: 0; background: transparent; cursor: pointer;';
+            colorPick.onchange = (e) => {
+                m.badgeColor = e.target.value;
+                Storage.set(globalConfig);
+                mountUI(true);
+            };
+
+
+            headRow.appendChild(nameTxt);
+            headRow.appendChild(colorPick);
+
+
+            const subRow = document.createElement('div');
+            subRow.style.cssText = 'display: flex; align-items: center; gap: 6px;';
+
+
+            const badgeInput = document.createElement('input');
+            badgeInput.type = 'text';
+            badgeInput.maxLength = 4;
+            badgeInput.value = m.badgeText;
+            badgeInput.placeholder = '標籤';
+            badgeInput.style.cssText = 'width: 48px; background: #2d2f31; color: #8ab4f8; border: 1px solid #5f6368; border-radius: 4px; padding: 2px 4px; font-size: 11px; text-align: center; font-weight: bold;';
+            badgeInput.oninput = () => {
+                m.badgeText = badgeInput.value.trim() || '標籤';
+                Storage.set(globalConfig);
+                mountUI(true);
+            };
+
+
+            const hint = document.createElement('span');
+            hint.style.cssText = 'font-size: 11px; color: #9aa0a6;';
+            hint.textContent = (mKey === settings.activeModuleId) ? '🟢 當前啟用' : '點擊編輯';
+
+
+            subRow.appendChild(badgeInput);
+            subRow.appendChild(hint);
+
+
+            modCard.appendChild(headRow);
+            modCard.appendChild(subRow);
+
+
+            modCard.onclick = (e) => {
+                if (['INPUT', 'SELECT'].includes(e.target.tagName)) return;
+                currentModuleTab = mKey;
+                renderPaneAiStudio(container);
+            };
+
+
+            modNav.appendChild(modCard);
+        });
+        container.appendChild(modNav);
+
+
+        // 5. 下層：當前選取模組按鈕清單
+        const curModDef = settings.modules[currentModuleTab];
+        const btnListContainer = document.createElement('div');
+        btnListContainer.style.cssText = 'display: flex; flex-direction: column; gap: 8px; margin-top: 4px;';
+
+
+        curModDef.buttons.forEach((btnDef) => {
+            const card = document.createElement('div');
+            card.style.cssText = 'background: #1e1f20; border: 1px solid #3c4043; border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;';
+
+
+            const headRow = document.createElement('div');
+            headRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 8px;';
+
+
+            const leftGroup = document.createElement('div');
+            leftGroup.style.cssText = 'display: flex; align-items: center; gap: 6px; flex: 1;';
+
+
+            const chk = document.createElement('input');
+            chk.type = 'checkbox';
+            chk.checked = btnDef.enabled;
+            chk.onchange = () => {
+                btnDef.enabled = chk.checked;
+                Storage.set(globalConfig);
+                mountUI(true);
+            };
+
+
+            const nameInput = document.createElement('input');
+            nameInput.type = 'text';
+            nameInput.value = btnDef.name;
+            nameInput.style.cssText = 'flex: 1; background: #2d2f31; color: #8ab4f8; border: 1px solid #5f6368; border-radius: 4px; padding: 3px 6px; font-size: 12px; font-weight: bold;';
+            nameInput.oninput = () => {
+                btnDef.name = nameInput.value.trim();
+                Storage.set(globalConfig);
+                mountUI(true);
+            };
+
+
+            const modeSel = document.createElement('select');
+            modeSel.style.cssText = 'background: #2d2f31; color: #e8eaed; border: 1px solid #5f6368; border-radius: 4px; padding: 2px 4px; font-size: 11px;';
+            const optMatch = document.createElement('option');
+            optMatch.value = 'match';
+            optMatch.textContent = '截取 (Match)';
+            if (btnDef.mode === 'match') optMatch.selected = true;
+            const optReplace = document.createElement('option');
+            optReplace.value = 'replace';
+            optReplace.textContent = '挖除 (Replace)';
+            if (btnDef.mode === 'replace') optReplace.selected = true;
+            modeSel.appendChild(optMatch);
+            modeSel.appendChild(optReplace);
+            modeSel.onchange = () => {
+                btnDef.mode = modeSel.value;
+                Storage.set(globalConfig);
+                renderPaneAiStudio(container);
+            };
+
+
+            leftGroup.appendChild(chk);
+            leftGroup.appendChild(nameInput);
+            leftGroup.appendChild(modeSel);
+
+
+            const rightTabsGroup = document.createElement('div');
+            rightTabsGroup.className = 'ai-copy-card-subtabs';
+
+
+            const subtabBtnRule = document.createElement('button');
+            subtabBtnRule.className = 'ai-copy-card-subtab-btn active';
+            subtabBtnRule.textContent = '🎯 正則規則';
+
+
+            const subtabBtnAffix = document.createElement('button');
+            subtabBtnAffix.className = 'ai-copy-card-subtab-btn';
+
+
+            function updateAffixTabHighlight() {
+                const hasAffix = Boolean((btnDef.prefix && btnDef.prefix.trim()) || (btnDef.suffix && btnDef.suffix.trim()));
+                subtabBtnAffix.textContent = hasAffix ? '🏷️ 專屬前後綴 (已設定)' : '🏷️ 專屬前後綴';
+                if (hasAffix && !subtabBtnAffix.classList.contains('active')) {
+                    subtabBtnAffix.style.borderColor = '#8ab4f8';
+                    subtabBtnAffix.style.color = '#8ab4f8';
+                    subtabBtnAffix.style.background = 'rgba(138, 180, 248, 0.08)';
+                } else if (!subtabBtnAffix.classList.contains('active')) {
+                    subtabBtnAffix.style.borderColor = '#5f6368';
+                    subtabBtnAffix.style.color = '#9aa0a6';
+                    subtabBtnAffix.style.background = 'transparent';
+                }
+            }
+            updateAffixTabHighlight();
+
+
+            rightTabsGroup.appendChild(subtabBtnRule);
+            rightTabsGroup.appendChild(subtabBtnAffix);
+
+
+            headRow.appendChild(leftGroup);
+            headRow.appendChild(rightTabsGroup);
+            card.appendChild(headRow);
+
+
+            // 子面板 1：正則規則
+            const paneViewRule = document.createElement('div');
+            paneViewRule.style.cssText = 'display: flex; flex-direction: column; gap: 6px;';
+
+
+            const patInput = document.createElement('input');
+            patInput.type = 'text';
+            patInput.value = btnDef.pattern || '';
+            patInput.placeholder = '正則表示式 (如: /pattern/flags)';
+            patInput.style.cssText = 'width: 100%; background: #2d2f31; color: #f9fafb; border: 1px solid #5f6368; border-radius: 4px; padding: 4px 6px; font-size: 11px; font-family: monospace; box-sizing: border-box;';
+            patInput.oninput = () => {
+                btnDef.pattern = patInput.value.trim();
+                Storage.set(globalConfig);
+            };
+            paneViewRule.appendChild(patInput);
+
+
+            if (btnDef.mode === 'match') {
+                const optionsRow = document.createElement('div');
+                optionsRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 8px;';
+
+
+                const leftOptionsGroup = document.createElement('div');
+                leftOptionsGroup.style.cssText = 'display: flex; align-items: center; gap: 12px;';
+
+
+                const maxBlockLabel = document.createElement('label');
+                maxBlockLabel.style.cssText = 'display: flex; align-items: center; gap: 4px; font-size: 11px; color: #9aa0a6; cursor: pointer; user-select: none;';
+                const maxBlockChk = document.createElement('input');
+                maxBlockChk.type = 'checkbox';
+                maxBlockChk.checked = !!btnDef.isCodeBlockTarget;
+                maxBlockChk.onchange = () => {
+                    btnDef.isCodeBlockTarget = maxBlockChk.checked;
+                    Storage.set(globalConfig);
+                };
+                maxBlockLabel.appendChild(maxBlockChk);
+                maxBlockLabel.appendChild(document.createTextNode('最長代碼塊最優'));
+                leftOptionsGroup.appendChild(maxBlockLabel);
+
+
+                optionsRow.appendChild(leftOptionsGroup);
+
+
+                const fallbackAccordionBox = document.createElement('div');
+                const hasFallbackValue = Boolean(btnDef.fallbackPattern && btnDef.fallbackPattern.trim());
+                fallbackAccordionBox.style.cssText = `display: ${hasFallbackValue ? 'flex' : 'none'}; flex-direction: column; gap: 4px; padding: 6px 8px; background: rgba(192, 132, 252, 0.05); border: 1px dashed rgba(192, 132, 252, 0.4); border-radius: 4px;`;
+
+
+                const fallbackTitle = document.createElement('div');
+                fallbackTitle.style.cssText = 'font-size: 11px; color: #c084fc; font-weight: bold;';
+                fallbackTitle.textContent = '🛟 備援正則 (支援換行多條探測，支援 # 與 // 註解行)：';
+
+
+                const fallbackPatTextarea = document.createElement('textarea');
+                fallbackPatTextarea.rows = 2;
+                fallbackPatTextarea.value = btnDef.fallbackPattern || '';
+                fallbackPatTextarea.placeholder = '備援正則 (支援換行多條探測，如: /```([\\s\\S]*)```/i)';
+                fallbackPatTextarea.style.cssText = 'width: 100%; background: #2d2f31; color: #c084fc; border: 1px solid #5f6368; border-radius: 4px; padding: 4px 6px; font-size: 11px; font-family: monospace; box-sizing: border-box; resize: vertical;';
+
+
+                const btnToggleFallback = document.createElement('button');
+                function refreshToggleGhostStyle() {
+                    const active = Boolean(btnDef.fallbackPattern && btnDef.fallbackPattern.trim());
+                    btnToggleFallback.textContent = active ? '🛟 備用 (已設定)' : '🛟 +備用';
+                    btnToggleFallback.style.cssText = `background: ${active ? 'rgba(138, 180, 248, 0.12)' : 'transparent'}; border: 1px solid ${active ? '#8ab4f8' : '#5f6368'}; color: ${active ? '#8ab4f8' : '#9aa0a6'}; padding: 2px 6px; font-size: 11px; border-radius: 4px; cursor: pointer; transition: all 0.2s; white-space: nowrap;`;
+                }
+                refreshToggleGhostStyle();
+
+
+                btnToggleFallback.onclick = () => {
+                    if (fallbackAccordionBox.style.display === 'none') {
+                        fallbackAccordionBox.style.display = 'flex';
+                        fallbackPatTextarea.focus();
+                    } else {
+                        fallbackAccordionBox.style.display = 'none';
+                    }
+                };
+
+
+                fallbackPatTextarea.oninput = () => {
+                    btnDef.fallbackPattern = fallbackPatTextarea.value.trim();
+                    Storage.set(globalConfig);
+                    refreshToggleGhostStyle();
+                };
+
+
+                fallbackAccordionBox.appendChild(fallbackTitle);
+                fallbackAccordionBox.appendChild(fallbackPatTextarea);
+
+
+                optionsRow.appendChild(btnToggleFallback);
+                paneViewRule.appendChild(optionsRow);
+                paneViewRule.appendChild(fallbackAccordionBox);
+            }
+
+
+            if (btnDef.mode === 'replace') {
+                const repInput = document.createElement('input');
+                repInput.type = 'text';
+                repInput.value = btnDef.replaceValue || '';
+                repInput.placeholder = '替換字串 (留空即完全挖除)';
+                repInput.style.cssText = 'width: 100%; background: #2d2f31; color: #a7f3d0; border: 1px solid #5f6368; border-radius: 4px; padding: 3px 6px; font-size: 11px; font-family: monospace; box-sizing: border-box;';
+                repInput.oninput = () => {
+                    btnDef.replaceValue = repInput.value;
+                    Storage.set(globalConfig);
+                };
+                paneViewRule.appendChild(repInput);
+            }
+            card.appendChild(paneViewRule);
+
+
+		// 子面板 2：專屬前後綴 (實裝 🔗 雲端直達 ↗ 動態跳轉按鈕)
+            const paneViewAffix = document.createElement('div');
+            paneViewAffix.style.cssText = 'display: none; flex-direction: column; gap: 6px;';
+
+
+            const prefixGroup = document.createElement('div');
+            prefixGroup.style.cssText = 'display: flex; flex-direction: column; gap: 4px;';
+
+
+            const prefixHeadRow = document.createElement('div');
+            prefixHeadRow.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
+
+
+            const prefixLeftBox = document.createElement('div');
+            prefixLeftBox.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+
+
+            const prefixLbl = document.createElement('span');
+            prefixLbl.style.cssText = 'font-size: 11px; color: #8ab4f8; font-weight: bold;';
+            prefixLbl.textContent = '前綴 (支援字串文字或 Google Docs 雲端 URL)：';
+
+
+            const prefixDocLink = document.createElement('a');
+            prefixDocLink.textContent = '🔗 雲端直達 ↗';
+            prefixDocLink.target = '_blank';
+            prefixDocLink.rel = 'noopener noreferrer';
+            prefixDocLink.title = '點擊在新分頁開啟此前綴雲端文件';
+            prefixDocLink.style.cssText = 'color: #8ab4f8; text-decoration: none; font-size: 11px; font-weight: bold; background: #2d2f31; border: 1px solid #5f6368; padding: 1px 6px; border-radius: 4px; display: none; align-items: center; transition: all 0.2s;';
+            prefixDocLink.onmouseover = () => { prefixDocLink.style.borderColor = '#8ab4f8'; prefixDocLink.style.color = '#fff'; prefixDocLink.style.background = '#3c4043'; };
+            prefixDocLink.onmouseout = () => { prefixDocLink.style.borderColor = '#5f6368'; prefixDocLink.style.color = '#8ab4f8'; prefixDocLink.style.background = '#2d2f31'; };
+
+
+            prefixLeftBox.appendChild(prefixLbl);
+            prefixLeftBox.appendChild(prefixDocLink);
+
+
+            const autoDividerLabel = document.createElement('label');
+            autoDividerLabel.style.cssText = 'font-size: 11px; color: #9aa0a6; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 4px;';
+            const autoDividerChk = document.createElement('input');
+            autoDividerChk.type = 'checkbox';
+            autoDividerChk.checked = btnDef.autoDivider === true;
+            autoDividerChk.onchange = () => {
+                btnDef.autoDivider = autoDividerChk.checked;
+                Storage.set(globalConfig);
+            };
+            autoDividerLabel.appendChild(autoDividerChk);
+            autoDividerLabel.appendChild(document.createTextNode('補齊 --- 分割線'));
+
+
+            prefixHeadRow.appendChild(prefixLeftBox);
+            prefixHeadRow.appendChild(autoDividerLabel);
+
+
+            const prefixTextarea = document.createElement('textarea');
+            prefixTextarea.rows = 3;
+            prefixTextarea.value = btnDef.prefix || '';
+            prefixTextarea.placeholder = '自訂純文字前綴，或填入 Google Doc 網址實現動態拉取';
+            prefixTextarea.style.cssText = 'width: 100%; height: 80px; background: #2d2f31; color: #f9fafb; border: 1px solid #5f6368; border-radius: 4px; padding: 4px 6px; font-size: 11px; font-family: monospace; box-sizing: border-box; resize: vertical;';
+
+
+            function updatePrefixDocLink() {
+                const safeUrl = getSafeDocLinkUrl(prefixTextarea.value);
+                if (safeUrl !== '#') {
+                    prefixDocLink.href = safeUrl;
+                    prefixDocLink.style.display = 'inline-flex';
+                } else {
+                    prefixDocLink.style.display = 'none';
+                }
+            }
+            updatePrefixDocLink();
+
+
+            prefixTextarea.oninput = () => {
+                btnDef.prefix = prefixTextarea.value;
+                Storage.set(globalConfig);
+                updateAffixTabHighlight();
+                updatePrefixDocLink();
+            };
+            prefixGroup.appendChild(prefixHeadRow);
+            prefixGroup.appendChild(prefixTextarea);
+
+
+            const suffixGroup = document.createElement('div');
+            suffixGroup.style.cssText = 'display: flex; flex-direction: column; gap: 2px;';
+
+
+            const suffixHeadRow = document.createElement('div');
+            suffixHeadRow.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+
+
+            const suffixLbl = document.createElement('span');
+            suffixLbl.style.cssText = 'font-size: 11px; color: #8ab4f8; font-weight: bold;';
+            suffixLbl.textContent = '後綴 (支援字串文字或 Google Docs 雲端 URL)：';
+
+
+            const suffixDocLink = document.createElement('a');
+            suffixDocLink.textContent = '🔗 雲端直達 ↗';
+            suffixDocLink.target = '_blank';
+            suffixDocLink.rel = 'noopener noreferrer';
+            suffixDocLink.title = '點擊在新分頁開啟此後綴雲端文件';
+            suffixDocLink.style.cssText = 'color: #8ab4f8; text-decoration: none; font-size: 11px; font-weight: bold; background: #2d2f31; border: 1px solid #5f6368; padding: 1px 6px; border-radius: 4px; display: none; align-items: center; transition: all 0.2s;';
+            suffixDocLink.onmouseover = () => { suffixDocLink.style.borderColor = '#8ab4f8'; suffixDocLink.style.color = '#fff'; suffixDocLink.style.background = '#3c4043'; };
+            suffixDocLink.onmouseout = () => { suffixDocLink.style.borderColor = '#5f6368'; suffixDocLink.style.color = '#8ab4f8'; suffixDocLink.style.background = '#2d2f31'; };
+
+
+            suffixHeadRow.appendChild(suffixLbl);
+            suffixHeadRow.appendChild(suffixDocLink);
+
+
+            const suffixTextarea = document.createElement('textarea');
+            suffixTextarea.rows = 2;
+            suffixTextarea.value = btnDef.suffix || '';
+            suffixTextarea.placeholder = '自訂純文字後綴，或填入 Google Doc 網址實現動態拉取';
+            suffixTextarea.style.cssText = 'width: 100%; height: 45px; background: #2d2f31; color: #f9fafb; border: 1px solid #5f6368; border-radius: 4px; padding: 4px 6px; font-size: 11px; font-family: monospace; box-sizing: border-box; resize: vertical;';
+
+
+            function updateSuffixDocLink() {
+                const safeUrl = getSafeDocLinkUrl(suffixTextarea.value);
+                if (safeUrl !== '#') {
+                    suffixDocLink.href = safeUrl;
+                    suffixDocLink.style.display = 'inline-flex';
+                } else {
+                    suffixDocLink.style.display = 'none';
+                }
+            }
+            updateSuffixDocLink();
+
+
+            suffixTextarea.oninput = () => {
+                btnDef.suffix = suffixTextarea.value;
+                Storage.set(globalConfig);
+                updateAffixTabHighlight();
+                updateSuffixDocLink();
+            };
+            suffixGroup.appendChild(suffixHeadRow);
+            suffixGroup.appendChild(suffixTextarea);
+
+
+            paneViewAffix.appendChild(prefixGroup);
+            paneViewAffix.appendChild(suffixGroup);
+            card.appendChild(paneViewAffix);
+
+
+            subtabBtnRule.onclick = () => {
+                subtabBtnRule.classList.add('active');
+                subtabBtnAffix.classList.remove('active');
+                paneViewRule.style.display = 'flex';
+                paneViewAffix.style.display = 'none';
+                updateAffixTabHighlight();
+            };
+
+
+            subtabBtnAffix.onclick = () => {
+                subtabBtnAffix.classList.add('active');
+                subtabBtnRule.classList.remove('active');
+                paneViewRule.style.display = 'none';
+                paneViewAffix.style.display = 'flex';
+                subtabBtnAffix.style.borderColor = '#8ab4f8';
+                subtabBtnAffix.style.color = '#8ab4f8';
+                subtabBtnAffix.style.background = 'rgba(138, 180, 248, 0.15)';
+            };
+
+
+            btnListContainer.appendChild(card);
+        });
+
+
+        container.appendChild(btnListContainer);
+    }
+
+
+    function renderPaneCloud(container) {
+        while (container.firstChild) container.removeChild(container.firstChild);
+
+
+        // 1. Google Docs 同步區
+        const cloudHeader = document.createElement('div');
+        cloudHeader.style.cssText = 'display: flex; justify-content: space-between; align-items: center; font-weight: 600; color: #9aa0a6; font-size: 12px;';
+        const cloudTitle = document.createElement('span');
+        cloudTitle.textContent = '🌐 雲端 JSON 配置同步 (Google Docs 純內容覆蓋)';
+        const cloudDocLink = document.createElement('a');
+        cloudDocLink.textContent = '🔗 開啟雲端文件↗';
+        cloudDocLink.href = getSafeDocLinkUrl(globalConfig.jsonSyncUrl);
+        cloudDocLink.target = '_blank';
+        cloudDocLink.rel = 'noopener noreferrer';
+        cloudDocLink.style.cssText = 'color: #8ab4f8; text-decoration: none; font-size: 12px;';
+
+
+        cloudHeader.appendChild(cloudTitle);
+        cloudHeader.appendChild(cloudDocLink);
+
+
+        const inputSyncUrl = document.createElement('input');
+        inputSyncUrl.type = 'text';
+        inputSyncUrl.placeholder = 'https://docs.google.com/document/d/.../edit';
+        inputSyncUrl.value = globalConfig.jsonSyncUrl || '';
+        Object.assign(inputSyncUrl.style, {
+            width: '100%', backgroundColor: '#2d2f31', color: '#f9fafb', border: '1px solid #5f6368', borderRadius: '4px', padding: '6px 8px', fontSize: '12px', boxSizing: 'border-box'
+        });
+
+
+        inputSyncUrl.oninput = () => {
+            globalConfig.jsonSyncUrl = inputSyncUrl.value.trim();
+            cloudDocLink.href = getSafeDocLinkUrl(globalConfig.jsonSyncUrl);
+            Storage.set(globalConfig);
+        };
+
+
+        const btnCloudSync = document.createElement('button');
+        btnCloudSync.textContent = '🔄 一鍵從雲端同步配置 (純內容覆蓋，隔離本機座標)';
+        btnCloudSync.className = 'ai-copy-btn-primary';
+        btnCloudSync.style.cssText = 'background: #047857; color: #ffffff; width: 100%; padding: 8px;';
+        btnCloudSync.onmouseover = () => btnCloudSync.style.background = '#059669';
+        btnCloudSync.onmouseout = () => btnCloudSync.style.background = '#047857';
+
+
+        btnCloudSync.onclick = () => {
+            syncFromJsonDoc(() => {
+                mountUI(true);
+                renderPaneCloud(container);
+            });
+        };
+
+
+        container.appendChild(cloudHeader);
+        container.appendChild(inputSyncUrl);
+        container.appendChild(btnCloudSync);
+
+
+        const divider = document.createElement('div');
+        divider.style.cssText = 'height: 1px; background: #3c4043; margin: 8px 0;';
+        container.appendChild(divider);
+
+
+        // 2. 模組化備份精靈
+        const wizTitle = document.createElement('div');
+        wizTitle.style.cssText = 'font-weight: 600; color: #9aa0a6; font-size: 12px;';
+        wizTitle.textContent = '📦 模組化配置匯出精靈 (可自選導出範疇)：';
+        container.appendChild(wizTitle);
+
+
+        const wizBox = document.createElement('div');
+        wizBox.style.cssText = 'background: #1e1f20; border: 1px solid #3c4043; border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 6px;';
+
+
+        const chkMod1 = document.createElement('input'); chkMod1.type = 'checkbox'; chkMod1.checked = true;
+        const lblMod1 = document.createElement('label'); lblMod1.style.cssText = 'font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 6px;';
+        lblMod1.appendChild(chkMod1); lblMod1.appendChild(document.createTextNode('模組一：前後綴、站點排序與採集動作、雜訊規則、15組切片正則及熱鍵偏好 (內容設定)'));
+
+
+        const chkMod2 = document.createElement('input'); chkMod2.type = 'checkbox'; chkMod2.checked = false;
+        const lblMod2 = document.createElement('label'); lblMod2.style.cssText = 'font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 6px;';
+        lblMod2.appendChild(chkMod2); lblMod2.appendChild(document.createTextNode('模組二：主卡片懸浮座標、小光球座標、Toast座標與收折狀態 (螢幕位置，遷移整機可選)'));
+
+
+        const chkMod3 = document.createElement('input'); chkMod3.type = 'checkbox'; chkMod3.checked = false;
+        const lblMod3 = document.createElement('label'); lblMod3.style.cssText = 'font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 6px;';
+        lblMod3.appendChild(chkMod3); lblMod3.appendChild(document.createTextNode('模組三：AI Studio 排版佈局 (3+2/階梯/單排) 與紫鍵獨立設定'));
+
+
+        wizBox.appendChild(lblMod1);
+        wizBox.appendChild(lblMod2);
+        wizBox.appendChild(lblMod3);
+        container.appendChild(wizBox);
+
+
+        function generateExportPayload() {
+            const payload = JSON.parse(JSON.stringify(globalConfig));
+            if (!chkMod2.checked) {
+                delete payload.uiPosition;
+                delete payload.orbPosition;
+                delete payload.toastPosition;
+                delete payload.isCollapsed;
+            }
+            if (!chkMod3.checked) {
+                if (payload.aiStudioSettings) {
+                    delete payload.aiStudioSettings.sliceLayout;
+                    delete payload.aiStudioSettings.purplePosition;
+                    delete payload.aiStudioSettings.activeModuleId;
+                }
+            }
+            return payload;
+        }
+
+
+        const ioRow = document.createElement('div');
+        ioRow.style.cssText = 'display: flex; gap: 8px;';
+
+
+        const btnCopyJson = document.createElement('button');
+        btnCopyJson.textContent = '📋 複製自訂 JSON';
+        btnCopyJson.className = 'ai-copy-btn-secondary';
+        btnCopyJson.style.flex = '1';
+        btnCopyJson.onclick = () => {
+            const data = generateExportPayload();
+            copyToClipboard(JSON.stringify(data, null, 2));
+            showToast('✅ JSON 設定檔已複製至剪貼簿！');
+        };
+
+
+        const btnExport = document.createElement('button');
+        btnExport.textContent = '💾 下載自訂 JSON';
+        btnExport.className = 'ai-copy-btn-secondary';
+        btnExport.style.flex = '1';
+        btnExport.onclick = () => {
+            const data = generateExportPayload();
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data, null, 2));
+            const dlAnchor = document.createElement('a');
+            dlAnchor.setAttribute('href', dataStr);
+            dlAnchor.setAttribute('download', 'ai_copy_config.json');
+            document.body.appendChild(dlAnchor);
+            dlAnchor.click();
+            dlAnchor.remove();
+            showToast('✅ JSON 配置文件已下載！');
+        };
+
+
+        ioRow.appendChild(btnCopyJson);
+        ioRow.appendChild(btnExport);
+        container.appendChild(ioRow);
+
+
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.json';
+        fileInput.style.display = 'none';
+
+
+        fileInput.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+                try {
+                    const parsed = JSON.parse(evt.target.result);
+                    if (parsed && typeof parsed === 'object') {
+                        globalConfig = sanitizeConfig(parsed);
+                        Storage.set(globalConfig);
+                        mountUI(true);
+                        renderPaneCloud(container);
+                        showToast('✅ JSON 設定檔匯入成功！');
+                    } else {
+                        showToast('❌ JSON 格式不符合規範！', true);
+                    }
+                } catch (err) {
+                    showToast('❌ JSON 解析失敗！', true);
+                }
+            };
+            reader.readAsText(file, 'UTF-8');
+        };
+
+
+        const btnImport = document.createElement('button');
+        btnImport.textContent = '📤 匯入 JSON 檔案並自癒覆蓋';
+        btnImport.className = 'ai-copy-btn-secondary';
+        btnImport.style.width = '100%';
+        btnImport.onclick = () => fileInput.click();
+
+
+        container.appendChild(btnImport);
+        container.appendChild(fileInput);
+    }
+
+
+    // ==========================================
+    // 12. 懸浮按鈕列、小光球與滾輪雙向調度
+    // ==========================================
+    function resolvePurplePosition(adapter) {
+        if (adapter && adapter.id === 'aistudio') {
+            const aiSetting = globalConfig.aiStudioSettings?.purplePosition;
+            if (aiSetting === 'right' || aiSetting === 'bottom') return aiSetting;
+        }
+        return globalConfig.uiSettings?.purplePosition || 'bottom';
+    }
+
+
+    function createOrbElement(adapter) {
+        const orb = document.createElement('div');
+        orb.id = FLOATING_ORB_ID;
+
+
+        const curModId = globalConfig.aiStudioSettings?.activeModuleId || 'module_1';
+        const modDef = globalConfig.aiStudioSettings?.modules?.[curModId] || DEFAULT_CONFIG.aiStudioSettings.modules.module_1;
+
+
+        orb.style.backgroundColor = modDef.badgeColor || '#1E88E5';
+        orb.style.boxShadow = `0 0 12px ${modDef.badgeColor || '#1E88E5'}, 0 4px 10px rgba(0,0,0,0.5)`;
+        orb.textContent = modDef.badgeText || '發包';
+        orb.title = `【${modDef.badgeText}】${modDef.name} (單擊展開，按住可拖曳)`;
+
+
+        setupDraggableUI(orb, orb, true, () => {
+            globalConfig.isCollapsed = false;
+            Storage.set(globalConfig);
+            mountUI(true);
+        });
+
+
+        return orb;
+    }
+
+
+    function attachWheelSwitch(targetEl) {
+        if (!targetEl) return;
+        targetEl.addEventListener('wheel', (e) => {
+            if ((e.buttons & 1) || isPointerDragging) {
+                e.preventDefault();
+                return;
+            }
+
+
+            const now = Date.now();
+            if (now - lastWheelTimestamp < 150) {
+                e.preventDefault();
+                return;
+            }
+            lastWheelTimestamp = now;
+
+
             e.preventDefault();
             e.stopPropagation();
-            navigateToFileCard(name);
-          });
 
 
-          li.appendChild(bullet);
-          li.appendChild(link);
-          listEl.appendChild(li);
-        });
-      }
+            if (e.deltaY > 0) {
+                switchModule('next');
+            } else if (e.deltaY < 0) {
+                switchModule('prev');
+            }
+        }, { passive: false });
     }
-  }
 
 
-  // ==========================================
-  // RFC 4180 CSV 狀態機解析規格 (防迴歸 INV-01)
-  // ==========================================
-  function parseRFC4180CSV(csvText) {
-    let inQuotes = false;
-    let fieldBuffer = '';
-    let rowBuffer = [];
-    const grid = [];
+    function createUIElement(adapter) {
+        const container = document.createElement('div');
+        container.id = UI_CONTAINER_ID;
 
 
-    const len = csvText.length;
-    for (let i = 0; i < len; i++) {
-      const char = csvText[i];
+        const isAiStudio = adapter.id === 'aistudio';
+        const isMistral = adapter.id === 'mistral';
+        const isZai = adapter.id === 'zai';
+        const isMiniMax = adapter.id === 'minimax';
+        const settings = globalConfig.aiStudioSettings || DEFAULT_CONFIG.aiStudioSettings;
+        const curModId = settings.activeModuleId || 'module_1';
+        const curMod = settings.modules?.[curModId] || DEFAULT_CONFIG.aiStudioSettings.modules.module_1;
+        const layoutMode = (isAiStudio && settings.sliceLayout) ? settings.sliceLayout : 'staircase';
 
 
-      if (char === '"') {
-        if (inQuotes && csvText[i + 1] === '"') {
-          fieldBuffer += '"';
-          i++;
-        } else {
-          inQuotes = !inQuotes;
+        const showFull = globalConfig.uiSettings.showFullThread && !isAiStudio && !isMistral;
+        const showPurple = globalConfig.uiSettings.showCleanSingle;
+        const effectivePurplePos = resolvePurplePosition(adapter);
+        const isStacked = effectivePurplePos === 'bottom';
+
+
+        // 收集切片按鈕實體
+        const sliceButtonNodes = [];
+        if (isAiStudio && curMod.buttons && Array.isArray(curMod.buttons)) {
+            curMod.buttons.forEach((btnDef, idx) => {
+                if (btnDef.enabled && btnDef.name) {
+                    const sliceBtn = document.createElement('button');
+                    sliceBtn.textContent = btnDef.name;
+                    sliceBtn.className = `ai-copy-btn-slice ai-copy-slice-${idx % 5}`;
+                    const fbTip = btnDef.fallbackPattern ? ` | 備援: ${btnDef.fallbackPattern}` : '';
+                    const affixTip = (btnDef.prefix || btnDef.suffix) ? ` | 前後綴: 已裝備` : '';
+                    const divTip = btnDef.autoDivider ? ` | 分割線: 自動` : '';
+                    sliceBtn.title = `[模式: ${btnDef.mode === 'replace' ? '挖除' : '截取'}] 正則：${btnDef.pattern || '無'}${fbTip}${affixTip}${divTip}`;
+                    sliceBtn.onclick = () => handleSliceCopyAction(btnDef);
+                    sliceButtonNodes.push(sliceBtn);
+                }
+            });
         }
-      } else if (char === ',' && !inQuotes) {
-        rowBuffer.push(fieldBuffer);
-        fieldBuffer = '';
-      } else if ((char === '\r' || char === '\n') && !inQuotes) {
-        if (char === '\r' && csvText[i + 1] === '\n') {
-          i++;
-        }
-        rowBuffer.push(fieldBuffer);
-        grid.push(rowBuffer);
-        fieldBuffer = '';
-        rowBuffer = [];
-      } else {
-        fieldBuffer += char;
-      }
-    }
 
 
-    if (fieldBuffer.length > 0 || rowBuffer.length > 0) {
-      rowBuffer.push(fieldBuffer);
-      grid.push(rowBuffer);
-    }
+        // 控制按鈕群組
+        const dragHandle = document.createElement('span');
+        dragHandle.className = 'ai-copy-drag-handle';
+        dragHandle.textContent = '⠿';
+        dragHandle.title = '按住拖曳移動工具列';
 
 
-    return grid;
-  }
-
-
-  // ==========================================
-  // 雲端特權拉取模組 (防迴歸 INV-01)
-  // ==========================================
-  function requestSingleUrl(url) {
-    return new Promise((resolve, reject) => {
-      if (typeof GM_xmlhttpRequest === 'function') {
-        GM_xmlhttpRequest({
-          method: 'GET',
-          url: url,
-          headers: {
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-          },
-          timeout: 15000,
-          onload: (response) => {
-            if (response.status >= 200 && response.status < 300) {
-              resolve(response.responseText);
+        const btnGear = document.createElement('button');
+        btnGear.textContent = '⚙️';
+        btnGear.className = 'ai-copy-icon-btn ai-copy-gear-btn';
+        btnGear.title = '開啟參數設定管理器 (右鍵可清空 QA 採集佇列)';
+        btnGear.onclick = () => openManager();
+        btnGear.oncontextmenu = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const queue = getQaQueue();
+            const count = Object.keys(queue.items || {}).length;
+            if (count === 0) {
+                showToast('ℹ️ QA 採集佇列目前為空。');
             } else {
-              reject(new Error(`HTTP ${response.status}`));
+                clearQaQueue();
+                showToast(`🗑️ QA 採集佇列已手動清空 (釋放 ${count} 筆暫存)！`);
             }
-          },
-          onerror: () => reject(new Error('Network Error / CSP Blocked')),
-          ontimeout: () => reject(new Error('Request Timeout'))
-        });
-      } else {
-        fetch(url, { cache: 'no-cache', credentials: 'omit' })
-          .then((res) => {
-            if (!res.ok) throw new Error(`Fetch HTTP ${res.status}`);
-            return res.text();
-          })
-          .then(resolve)
-          .catch(reject);
-      }
-    });
-  }
-
-
-  async function fetchCloudCSV() {
-    const config = loadConfig();
-    const endpoints = [config.cloudEndpointPrimary, config.cloudEndpointSecondary].filter(Boolean);
-
-
-    let lastErr = null;
-    for (const url of endpoints) {
-      try {
-        const text = await requestSingleUrl(url);
-        if (text && text.trim().length > 0) {
-          return text;
-        }
-      } catch (err) {
-        console.warn(`[QATP] 端點連線失敗: ${url}`, err);
-        lastErr = err;
-      }
-    }
-    throw new Error(`無法拉取雲端試算表模板 (${lastErr ? lastErr.message : '所有通道皆失敗'})`);
-  }
-
-
-  // ==========================================
-  // Google Docs 特徵 JSON 雲端同步演算法 (Safe DOM 防偽)
-  // OBS-B: 主機白名單正則驗證與 ID 萃取
-  // ==========================================
-  function getGoogleDocRawUrl(url) {
-    if (!url || typeof url !== 'string') return '';
-    const match = url.match(/https:\/\/docs\.google\.com\/document\/d\/([a-zA-Z0-9_-]+)/i);
-    if (match && match[1]) {
-      return `https://docs.google.com/document/d/${match[1]}/export?format=txt`;
-    }
-    return '';
-  }
-
-
-  function getGoogleDocEditUrl(url) {
-    if (!url || typeof url !== 'string') return '';
-    const match = url.match(/https:\/\/docs\.google\.com\/document\/d\/([a-zA-Z0-9_-]+)/i);
-    if (match && match[1]) {
-      return `https://docs.google.com/document/d/${match[1]}/edit`;
-    }
-    return '';
-  }
-
-
-  function getGoogleSheetEditUrl(url) {
-    if (!url || typeof url !== 'string') return '';
-    const match = url.match(/https:\/\/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/i);
-    if (match && match[1]) {
-      const gidMatch = url.match(/[?&#]gid=([0-9]+)/i);
-      const gid = gidMatch && gidMatch[1] ? `#gid=${gidMatch[1]}` : '';
-      return `https://docs.google.com/spreadsheets/d/${match[1]}/edit${gid}`;
-    }
-    return '';
-  }
-
-
-  function isHtmlResponse(text) {
-    if (!text || typeof text !== 'string') return false;
-    const lower = text.trim().toLowerCase();
-    return lower.startsWith('<!doctype html') || lower.startsWith('<html') || lower.includes('<head>') || lower.includes('accounts.google.com');
-  }
-
-
-  async function fetchCloudFeatureJSON(docUrl) {
-    const rawUrl = getGoogleDocRawUrl(docUrl);
-    if (!rawUrl) throw new Error('雲端 Docs 網址格式無效');
-
-
-    const rawText = await requestSingleUrl(rawUrl);
-    if (isHtmlResponse(rawText)) {
-      throw new Error('Google Docs 回傳了 HTML 頁面，請確認文件公開共享權限已設為「知道連結的人皆可查看」');
-    }
-
-
-    let cleaned = rawText.replace(/^\uFEFF/, '').trim();
-    cleaned = cleaned.replace(/[\u201C\u201D]/g, '"').replace(/[\u2018\u2019]/g, "'");
-    cleaned = cleaned.replace(/[\u2013\u2014]/g, '-');
-
-
-    const startIdx = cleaned.indexOf('{');
-    const endIdx = cleaned.lastIndexOf('}');
-    if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) {
-      throw new Error('未在雲端文件中檢索到有效的 JSON 根物件');
-    }
-    const targetJsonStr = cleaned.slice(startIdx, endIdx + 1);
-
-
-    try {
-      return JSON.parse(targetJsonStr);
-    } catch (err) {
-      throw new Error(`雲端特徵 JSON 解析失敗: ${err.message}`);
-    }
-  }
-
-
-  async function syncFromDocJson(docUrl) {
-    showToast('⏳ 正在從 Google Docs 同步特徵庫...', 'warning', 2000);
-    const featureData = await fetchCloudFeatureJSON(docUrl);
-
-
-    const config = loadConfig();
-
-
-    if (typeof featureData.qatpPrimaryToken === 'string' && featureData.qatpPrimaryToken.trim()) {
-      config.qatpPrimaryToken = featureData.qatpPrimaryToken.trim();
-    }
-    if (typeof featureData.qatpSecondaryPattern === 'string' && featureData.qatpSecondaryPattern.trim() && featureData.qatpSecondaryPattern.trim().length <= 500) {
-      config.qatpSecondaryPattern = featureData.qatpSecondaryPattern.trim();
-    }
-    if (typeof featureData.filterRegex === 'string' && featureData.filterRegex.trim() && featureData.filterRegex.trim().length <= 500) {
-      config.filterRegex = featureData.filterRegex.trim();
-    }
-    if (typeof featureData.codeRegex === 'string' && featureData.codeRegex.trim() && featureData.codeRegex.trim().length <= 500) {
-      config.codeRegex = featureData.codeRegex.trim();
-    }
-    if (Array.isArray(featureData.noteKeywords) && featureData.noteKeywords.length > 0) {
-      config.noteKeywords = featureData.noteKeywords.map((k) => String(k).trim()).filter(Boolean);
-    }
-
-
-    config.jsonSyncUrl = docUrl.trim();
-
-
-    saveConfig(config);
-    showToast('🎉 特徵庫已成功從雲端同步並持久化保存！', 'success', 3000);
-    return config;
-  }
-
-
-  // ==========================================
-  // 提示詞組裝模組 (容錯拼接加固，保留後續文案)
-  // ==========================================
-  function assemblePrompt(grid, targetGistUrl) {
-    const config = loadConfig();
-    const targetKw = (config.cloudKeyword || 'repo & grep').trim().toLowerCase();
-    let templateText = null;
-
-
-    for (const row of grid) {
-      if (row && row[0]) {
-        const colHeader = row[0].trim().toLowerCase();
-        if (colHeader === targetKw) {
-          templateText = row[1] || '';
-          break;
-        }
-      }
-    }
-
-
-    if (templateText === null) {
-      for (const row of grid) {
-        if (row && row[0] && row[0].trim().toLowerCase() === 'gist & grep') {
-          templateText = row[1] || '';
-          break;
-        }
-      }
-    }
-
-
-    if (templateText === null) {
-      throw new Error(`試算表中未定義 '${config.cloudKeyword}' 模板`);
-    }
-
-
-    let result = templateText
-      .replace(/\[目標網址\]/g, targetGistUrl)
-      .replace(/\{target_url\}/g, targetGistUrl)
-      .replace(/\{target_gist_url\}/g, targetGistUrl);
-
-
-    const targetPattern = /目標\s*Gist\s*網址\s*[:：]/i;
-    const match = result.match(targetPattern);
-
-
-    if (match) {
-      const matchIndex = match.index;
-      const matchLength = match[0].length;
-      const beforeMatch = result.slice(0, matchIndex + matchLength);
-      const afterMatch = result.slice(matchIndex + matchLength);
-
-
-      if (!afterMatch.includes(targetGistUrl)) {
-        result = `${beforeMatch}\n${targetGistUrl}\n${afterMatch.trimStart()}`;
-      }
-    } else {
-      result = `${result.trimEnd()}\n\n目標 Gist 網址：\n${targetGistUrl}`;
-    }
-
-
-    return result;
-  }
-
-
-  // ==========================================
-  // 特權剪貼簿模組 (讀與寫)
-  // ==========================================
-  async function writeToClipboard(text) {
-    try {
-      if (typeof GM_setClipboard === 'function') {
-        GM_setClipboard(text, 'text');
-        return true;
-      }
-    } catch (e) {
-      console.warn('[QATP] GM_setClipboard 失敗，嘗試降級: ', e);
-    }
-
-
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(text);
-        return true;
-      }
-    } catch (e) {
-      console.warn('[QATP] navigator.clipboard 失敗，嘗試 textarea 降級: ', e);
-    }
-
-
-    try {
-      const textarea = document.createElement('textarea');
-      textarea.value = text;
-      textarea.style.position = 'fixed';
-      textarea.style.left = '-9999px';
-      textarea.style.top = '-9999px';
-      document.body.appendChild(textarea);
-      textarea.focus();
-      textarea.select();
-      const success = document.execCommand('copy');
-      document.body.removeChild(textarea);
-      if (success) return true;
-    } catch (e) {
-      console.error('[QATP] 剪貼簿寫入受阻: ', e);
-    }
-
-
-    throw new Error('剪貼簿存取受阻，請手動複製');
-  }
-
-
-  async function readClipboardText() {
-    if (!navigator.clipboard || !navigator.clipboard.readText) {
-      throw new Error('瀏覽器環境不支援非同步剪貼簿讀取 API');
-    }
-    try {
-      const text = await navigator.clipboard.readText();
-      return text;
-    } catch (err) {
-      throw new Error(`無法讀取剪貼簿 (權限不足或非焦點狀態): ${err.message}`);
-    }
-  }
-
-
-  // ==========================================
-  // Code 首尾雙向錨定探針 (Head-Tail Invariants)
-  // ==========================================
-  function probeStrongCodeFeatures(unwrappedText) {
-    if (!unwrappedText || typeof unwrappedText !== 'string') {
-      return { isStrongCode: false, ext: '.txt', description: '' };
-    }
-
-
-    const lines = unwrappedText.split(/\r?\n/);
-    const topTenLines = lines.slice(0, 10).join('\n');
-    const tailTenLines = lines.slice(-10).join('\n');
-
-
-    // 1. Userscript / JS 首尾雙向錨定
-    const jsHeaderRegex = /^\/\/\s*==UserScript==/m;
-    const jsTailRegex = /(?:\)\(\);\s*$|window\.[a-zA-Z0-9_$]+|export\s+default)/m;
-    if (jsHeaderRegex.test(topTenLines) && jsTailRegex.test(tailTenLines)) {
-      let desc = '';
-      const descMatch = unwrappedText.match(/^\/\/\s*@name\s+([^\r\n]+)/m);
-      if (descMatch && descMatch[1]) desc = descMatch[1].trim();
-      return { isStrongCode: true, ext: '.user.js', description: desc };
-    }
-
-
-    // 2. Python 首尾雙向錨定
-    const pyHeaderRegex = /(?:^#\s*-\*-\s*coding:|^#!\/usr\/bin\/env\s+python|^import\s+[a-zA-Z0-9_]+|^from\s+[a-zA-Z0-9_]+\s+import)/m;
-    const pyTailRegex = /(?:if\s+__name__\s*==\s*['"]__main__['"]|root\..*?\(\)|sys\.exit\(|def\s+[a-zA-Z0-9_]+\()/m;
-    if (pyHeaderRegex.test(topTenLines) && pyTailRegex.test(tailTenLines)) {
-      let desc = '';
-      const descMatch = unwrappedText.match(/^(?:#\s*([^\r\n]+)|"""([^\r\n]+)""")/m);
-      if (descMatch) desc = (descMatch[1] || descMatch[2] || '').trim();
-      return { isStrongCode: true, ext: '.py', description: desc };
-    }
-
-
-    // 3. AutoHotkey v2 首尾雙向錨定
-    const ahkHeaderRegex = /(?:^#Requires\s+AutoHotkey|^;[^\r\n]*AHK\s*v2)/im;
-    const ahkTailRegex = /(?:::|return|\})/m;
-    if (ahkHeaderRegex.test(topTenLines) && ahkTailRegex.test(tailTenLines)) {
-      let desc = '';
-      const descMatch = unwrappedText.match(/^;\s*([^\r\n]+)/m);
-      if (descMatch && descMatch[1]) desc = descMatch[1].trim();
-      return { isStrongCode: true, ext: '.ahk', description: desc };
-    }
-
-
-    // 4. Shell / Bash 首尾雙向錨定
-    const shHeaderRegex = /^#!\/bin\/(?:bash|sh)/m;
-    if (shHeaderRegex.test(topTenLines)) {
-      let desc = '';
-      const descMatch = unwrappedText.match(/^#\s*([^\r\n]+)/m);
-      if (descMatch && descMatch[1]) desc = descMatch[1].trim();
-      return { isStrongCode: true, ext: '.sh', description: desc };
-    }
-
-
-    return { isStrongCode: false, ext: '.txt', description: '' };
-  }
-
-
-  // ==========================================
-  // 多語言特徵探針與副檔名推斷 (弱特徵兜底)
-  // ==========================================
-  function probeLanguageAndMeta(unwrappedText) {
-    const topTenLines = unwrappedText.split(/\r?\n/).slice(0, 10).join('\n');
-
-
-    // 1. AutoHotkey v2 探針
-    const ahkRegex = /(?:^#Requires\s+AutoHotkey\s+v2|;[^\r\n]*AHK\s*v2|SetTitleMatchMode\(?\s*2\s*\)?|#SingleInstance\s+force)/im;
-    if (ahkRegex.test(topTenLines)) {
-      let desc = '';
-      const descMatch = unwrappedText.match(/^;\s*([^\r\n]+)/m);
-      if (descMatch && descMatch[1]) desc = descMatch[1].trim();
-      return { ext: '.ahk', description: desc, isCode: true };
-    }
-
-
-    // 2. Userscript / JavaScript 探針
-    const jsHeaderRegex = /(?:^\/\/\s*==UserScript==|^\/\*![\s\S]*?\*\/|^\s*\(function\s*\()/m;
-    if (jsHeaderRegex.test(topTenLines) || jsHeaderRegex.test(unwrappedText)) {
-      const isUserscript = /==UserScript==/.test(topTenLines);
-      let desc = '';
-      const descMatch = unwrappedText.match(/^\/\/\s*@name\s+([^\r\n]+)/m);
-      if (descMatch && descMatch[1]) desc = descMatch[1].trim();
-      return { ext: isUserscript ? '.user.js' : '.js', description: desc, isCode: true };
-    }
-
-
-    // 3. Python 探針
-    const pyRegex = /(?:^#\s*-\*-\s*coding:|^#!\/usr\/bin\/env\s+python|^import\s+[a-zA-Z0-9_]+|^from\s+[a-zA-Z0-9_]+\s+import|^\s*def\s+[a-zA-Z0-9_]+\s*\(|^\s*class\s+[a-zA-Z0-9_]+)/m;
-    if (pyRegex.test(topTenLines) || pyRegex.test(unwrappedText)) {
-      let desc = '';
-      const descMatch = unwrappedText.match(/^(?:#\s*([^\r\n]+)|"""([^\r\n]+)""")/m);
-      if (descMatch) desc = (descMatch[1] || descMatch[2] || '').trim();
-      return { ext: '.py', description: desc, isCode: true };
-    }
-
-
-    // 4. Shell / Bash 探針
-    const shRegex = /(?:^#!\/bin\/(?:bash|sh)|^\s*(?:set\s+-[eou]|export\s+[A-Z_]+=))/m;
-    if (shRegex.test(topTenLines)) {
-      let desc = '';
-      const descMatch = unwrappedText.match(/^#\s*([^\r\n]+)/m);
-      if (descMatch && descMatch[1]) desc = descMatch[1].trim();
-      return { ext: '.sh', description: desc, isCode: true };
-    }
-
-
-    return { ext: '.txt', description: '', isCode: false };
-  }
-
-
-  // ==========================================
-  // 三階剪貼簿多態智能辨識引擎 (INV-03 時序與門禁)
-  // ==========================================
-  function classifyClipboardText(rawText) {
-    if (!rawText || typeof rawText !== 'string' || !rawText.trim()) {
-      return { type: 'TYPE_UNKNOWN', content: '', meta: {} };
-    }
-
-
-    let text = rawText.trim();
-    const config = loadConfig();
-
-
-    // 0. Markdown 代碼區塊去殼
-    const mdCodeBlockMatch = text.match(/^```(?:javascript|js|typescript|ts|python|py|json|html|css|ahk|autohotkey|sh|bash)?\r?\n([\s\S]+?)\r?\n```$/);
-    let unwrappedText = text;
-    if (mdCodeBlockMatch && mdCodeBlockMatch[1]) {
-      unwrappedText = mdCodeBlockMatch[1].trim();
-    }
-
-
-    const lines = unwrappedText.split(/\r?\n/);
-    const topThreeLines = lines.slice(0, 3).join('\n');
-    const topFifteenLines = lines.slice(0, 15).join('\n');
-    const topTwentyLines = lines.slice(0, 20).join('\n');
-    const head500Chars = unwrappedText.slice(0, 500);
-
-
-    const isStandaloneCodeHeader = /^(?:\/\/\s*==UserScript==|#Requires\s+AutoHotkey|coding:\s*utf-8|#!\/bin\/)/m.test(topThreeLines);
-
-
-    // ========================================================
-    // 【第 1 階：QATP 任務書精確門禁】(優先判定，防截胡)
-    // ========================================================
-    if (!isStandaloneCodeHeader) {
-      const primaryToken = (config.qatpPrimaryToken || 'QATP').trim();
-      const secondaryRegex = parseRegexPattern(config.qatpSecondaryPattern) || /(?:QA\\s*獨立覆核任務|QA\\s*測試驗證任務書|QATP\\s*驗收任務書|四大維度測試案例清單|人類實機操作核對專區)/i;
-
-
-      const hasPrimary = topTwentyLines.includes(primaryToken);
-      const hasSecondary = secondaryRegex.test(topTwentyLines);
-
-
-      if (hasPrimary && hasSecondary) {
-        return {
-          type: 'TYPE_QATP',
-          content: rawText,
-          meta: { fileName: config.qatpFileName || 'QATP.md' }
-        };
-      }
-    }
-
-
-    // ========================================================
-    // 【第 2 階：交接檔 (Handoff / note) 精確語意門禁】
-    // ========================================================
-    const noteKeywords = Array.isArray(config.noteKeywords) ? config.noteKeywords : DEFAULT_CONFIG_V2_1_1.noteKeywords;
-    const filterRegex = parseRegexPattern(config.filterRegex) || /(?:#[^\S\r\n]*舊版內容對照清單|技術交接|反向驗證清單|歷史技術債客觀勘誤表|Bottom-Up Settlement|技術交接與維護規格書)/i;
-
-
-    const hitHandoffKeyword = noteKeywords.some((kw) => topFifteenLines.includes(kw) || head500Chars.includes(kw)) || filterRegex.test(topFifteenLines) || filterRegex.test(head500Chars);
-
-
-    if (!isStandaloneCodeHeader && hitHandoffKeyword) {
-      return {
-        type: 'TYPE_HANDOFF',
-        content: rawText,
-        meta: { fileName: config.defaultFileName || 'note' }
-      };
-    }
-
-
-    // ========================================================
-    // 【第 3 階：生產代碼 (Code) 首尾雙向錨定與 Markdown 表格排他門禁】
-    // ========================================================
-    const hasMdTable = /\|[ \t]*:?[-]+:?[ \t]*\|/.test(unwrappedText);
-    const mdHeaderMatches = (topTwentyLines.match(/^#{1,3}[ \t]+[^\r\n]+/gm) || []).length;
-    const isMarkdownDocument = hasMdTable && mdHeaderMatches >= 2;
-
-
-    if (!isMarkdownDocument) {
-      const strongCode = probeStrongCodeFeatures(unwrappedText);
-      if (strongCode.isStrongCode) {
-        let finalFileName = 'code' + strongCode.ext;
-        if (config.codeNamingMode === 'custom') {
-          finalFileName = config.customCodeFileName || 'code';
-        } else if (config.codeNamingMode === 'infer_name') {
-          if (strongCode.description) {
-            const cleanName = strongCode.description.replace(/[\/\\:*?"<>|]/g, '').trim();
-            finalFileName = cleanName ? `${cleanName}${strongCode.ext}` : ('code' + strongCode.ext);
-          } else {
-            finalFileName = 'code' + strongCode.ext;
-          }
-        }
-
-
-        return {
-          type: 'TYPE_CODE',
-          content: unwrappedText,
-          meta: {
-            fileName: finalFileName,
-            description: strongCode.description
-          }
-        };
-      }
-
-
-      // ========================================================
-      // 【第 4 階：弱代碼特徵探針兜底】
-      // ========================================================
-      const probe = probeLanguageAndMeta(unwrappedText);
-      const configCodeRegex = parseRegexPattern(config.codeRegex);
-      const isCode = probe.isCode || !!mdCodeBlockMatch || (configCodeRegex && configCodeRegex.test(unwrappedText));
-
-
-      if (isCode) {
-        let finalFileName = 'code' + probe.ext;
-        if (config.codeNamingMode === 'custom') {
-          finalFileName = config.customCodeFileName || 'code';
-        } else if (config.codeNamingMode === 'infer_name') {
-          if (probe.description) {
-            const cleanName = probe.description.replace(/[\/\\:*?"<>|]/g, '').trim();
-            finalFileName = cleanName ? `${cleanName}${probe.ext}` : ('code' + probe.ext);
-          } else {
-            finalFileName = 'code' + probe.ext;
-          }
-        }
-
-
-        return {
-          type: 'TYPE_CODE',
-          content: unwrappedText,
-          meta: {
-            fileName: finalFileName,
-            description: probe.description
-          }
-        };
-      }
-    }
-
-
-    // ========================================================
-    // 【第 5 階：未知內容】
-    // ========================================================
-    return { type: 'TYPE_UNKNOWN', content: rawText, meta: {} };
-  }
-
-
-  // ==========================================
-  // 空槽位自動垃圾桶清理協議 (ITEM-03 / purgeEmptySlots)
-  // ==========================================
-  function purgeEmptySlots() {
-    const slots = document.querySelectorAll('.js-gist-file');
-    if (slots.length <= 1) return;
-
-
-    for (let i = slots.length - 1; i >= 0; i--) {
-      const remainingSlots = document.querySelectorAll('.js-gist-file');
-      if (remainingSlots.length <= 1) break;
-
-
-      const slot = slots[i];
-      const content = getSlotContent(slot);
-      if (content.length === 0) {
-        const removeBtn = slot.querySelector('button.js-remove-gist-file, .js-remove-gist-file');
-        if (removeBtn) {
-          removeBtn.click();
-        }
-      }
-    }
-  }
-
-
-  // ==========================================
-  // 表單保存觸發器強健定位邏輯 (INV-02 / 剪貼簿防污染協議 / 清理防禦)
-  // ==========================================
-  function triggerSaveAction(shouldCopyQatp = true) {
-    if (shouldCopyQatp) {
-      try {
-        sessionStorage.setItem(SESSION_KEY_QATP, '1');
-      } catch (e) {
-        console.warn('[QATP] 無法寫入 sessionStorage', e);
-      }
-    } else {
-      try {
-        sessionStorage.removeItem(SESSION_KEY_QATP);
-      } catch (e) {
-        console.warn('[QATP] 無法清除 sessionStorage', e);
-      }
-    }
-
-
-    purgeEmptySlots();
-
-
-    const selectors = [
-      'button.hx_create-pr-button.btn-primary',
-      'button[type="submit"].btn-primary',
-      '.form-actions button[type="submit"].btn-primary',
-      'form.js-blob-form button[type="submit"]',
-      'form[action^="/gists"] button[type="submit"]'
-    ];
-
-
-    setTimeout(() => {
-      let retryCount = 0;
-      const findAndSubmit = () => {
-        let submitBtn = null;
-        for (const sel of selectors) {
-          const els = document.querySelectorAll(sel);
-          for (const el of els) {
-            if (el.offsetParent !== null && !el.classList.contains('Button--danger') && !el.disabled) {
-              submitBtn = el;
-              break;
-            }
-          }
-          if (submitBtn) break;
-        }
-
-
-        if (submitBtn) {
-          submitBtn.click();
-        } else if (retryCount < 3) {
-          retryCount++;
-          setTimeout(findAndSubmit, 300);
-        } else {
-          showToast('⚠️ 未能自動定位儲存按鈕，請手動點擊儲存', 'warning');
-        }
-      };
-
-
-      findAndSubmit();
-    }, 100);
-  }
-
-
-  // ==========================================
-  // 核心水合函式：注入內容至單一檔案槽 (INV-02 / 超時 5000ms / 等冪檢查)
-  // ==========================================
-  async function hydrateSlot(slotContainer, fileName, content) {
-    if (!slotContainer) throw new Error('槽位容器無效');
-
-
-    // 1. 設定檔名
-    if (fileName) {
-      const nameInput = slotContainer.querySelector('input.js-gist-filename, input.form-control.js-gist-filename');
-      if (nameInput) {
-        nameInput.value = fileName;
-        nameInput.dispatchEvent(new Event('input', { bubbles: true }));
-        nameInput.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-    }
-
-
-    // 2. 等冪檢查：若內容已完全相同則直接跳過寫入
-    const currentContent = getSlotContent(slotContainer);
-    if (currentContent === content.trim()) {
-      return { modified: false };
-    }
-
-
-    // 3. 注入內容 (CodeMirror / Textarea 雙軌階梯輪詢，加固至 5000ms)
-    let injected = false;
-    const startTime = Date.now();
-    while (Date.now() - startTime < 5000) {
-      const cmEl = slotContainer.querySelector('.CodeMirror');
-      let cmInstance = cmEl ? (cmEl.CodeMirror || (typeof unsafeWindow !== 'undefined' && unsafeWindow.CodeMirror)) : null;
-
-
-      if (cmInstance && typeof cmInstance.setValue === 'function') {
-        cmInstance.setValue(content);
-        if (typeof cmInstance.refresh === 'function') cmInstance.refresh();
-        injected = true;
-        break;
-      }
-
-
-      const ta = slotContainer.querySelector('textarea.file-editor-textarea, textarea');
-      if (ta) {
-        ta.value = content;
-        ta.dispatchEvent(new Event('input', { bubbles: true }));
-        ta.dispatchEvent(new Event('change', { bubbles: true }));
-        ta.dispatchEvent(new Event('blur', { bubbles: true }));
-        injected = true;
-        break;
-      }
-
-
-      await new Promise((r) => setTimeout(r, 100));
-    }
-
-
-    if (!injected) {
-      throw new Error('❌ 未能探測到可用的 CodeMirror 或 Textarea 編輯實例');
-    }
-
-
-    return { modified: true };
-  }
-
-
-  function getSlotContent(slotContainer) {
-    if (!slotContainer) return '';
-    const cmEl = slotContainer.querySelector('.CodeMirror');
-    let cmInstance = cmEl ? (cmEl.CodeMirror || (typeof unsafeWindow !== 'undefined' && unsafeWindow.CodeMirror)) : null;
-    if (cmInstance && typeof cmInstance.getValue === 'function') {
-      return cmInstance.getValue().trim();
-    }
-    const ta = slotContainer.querySelector('textarea.file-editor-textarea, textarea');
-    if (ta) {
-      return ta.value.trim();
-    }
-    return '';
-  }
-
-
-  async function addNewFileSlot(expectedCount) {
-    const addBtn = document.querySelector('button.js-add-gist-file, .js-add-gist-file');
-    if (!addBtn) throw new Error('❌ 水合逾時：無法定位加檔按鈕');
-
-
-    addBtn.click();
-
-
-    return new Promise((resolve, reject) => {
-      const startTime = Date.now();
-      const timer = setInterval(() => {
-        const containers = document.querySelectorAll('.js-gist-file');
-        if (containers.length >= expectedCount) {
-          clearInterval(timer);
-          resolve(containers[containers.length - 1]);
-        } else if (Date.now() - startTime > 5000) {
-          clearInterval(timer);
-          reject(new Error('❌ 水合逾時：新檔案容器未能如期掛載'));
-        }
-      }, 100);
-    });
-  }
-
-
-  // ==========================================
-  // 空槽位智慧認領核心 (ITEM-03 / claimOrCreateSlot)
-  // ==========================================
-  async function claimOrCreateSlot(targetFileName) {
-    const containers = document.querySelectorAll('.js-gist-file');
-    for (const slot of containers) {
-      const content = getSlotContent(slot);
-      if (content.length === 0) {
-        const nameInput = slot.querySelector('input.js-gist-filename, input.form-control.js-gist-filename');
-        const currentName = nameInput ? nameInput.value.trim() : '';
-        if (!currentName || currentName === targetFileName) {
-          return slot;
-        }
-      }
-    }
-    return await addNewFileSlot(containers.length + 1);
-  }
-
-
-  // ==========================================
-  // 語意槽位動態解析器 (OBS-04 對稱支援 note.*)
-  // ==========================================
-  async function resolveSemanticSlot(targetType, config) {
-    const qatpName = (config.qatpFileName || 'QATP.md').trim().toLowerCase();
-    const handoffName = (config.defaultFileName || 'note').trim().toLowerCase();
-
-
-    let containers = Array.from(document.querySelectorAll('.js-gist-file'));
-
-
-    // 1. 注入代碼槽 (TYPE_CODE)
-    if (targetType === 'TYPE_CODE') {
-      for (const slot of containers) {
-        const nameInput = slot.querySelector('input.js-gist-filename, input.form-control.js-gist-filename');
-        const name = nameInput ? nameInput.value.trim().toLowerCase() : '';
-        if (name && name !== qatpName && name !== handoffName && !name.startsWith(handoffName + '.')) {
-          return slot;
-        }
-      }
-      for (const slot of containers) {
-        const nameInput = slot.querySelector('input.js-gist-filename, input.form-control.js-gist-filename');
-        const name = nameInput ? nameInput.value.trim() : '';
-        const content = getSlotContent(slot);
-        if (!name && content.length === 0) {
-          return slot;
-        }
-      }
-      return await addNewFileSlot(containers.length + 1);
-    }
-
-
-    // 2. 注入 QATP 任務書槽 (TYPE_QATP)
-    if (targetType === 'TYPE_QATP') {
-      for (const slot of containers) {
-        const nameInput = slot.querySelector('input.js-gist-filename, input.form-control.js-gist-filename');
-        const name = nameInput ? nameInput.value.trim().toLowerCase() : '';
-        if (name === qatpName) {
-          return slot;
-        }
-      }
-      for (const slot of containers) {
-        const nameInput = slot.querySelector('input.js-gist-filename, input.form-control.js-gist-filename');
-        const name = nameInput ? nameInput.value.trim() : '';
-        const content = getSlotContent(slot);
-        if (!name && content.length === 0) {
-          return slot;
-        }
-      }
-      return await addNewFileSlot(containers.length + 1);
-    }
-
-
-    // 3. 注入交接檔槽 (TYPE_HANDOFF / OBS-04 對稱支援 note.*)
-    if (targetType === 'TYPE_HANDOFF') {
-      for (const slot of containers) {
-        const nameInput = slot.querySelector('input.js-gist-filename, input.form-control.js-gist-filename');
-        const name = nameInput ? nameInput.value.trim().toLowerCase() : '';
-        if (name === handoffName || name.startsWith(handoffName + '.')) {
-          return slot;
-        }
-      }
-      for (const slot of containers) {
-        const nameInput = slot.querySelector('input.js-gist-filename, input.form-control.js-gist-filename');
-        const name = nameInput ? nameInput.value.trim() : '';
-        const content = getSlotContent(slot);
-        if (!name && content.length === 0) {
-          return slot;
-        }
-      }
-      return await addNewFileSlot(Math.max(containers.length + 1, 3));
-    }
-
-
-    return containers[0] || (await addNewFileSlot(1));
-  }
-
-
-  // ==========================================
-  // 三合一智能裝配決策狀態機 (切片 1: 演進 INV-04 等冪熱更新 / 切片 2: 交接檔哨兵連動)
-  // OBS-D: 智能裝配採就地水合更新；一鍵加交接檔採 claimOrCreateSlot 空槽認領
-  // ==========================================
-  async function runSmartAssemblyPipeline() {
-    try {
-      // 0. 單次強制換新開關狀態機 (One-Shot Force New Gist)
-      const forceNewCb = document.getElementById('gist-qatp-force-new-cb');
-      if (forceNewCb && forceNewCb.checked) {
-        forceNewCb.checked = false;
-        try {
-          sessionStorage.setItem(SESSION_KEY_SMART, '1');
-        } catch (e) {
-          console.warn('[QATP] 無法寫入 sessionStorage', e);
-        }
-        showToast('🧭 強制換新模式已觸發，正在開啟全新 Gist...', 'warning', 1500);
-        window.location.href = 'https://gist.github.com/';
-        return;
-      }
-
-
-      // 1. 頁面態偵測：檢視態跳轉編輯態端點精準校正
-      if (!isEditorEnvironment()) {
-        try {
-          sessionStorage.setItem(SESSION_KEY_SMART, '1');
-        } catch (e) {
-          console.warn('[QATP] 無法寫入 sessionStorage', e);
-        }
-
-
-        if (isNewPage()) {
-          showToast('🧭 正在跳轉至 Gist 新增頁面...', 'warning', 1500);
-          window.location.href = 'https://gist.github.com/';
-        } else {
-          try {
-            const canonicalUrl = getCanonicalGistUrl();
-            showToast('🧭 正在跳轉至 Gist 編輯頁面...', 'warning', 1500);
-            window.location.href = `${canonicalUrl}/edit`;
-          } catch (e) {
-            showToast('🧭 正在跳轉至 Gist 新增頁面...', 'warning', 1500);
-            window.location.href = 'https://gist.github.com/';
-          }
-        }
-        return;
-      }
-
-
-      const config = loadConfig();
-
-
-      // 2. 結案開新判斷
-      if (isGistArchived() && config.autoNewGistOnFinished) {
-        const rawClip = await readClipboardText();
-        const classifiedEarly = classifyClipboardText(rawClip);
-        if (classifiedEarly.type === 'TYPE_CODE') {
-          showToast('📦 當前 Gist 已結案，正在自動開啟新 Gist 建立任務...', 'warning', 1500);
-          try {
-            sessionStorage.setItem(SESSION_KEY_SMART, '1');
-          } catch (e) {
-            console.warn('[QATP] 無法寫入 sessionStorage', e);
-          }
-          window.location.href = 'https://gist.github.com/';
-          return;
-        }
-      }
-
-
-      // 3. 預建雙槽解耦與實體等待防線
-      let files = document.querySelectorAll('.js-gist-file');
-      if (files.length === 0) {
-        throw new Error('找不到可編輯的 Gist 檔案卡片容器');
-      }
-
-
-      if (files.length < 2) {
-        await addNewFileSlot(2);
-        files = document.querySelectorAll('.js-gist-file');
-      }
-
-
-      // 4. 讀取剪貼簿並進行多態辨識
-      const rawText = await readClipboardText();
-      const classified = classifyClipboardText(rawText);
-
-
-      if (classified.type === 'TYPE_UNKNOWN') {
-        showToast('⚠️ 剪貼簿未辨識出有效代碼、QATP 或交接檔特徵', 'warning', 3500);
-        updateFileBoard();
-        return;
-      }
-
-
-      const getCardName = (slot) => {
-        const input = slot.querySelector('input.js-gist-filename, input.form-control.js-gist-filename');
-        return input ? input.value.trim().toLowerCase() : '';
-      };
-
-
-      // 5. 雙槽狀態盤點 (切片 1: 演進版 INV-04：支援等冪熱更新)
-      const currentSlots = document.querySelectorAll('.js-gist-file');
-      const qatpFileNameLower = (config.qatpFileName || 'QATP.md').toLowerCase();
-      const handoffFileNameLower = (config.defaultFileName || 'note').toLowerCase();
-
-
-      let existingCodeHasContent = false;
-      let existingQatpHasContent = false;
-
-
-      for (const slot of currentSlots) {
-        const cName = getCardName(slot);
-        const cLen = getSlotContent(slot).length;
-        if (cName === qatpFileNameLower && cLen > 0) {
-          existingQatpHasContent = true;
-        } else if (cName && cName !== qatpFileNameLower && cName !== handoffFileNameLower && !cName.startsWith(handoffFileNameLower + '.') && cLen > 0) {
-          existingCodeHasContent = true;
-        }
-      }
-
-
-      // 分支 A: 生產代碼 (支援內容相異熱更新，內容相同等冪避讓)
-      if (classified.type === 'TYPE_CODE') {
-        showToast('⏳ 正在裝配生產代碼至代碼槽...', 'warning', 1500);
-
-
-        if (classified.meta.description) {
-          const descInput = document.querySelector('input[name="gist[description]"], input.js-quick-title');
-          if (descInput) {
-            descInput.value = classified.meta.description;
-            descInput.dispatchEvent(new Event('input', { bubbles: true }));
-            descInput.dispatchEvent(new Event('change', { bubbles: true }));
-          }
-        }
-
-
-        const targetCodeSlot = await resolveSemanticSlot('TYPE_CODE', config);
-        const hydrateRes = await hydrateSlot(targetCodeSlot, classified.meta.fileName, classified.content);
-
-
-        // 檢查是否存在 QATP 槽且具備內容
-        const latestFiles = document.querySelectorAll('.js-gist-file');
-        const qatpName = (config.qatpFileName || 'QATP.md').toLowerCase();
-        let qatpHasContent = false;
-
-
-        for (const slot of latestFiles) {
-          if (getCardName(slot) === qatpName && getSlotContent(slot).length > 0) {
-            qatpHasContent = true;
-            break;
-          }
-        }
-
-
-        if (qatpHasContent) {
-          // 若代碼實質發生變更，自動存檔並重送倉庫；若無變更則等冪避讓
-          if (hydrateRes.modified) {
-            if (config.autoSubmitDualReady) {
-              try { sessionStorage.setItem(SESSION_KEY_RELAY, '1'); } catch (e) {}
-              showToast('🎉 代碼熱更新成功！正在自動存檔並同步中繼倉...', 'success', 2000);
-              setTimeout(() => triggerSaveAction(false), 400);
-            } else {
-              showToast('🎉 代碼熱更新成功！請手動儲存以同步中繼倉', 'success', 3000);
-            }
-          } else {
-            showToast('ℹ️ 代碼內容與當前一致，跳過重複存檔與推倉', 'info', 2500);
-          }
-        } else {
-          showToast('✅ 代碼已填入，已預建 QATP 槽位！請複製 QATP 後再次點擊本按鈕', 'success', 4000);
-        }
-      }
-      // 分支 B: QATP 任務書
-      else if (classified.type === 'TYPE_QATP') {
-        showToast('⏳ 正在裝配任務書至 QATP 槽...', 'warning', 1500);
-
-
-        const targetQatpSlot = await resolveSemanticSlot('TYPE_QATP', config);
-        const targetFileName = config.qatpFileName || 'QATP.md';
-        await hydrateSlot(targetQatpSlot, targetFileName, classified.content);
-
-
-        const latestFiles = document.querySelectorAll('.js-gist-file');
-        const qatpName = (config.qatpFileName || 'QATP.md').toLowerCase();
-        const handoffName = (config.defaultFileName || 'note').toLowerCase();
-        let codeHasContent = false;
-
-
-        for (const slot of latestFiles) {
-          const name = getCardName(slot);
-          if (name && name !== qatpName && name !== handoffName && !name.startsWith(handoffName + '.')) {
-            if (getSlotContent(slot).length > 0) {
-              codeHasContent = true;
-              break;
-            }
-          }
-        }
-
-
-        if (codeHasContent) {
-          if (config.autoSubmitDualReady) {
-            try {
-              sessionStorage.setItem(SESSION_KEY_RELAY, '1');
-            } catch (e) {
-              console.warn('[QATP] 無法寫入 sessionStorage', e);
-            }
-            showToast('🎉 任務書注入成功！兩槽齊全，正在自動存檔並連動投送...', 'success', 2000);
-            setTimeout(() => triggerSaveAction(false), 400);
-          } else {
-            showToast('🎉 任務書注入成功！兩槽齊全，請手動提交儲存', 'success', 3000);
-          }
-        } else {
-          showToast('✅ QATP 已填入槽位，已保留代碼槽！請複製代碼後再次點擊本按鈕', 'success', 4000);
-        }
-      }
-      // 分支 C: Handoff 交接檔 (切片 2: 連動 handoff 哨兵)
-      else if (classified.type === 'TYPE_HANDOFF') {
-        showToast('⏳ 正在裝配交接檔...', 'warning', 1500);
-
-
-        const targetHandoffSlot = await resolveSemanticSlot('TYPE_HANDOFF', config);
-        const targetFileName = config.defaultFileName || 'note';
-
-
-        await hydrateSlot(targetHandoffSlot, targetFileName, classified.content);
-        updateFileBoard();
-
-
-        const allSlots = document.querySelectorAll('.js-gist-file');
-        const qatpName = (config.qatpFileName || 'QATP.md').toLowerCase();
-        const handoffName = (config.defaultFileName || 'note').toLowerCase();
-
-
-        let hasCode = false;
-        let hasQatp = false;
-
-
-        for (const slot of allSlots) {
-          const name = getCardName(slot);
-          const hasContent = getSlotContent(slot).length > 0;
-          if (name === qatpName && hasContent) hasQatp = true;
-          if (name && name !== qatpName && name !== handoffName && !name.startsWith(handoffName + '.') && hasContent) hasCode = true;
-        }
-
-
-        if (hasCode && hasQatp) {
-          showToast('🎉 三槽內容全數齊全！正在提交儲存並連動投送交接檔...', 'success', 2000);
-          try {
-            sessionStorage.setItem(SESSION_KEY_RELAY, 'handoff'); // 標記為交接檔投送模式
-          } catch (e) {}
-          setTimeout(() => {
-            triggerSaveAction(false);
-          }, 500);
-        } else {
-          showToast('✅ 交接檔已填入！代碼或 QATP 尚未就緒，請補齊後手動儲存', 'warning', 4500);
-        }
-      }
-
-
-      updateFileBoard();
-
-
-    } catch (err) {
-      console.error('[Smart Assembly Error]', err);
-      showToast(err.message || '智能裝配流水線異常', 'danger');
-    }
-  }
-
-
-  // ==========================================
-  // 核心流水線：提取與寫入 QATP 指令 (Btn 4)
-  // ==========================================
-  async function runExtractAndCopyPipeline() {
-    try {
-      const canonicalUrl = getCanonicalGistUrl();
-      const csvData = await fetchCloudCSV();
-
-
-      const grid = parseRFC4180CSV(csvData);
-      const finalText = assemblePrompt(grid, canonicalUrl);
-
-
-      await writeToClipboard(finalText);
-      showToast('🎉 QATP 引導指令已成功複製！', 'success');
-    } catch (err) {
-      console.error('[QATP Pipeline Error]', err);
-      showToast(`❌ ${err.message || '執行失敗'}`, 'danger');
-    }
-  }
-
-
-  // ==========================================
-  // 一鍵加交接檔流水線 (Btn 2 / ITEM-03 智慧認領優先 / 切片 2: 連動 handoff 哨兵)
-  // ==========================================
-  async function executeHandoffPipeline(rawText = null) {
-    try {
-      let content = rawText;
-      if (!content) {
-        content = await readClipboardText();
-        const classified = classifyClipboardText(content);
-        if (classified.type !== 'TYPE_HANDOFF' && classified.type !== 'TYPE_QATP') {
-          showToast('⚠️ 剪貼簿內容未符合交接檔或任務書特徵', 'warning');
-          return;
-        }
-      }
-
-
-      showToast('⏳ 正在執行自動加檔與注入...', 'warning', 2000);
-
-
-      const config = loadConfig();
-      const targetFileName = config.defaultFileName || 'note';
-      const targetSlot = await claimOrCreateSlot(targetFileName);
-
-
-      await hydrateSlot(targetSlot, targetFileName, content);
-
-
-      updateFileBoard();
-      showToast('💾 交接檔內容已注入，正在儲存並連動投送交接檔...', 'success', 2000);
-      try {
-        sessionStorage.setItem(SESSION_KEY_RELAY, 'handoff'); // 標記為交接檔投送模式
-      } catch (e) {}
-      setTimeout(() => {
-        triggerSaveAction(false);
-      }, 500);
-
-
-    } catch (err) {
-      console.error('[Handoff Pipeline Error]', err);
-      showToast(err.message || '加檔流水線異常', 'danger');
-    }
-  }
-
-
-  async function startHandoffProcess() {
-    try {
-      const text = await readClipboardText();
-      const classified = classifyClipboardText(text);
-      if (classified.type !== 'TYPE_HANDOFF' && classified.type !== 'TYPE_QATP') {
-        showToast('⚠️ 剪貼簿內容未符合交接檔或任務書特徵', 'warning');
-        return;
-      }
-
-
-      if (isEditorEnvironment()) {
-        await executeHandoffPipeline(text);
-      } else {
-        const canonicalUrl = getCanonicalGistUrl();
-        try {
-          sessionStorage.setItem(SESSION_KEY_HANDOFF, '1');
-        } catch (e) {
-          console.warn('[QATP] 無法寫入 sessionStorage', e);
-        }
-        window.location.href = `${canonicalUrl}/edit`;
-      }
-    } catch (err) {
-      showToast(err.message || '讀取剪貼簿失敗', 'danger');
-    }
-  }
-
-
-  // ==========================================
-  // GitHub REST API 跨網域請求包裝器 (附帶退避重試矩陣)
-  // P3-01: fetch 降級時剝除 User-Agent 防警告
-  // P3-03/04: 5xx 伺服器錯誤範圍擴大至 599
-  // ==========================================
-  function githubApiRequest(method, url, token, body = null, retryCount = 0) {
-    return new Promise((resolve, reject) => {
-      const headers = {
-        'Accept': 'application/vnd.github.v3+json',
-        'Authorization': `token ${token}`
-      };
-      if (body) {
-        headers['Content-Type'] = 'application/json';
-      }
-
-
-      if (typeof GM_xmlhttpRequest === 'function') {
-        headers['User-Agent'] = 'Gist-QATP-Tool';
-
-
-        const reqDetails = {
-          method: method,
-          url: url,
-          headers: headers,
-          timeout: 15000,
-          onload: (res) => {
-            if (res.status >= 200 && res.status < 300) {
-              try {
-                const parsed = JSON.parse(res.responseText || '{}');
-                resolve(parsed);
-              } catch (e) {
-                resolve({});
-              }
-            } else if (res.status === 401 || res.status === 403) {
-              reject({ status: res.status, message: `❌ GitHub Token 無效或無寫入權限 (HTTP ${res.status})`, fatal: true });
-            } else if (res.status === 404) {
-              reject({ status: res.status, message: `❌ 找不到倉庫或分支，請確認目標倉庫已手動建立且具備存取權限 (HTTP 404)`, fatal: true });
-            } else if ((res.status >= 500 && res.status <= 599) && retryCount < 2) {
-              setTimeout(() => {
-                githubApiRequest(method, url, token, body, retryCount + 1).then(resolve).catch(reject);
-              }, 1000);
-            } else {
-              reject({ status: res.status, message: `❌ 跨倉投送失敗: 網路異常或 GitHub 服務暫時不可用 (HTTP ${res.status})` });
-            }
-          },
-          onerror: () => {
-            if (retryCount < 2) {
-              setTimeout(() => {
-                githubApiRequest(method, url, token, body, retryCount + 1).then(resolve).catch(reject);
-              }, 1000);
-            } else {
-              reject({ status: 0, message: '❌ 跨倉投送失敗: 網路異常或 GitHub 服務暫時不可用' });
-            }
-          },
-          ontimeout: () => {
-            if (retryCount < 2) {
-              setTimeout(() => {
-                githubApiRequest(method, url, token, body, retryCount + 1).then(resolve).catch(reject);
-              }, 1000);
-            } else {
-              reject({ status: 0, message: '❌ 跨倉投送失敗: 請求逾時' });
-            }
-          }
         };
 
 
-        if (body) {
-          reqDetails.data = JSON.stringify(body);
-        }
-
-
-        GM_xmlhttpRequest(reqDetails);
-      } else {
-        const fetchHeaders = Object.assign({}, headers);
-        delete fetchHeaders['User-Agent'];
-
-
-        const fetchOptions = {
-          method: method,
-          headers: fetchHeaders,
-          body: body ? JSON.stringify(body) : undefined
+        const btnCollapse = document.createElement('button');
+        btnCollapse.textContent = '🗕';
+        btnCollapse.className = 'ai-copy-icon-btn';
+        btnCollapse.style.cssText = 'height: 18px; padding: 0 6px; font-size: 11px; line-height: 1;';
+        btnCollapse.title = '收折為動態小光球';
+        btnCollapse.onclick = () => {
+            globalConfig.isCollapsed = true;
+            Storage.set(globalConfig);
+            mountUI(true);
         };
 
 
-        fetch(url, fetchOptions)
-          .then(async (res) => {
-            if (res.ok) return res.json();
-            if (res.status === 401 || res.status === 403) throw { status: res.status, message: `❌ GitHub Token 無效或無寫入權限 (HTTP ${res.status})`, fatal: true };
-            if (res.status === 404) throw { status: res.status, message: `❌ 找不到倉庫或分支 (HTTP 404)`, fatal: true };
-            if (res.status >= 500 && res.status <= 599) throw { status: res.status, message: `HTTP ${res.status}`, is5xx: true };
-            throw { status: res.status, message: `HTTP ${res.status}` };
-          })
-          .then(resolve)
-          .catch((err) => {
-            if (err.fatal) {
-              reject(err);
-            } else if (retryCount < 2) {
-              setTimeout(() => {
-                githubApiRequest(method, url, token, body, retryCount + 1).then(resolve).catch(reject);
-              }, 1000);
-            } else {
-              reject(err.message ? err : { status: 0, message: '❌ 跨倉投送失敗: 網路異常或 GitHub 服務暫時不可用' });
+        const btnToastPos = document.createElement('button');
+        btnToastPos.textContent = '🍞';
+        btnToastPos.className = 'ai-copy-icon-btn ai-copy-toast-btn';
+        btnToastPos.style.cssText = 'height: 18px; padding: 0 5px; font-size: 11px; line-height: 1;';
+        if (isToastPositioningMode) btnToastPos.classList.add('ai-copy-toast-btn-active');
+        btnToastPos.title = 'Toast 提示位置設定 (點擊進入/退出拖曳定位模式)';
+        btnToastPos.onclick = () => toggleToastPositioningMode();
+
+
+        const collapseAndToastCol = document.createElement('div');
+        collapseAndToastCol.style.cssText = 'display: flex; flex-direction: column; gap: 2px; align-items: center; justify-content: center;';
+        collapseAndToastCol.appendChild(btnCollapse);
+        collapseAndToastCol.appendChild(btnToastPos);
+
+
+        const btnCapsule = document.createElement('button');
+        btnCapsule.className = 'ai-copy-capsule-btn';
+        btnCapsule.textContent = curMod.badgeText;
+        btnCapsule.style.backgroundColor = curMod.badgeColor;
+        btnCapsule.title = `當前武裝：【${curMod.badgeText}】${curMod.name}\n(左鍵順向輪播，右鍵反向回退，滾輪切換)`;
+
+
+        btnCapsule.onclick = () => switchModule('next');
+        btnCapsule.oncontextmenu = (e) => {
+            e.preventDefault();
+            switchModule('prev');
+        };
+
+
+        const controlGroup = document.createElement('div');
+        controlGroup.style.cssText = 'display: flex; align-items: center; gap: 4px;';
+        controlGroup.appendChild(dragHandle);
+        controlGroup.appendChild(btnGear);
+        controlGroup.appendChild(collapseAndToastCol);
+        if (isAiStudio) controlGroup.appendChild(btnCapsule);
+
+
+        if (isAiStudio) {
+            const scope = settings.wheelSwitchScope || 'capsule_only';
+            if (scope === 'capsule_only') {
+                attachWheelSwitch(btnCapsule);
+            } else if (scope === 'control_group') {
+                attachWheelSwitch(controlGroup);
+            } else if (scope === 'entire_toolbar') {
+                attachWheelSwitch(container);
             }
-          });
-      }
-    });
-  }
+        }
 
 
-  // ==========================================
-  // 全量乾淨鏡像樹清場時序 (Git Trees Commit Pipeline / 妥協案 13, 14, 15)
-  // 切片 4: 支援 relayMode 模式標籤與交接檔投送剪貼簿防污染
-  // P2-02: 編輯態安全攔截防自殺時序
-  // P3-10: 檢視態 .blob-code-inner 純代碼萃取與路徑穿越防禦
-  // ==========================================
-  async function mirrorToGitHubRelay(relayMode = '1') {
-    try {
-      // 0. 演算法 1：編輯態時序解耦防自殺 (妥協案 15 / P2-02 / AC-2)
-      if (isEditorEnvironment()) {
+        // 藍鍵 / 雙軌按鈕分裂機制
+        let btnSingleBlue = null;
+        let btnPreviewGreen = null;
+
+
+        if (isZai || isMiniMax) {
+            btnSingleBlue = document.createElement('button');
+            btnSingleBlue.textContent = isZai ? '📋 複製最後對話' : '📋 複製最後回覆';
+            btnSingleBlue.className = 'ai-copy-btn';
+            btnSingleBlue.title = `${isZai ? '複製左側最後回覆對話' : '複製最後回覆'} (Alt + C，按住可拖曳)`;
+            btnSingleBlue.onclick = () => handleCopyAction('SINGLE');
+
+
+            btnPreviewGreen = document.createElement('button');
+            btnPreviewGreen.textContent = '📄 複製右側預覽';
+            btnPreviewGreen.className = 'ai-copy-btn-docx';
+            btnPreviewGreen.title = isZai ? '提取右側預覽內容為 Markdown (按住可拖曳)' : '提取右側成果物為 Markdown (按住可拖曳)';
+            btnPreviewGreen.onclick = () => {
+                if (isZai) handleZaiPreviewAction();
+                else handleMiniMaxDeliverableCopyAction();
+            };
+        } else {
+            btnSingleBlue = document.createElement('button');
+            btnSingleBlue.textContent = '📋 複製最後回覆';
+            btnSingleBlue.className = 'ai-copy-btn';
+            btnSingleBlue.title = '快捷鍵：Alt + C (按住可拖曳)';
+            btnSingleBlue.onclick = () => handleCopyAction('SINGLE');
+        }
+
+
+        let btnSinglePurple = null;
+        if (showPurple) {
+            btnSinglePurple = document.createElement('button');
+            btnSinglePurple.textContent = '🧹 乾淨最後回覆';
+            btnSinglePurple.className = 'ai-copy-btn-purple';
+            btnSinglePurple.title = '100% 原始純淨 Markdown (無前後綴，按住可拖曳)';
+            btnSinglePurple.onclick = () => handleCopyAction('SINGLE_CLEAN');
+        }
+
+
+        // 分流 1：AI Studio 直排階梯雙欄
+        if (isAiStudio && layoutMode === 'staircase') {
+            const btnBar = document.createElement('div');
+            btnBar.className = 'ai-copy-btn-bar-staircase';
+
+
+            const leftCol = document.createElement('div');
+            leftCol.className = 'ai-copy-left-col';
+
+
+            const gearRow = document.createElement('div');
+            gearRow.style.cssText = 'display: flex; gap: 6px; align-items: center;';
+            gearRow.appendChild(controlGroup);
+            gearRow.appendChild(btnSingleBlue);
+
+
+            leftCol.appendChild(gearRow);
+            if (btnSinglePurple) leftCol.appendChild(btnSinglePurple);
+
+
+            const rightCol = document.createElement('div');
+            rightCol.className = 'ai-copy-right-col';
+            sliceButtonNodes.forEach(b => rightCol.appendChild(b));
+
+
+            btnBar.appendChild(leftCol);
+            if (sliceButtonNodes.length > 0) btnBar.appendChild(rightCol);
+
+
+            container.appendChild(btnBar);
+            setupDraggableUI(container, container, false);
+            updateGearIndicator();
+            return container;
+        }
+
+
+        // 分流 2：標準橫排主列
+        const btnBar = document.createElement('div');
+        btnBar.className = 'ai-copy-btn-bar';
+
+
+        const mainRow = document.createElement('div');
+        mainRow.className = 'ai-copy-main-row';
+
+
+        mainRow.appendChild(controlGroup);
+        mainRow.appendChild(btnSingleBlue);
+        if (btnPreviewGreen) mainRow.appendChild(btnPreviewGreen);
+
+
+        if (showFull) {
+            const btnFullBlue = document.createElement('button');
+            btnFullBlue.textContent = '📚 複製全對話串';
+            btnFullBlue.className = 'ai-copy-btn';
+            btnFullBlue.title = '快捷鍵：Alt + Shift + C (按住可拖曳)';
+            btnFullBlue.onclick = () => handleCopyAction('FULL_THREAD');
+            mainRow.appendChild(btnFullBlue);
+        }
+
+
+        if (btnSinglePurple && !isStacked) {
+            mainRow.appendChild(btnSinglePurple);
+        }
+
+
+        btnBar.appendChild(mainRow);
+
+
+        // 分流 3：次級列按鈕分流
+        if (isAiStudio && layoutMode === 'single_row') {
+            const subRow = document.createElement('div');
+            subRow.className = 'ai-copy-sub-row-single';
+
+
+            if (btnSinglePurple && isStacked) subRow.appendChild(btnSinglePurple);
+            sliceButtonNodes.forEach(b => subRow.appendChild(b));
+
+
+            if (subRow.children.length > 0) btnBar.appendChild(subRow);
+        } else if (isAiStudio && layoutMode === 'grid_3_2') {
+            const subRowGrid = document.createElement('div');
+            subRowGrid.className = 'ai-copy-sub-row-grid';
+
+
+            const gridRow1 = document.createElement('div');
+            gridRow1.className = 'ai-copy-grid-row';
+            const gridRow2 = document.createElement('div');
+            gridRow2.className = 'ai-copy-grid-row';
+
+
+            let r1Limit = 3;
+            if (btnSinglePurple && isStacked) {
+                gridRow1.appendChild(btnSinglePurple);
+                r1Limit = 2;
+            }
+
+
+            sliceButtonNodes.forEach((b, idx) => {
+                if (idx < r1Limit) gridRow1.appendChild(b);
+                else gridRow2.appendChild(b);
+            });
+
+
+            if (gridRow1.children.length > 0) subRowGrid.appendChild(gridRow1);
+            if (gridRow2.children.length > 0) subRowGrid.appendChild(gridRow2);
+
+
+            if (subRowGrid.children.length > 0) btnBar.appendChild(subRowGrid);
+        } else {
+            const subRow = document.createElement('div');
+            subRow.className = 'ai-copy-sub-row';
+
+
+            if (btnSinglePurple && isStacked) subRow.appendChild(btnSinglePurple);
+            sliceButtonNodes.forEach(b => subRow.appendChild(b));
+
+
+            if (subRow.children.length > 0) btnBar.appendChild(subRow);
+        }
+
+
+        container.appendChild(btnBar);
+        setupDraggableUI(container, container, false);
+        updateGearIndicator();
+        return container;
+    }
+
+
+    function mountUI(forceRemount = false) {
         try {
-          sessionStorage.setItem(SESSION_KEY_RELAY, relayMode);
-        } catch (e) {
-          console.warn('[QATP] 無法寫入 sessionStorage', e);
-        }
-        showToast('💾 正在儲存 Gist，跳轉後將自動完成跨倉鏡像...', 'warning', 2000);
-        triggerSaveAction(false);
-        return;
-      }
-
-
-      // 1. 動態路由與 Fail-Fast 阻斷
-      const currentOwner = extractGistOwner();
-      if (!currentOwner) {
-        showToast('⚠️ 無法辨識當前 Gist 擁有者，請確認處於有效 Gist 頁面', 'warning');
-        return;
-      }
-
-
-      const config = loadConfig();
-      const slots = Array.isArray(config.relaySlots) ? config.relaySlots : [];
-      const matchedSlot = slots.find(
-        (s) => s && typeof s.account === 'string' && s.account.trim().toLowerCase() === currentOwner.toLowerCase()
-      );
-
-
-      if (!matchedSlot || !matchedSlot.token || !matchedSlot.token.trim()) {
-        showToast(`⚠️ 未找到帳號 [${currentOwner}] 的對應 Token！已阻斷投送以防誤染倉庫`, 'warning', 4500);
-        return;
-      }
-
-
-      const activeToken = matchedSlot.token.trim();
-      const repo = (config.relayRepoName || 'qatp-relay').trim();
-      const branch = (config.relayRepoBranch || 'main').trim();
-
-
-      // 2. 演算法 2：提取檢視態純代碼與路徑穿越防禦 (P3-10 / AC-4)
-      const treeItems = [];
-      const fileContainers = document.querySelectorAll('.file.js-gist-file, div[id^="file-"]');
-      for (const container of fileContainers) {
-        const nameEl = container.querySelector('.gist-blob-name, strong.gist-blob-name, .file-header .Link--primary');
-        const fileName = nameEl ? nameEl.textContent.trim() : '';
-
-
-        if (!fileName || fileName.includes('..') || fileName.startsWith('/')) {
-          continue;
-        }
-
-
-        let content = '';
-        const lineNodes = container.querySelectorAll('.blob-code-inner');
-        if (lineNodes && lineNodes.length > 0) {
-          content = Array.from(lineNodes).map((l) => l.innerText).join('\n').trim();
-        } else {
-          const ta = container.querySelector('textarea, .blob-wrapper');
-          if (ta && ta.value) {
-            content = ta.value.trim();
-          } else {
-            const table = container.querySelector('.js-file-line-container, table');
-            content = table ? table.innerText.trim() : (container.innerText || '').trim();
-          }
-        }
-
-
-        if (content.length > 0) {
-          treeItems.push({
-            path: fileName,
-            mode: '100644',
-            type: 'blob',
-            content: content
-          });
-        }
-      }
-
-
-      if (treeItems.length === 0) {
-        showToast('⚠️ 看板無有效檔案內容，阻斷投送', 'warning');
-        return;
-      }
-
-
-      showToast(`⏳ 正在鏡像至 ${currentOwner}/${repo} (全量清場)...`, 'info', 3000);
-
-
-      // 3. 取得分支最新 Commit SHA
-      let parentCommitSha = '';
-      try {
-        const refData = await githubApiRequest('GET', `https://api.github.com/repos/${currentOwner}/${repo}/git/ref/heads/${branch}`, activeToken);
-        parentCommitSha = refData.object ? refData.object.sha : '';
-      } catch (err) {
-        if (err.status === 404) {
-          const refDataFallback = await githubApiRequest('GET', `https://api.github.com/repos/${currentOwner}/${repo}/git/refs/heads/${branch}`, activeToken);
-          parentCommitSha = refDataFallback.object ? refDataFallback.object.sha : '';
-        } else {
-          throw err;
-        }
-      }
-
-
-      if (!parentCommitSha) {
-        throw new Error(`無法取得分支 ${branch} 的最新 Commit SHA`);
-      }
-
-
-      // 4. 建立全新獨立 Git Tree (妥協案 13：強制不帶 base_tree 達成原子清場)
-      const newTreeData = await githubApiRequest(
-        'POST',
-        `https://api.github.com/repos/${currentOwner}/${repo}/git/trees`,
-        activeToken,
-        { tree: treeItems }
-      );
-      const newTreeSha = newTreeData.sha;
-
-
-      // 5. 建立新 Commit 物件
-      let gistId = '';
-      try {
-        const canonical = getCanonicalGistUrl();
-        gistId = canonical.split('/').pop();
-      } catch (e) {
-        gistId = window.location.pathname.split('/').filter(Boolean).pop() || 'unknown';
-      }
-
-
-      const commitMessage = `[QATP Relay] Mirror from Gist: ${gistId} (${treeItems.length} files)`;
-      const newCommitData = await githubApiRequest(
-        'POST',
-        `https://api.github.com/repos/${currentOwner}/${repo}/git/commits`,
-        activeToken,
-        {
-          message: commitMessage,
-          tree: newTreeSha,
-          parents: [parentCommitSha]
-        }
-      );
-      const newCommitSha = newCommitData.sha;
-
-
-      // 6. 原子更新分支引用 (Update Ref)
-      await githubApiRequest(
-        'PATCH',
-        `https://api.github.com/repos/${currentOwner}/${repo}/git/refs/heads/${branch}`,
-        activeToken,
-        {
-          sha: newCommitSha,
-          force: true
-        }
-      );
-
-
-      // 7. 演算法 3：雲端大一統提示詞組裝與三變數置換 (AC-3)
-      const targetGistUrl = getCanonicalGistUrl();
-      const targetRepoUrl = `https://github.com/${currentOwner}/${repo}.git`;
-      const shortSha = newCommitSha.slice(0, 7);
-
-
-      // 切片 4: 分支判定：若為交接檔投送 (Round 2)，落實剪貼簿防污染，不覆寫剪貼簿
-      if (relayMode === 'handoff') {
-        showToast(`🚀 已將交接檔 (note) 鏡像至 ${currentOwner}/${repo} (${shortSha})！3 檔就緒`, 'success', 4500);
-        return;
-      }
-
-
-      let finalPromptText = '';
-      try {
-        const csvData = await fetchCloudCSV();
-        const grid = parseRFC4180CSV(csvData);
-        const targetKw = (config.cloudKeyword || 'repo & grep').trim().toLowerCase();
-        let cloudTemplate = null;
-
-
-        for (const row of grid) {
-          if (row && row[0] && row[0].trim().toLowerCase() === targetKw) {
-            cloudTemplate = row[1] || '';
-            break;
-          }
-        }
-
-
-        if (cloudTemplate) {
-          finalPromptText = cloudTemplate
-            .replace(/\{target_repo_url\}/g, targetRepoUrl)
-            .replace(/\{commit_sha\}/g, shortSha)
-            .replace(/\{target_gist_url\}/g, targetGistUrl)
-            .replace(/\{target_url\}/g, targetGistUrl);
-        }
-      } catch (templateErr) {
-        console.warn('[QATP] 無法取得雲端大一統模板，啟用保底防爆規約:', templateErr);
-      }
-
-
-      // 保底大一統防爆規約
-      if (!finalPromptText) {
-        finalPromptText = `請依據以下倉庫代碼執行 QATP 白箱測試與獨立覆核驗收任務：
-
-\`git -c http.sslVerify=false clone ${targetRepoUrl}\`
-\`cd ${repo} && git checkout ${shortSha}\`
-（最新提交：${shortSha}，來源 Gist：${targetGistUrl}）
-
-請嚴格遵循工程規範完成四大維度獨立驗證，驗收結果請落盤至：
-\`/workspace/output/QA驗收報告-QATP白箱審查.md\`
-
-交付格式採雙軌自適應：
-1. 支援資源交付：使用 <deliver-assets> 區塊封裝。
-2. 純文字交付：直接以 Markdown 報告交付驗證矩陣與核對清單。`;
-      }
-
-
-      // 常規 QATP 輪次 (Round 1)：向剪貼簿寫入雲端 repo & grep 引導詞
-      await writeToClipboard(finalPromptText);
-      showToast(`🚀 已鏡像至 ${currentOwner}/${repo} (${shortSha})！大一統 QATP 指令已就緒`, 'success', 4500);
-
-
-    } catch (err) {
-      console.error('[Mirror Relay Error]', err);
-      showToast(err.message || '跨倉鏡像投送失敗', 'danger', 5000);
-    }
-  }
-
-
-  // ==========================================
-  // 插槽 Ping 測試演算法
-  // ==========================================
-  async function pingGitHubSlot(account, token, repo) {
-    if (!account || !token) {
-      showToast('⚠️ 帳號或 Token 不得為空', 'warning');
-      return;
-    }
-    showToast(`⏳ 正在測試連線 ${account}/${repo}...`, 'info', 2000);
-    try {
-      const res = await githubApiRequest('GET', `https://api.github.com/repos/${account}/${repo}`, token);
-      if (res && (res.permissions ? res.permissions.push : true)) {
-        showToast('✅ 插槽連線正常，具備倉庫寫入權限！', 'success', 3500);
-      } else {
-        showToast('⚠️ 連線成功但無倉庫 Push 權限，請確認 Token Scope', 'warning', 3500);
-      }
-    } catch (err) {
-      console.error('[Ping Error]', err);
-      showToast(`❌ 插槽連線失敗: ${err.message}`, 'danger', 4000);
-    }
-  }
-
-
-  // ==========================================
-  // AHK 風格鍵盤熱鍵解析器與調度器
-  // OBS-C: 移除未使用的 raw 屬性
-  // ==========================================
-  function parseAhkHotkey(hotkeyStr) {
-    if (!hotkeyStr || typeof hotkeyStr !== 'string') return [];
-    const tokens = hotkeyStr.split(',').map((s) => s.trim()).filter(Boolean);
-    return tokens.map((token) => {
-      let reqCtrl = false;
-      let reqShift = false;
-      let reqAlt = false;
-      let clean = token;
-      while (clean.length > 0) {
-        if (clean.startsWith('^')) {
-          reqCtrl = true;
-          clean = clean.slice(1);
-        } else if (clean.startsWith('+')) {
-          reqShift = true;
-          clean = clean.slice(1);
-        } else if (clean.startsWith('!')) {
-          reqAlt = true;
-          clean = clean.slice(1);
-        } else {
-          break;
-        }
-      }
-      return {
-        key: clean.toLowerCase(),
-        ctrl: reqCtrl,
-        shift: reqShift,
-        alt: reqAlt
-      };
-    });
-  }
-
-
-  function setupKeyboardDispatcher() {
-    if (window._qatpKeyboardAttached) return;
-    window._qatpKeyboardAttached = true;
-
-
-    window.addEventListener(
-      'keydown',
-      (e) => {
-        const config = loadConfig();
-        const parsedList = parseAhkHotkey(config.smartAssemblyHotkey);
-        if (!parsedList || parsedList.length === 0) return;
-
-
-        const eventKey = e.key.toLowerCase();
-        const isMatched = parsedList.some((rule) => {
-          return (
-            rule.key === eventKey &&
-            rule.ctrl === e.ctrlKey &&
-            rule.shift === e.shiftKey &&
-            rule.alt === e.altKey
-          );
-        });
-
-
-        if (!isMatched) return;
-
-
-        const target = e.target;
-        const isEditable =
-          target &&
-          (target.matches('input, textarea, select') ||
-            target.isContentEditable ||
-            !!target.closest('.CodeMirror'));
-
-
-        const isFunctionKey = /^f[1-9][0-2]?$/i.test(e.key);
-        const hasModifier = e.ctrlKey || e.altKey;
-
-
-        if (isEditable && !isFunctionKey && !hasModifier) {
-          return;
-        }
-
-
-        e.preventDefault();
-        e.stopPropagation();
-        runSmartAssemblyPipeline();
-      },
-      { capture: true }
-    );
-  }
-
-
-  // ==========================================
-  // 滑鼠中鍵上下文感知熱鍵引擎 (INV-06 嚴格型別守衛)
-  // ==========================================
-  function setupMiddleClickDispatcher() {
-    if (window._qatpMiddleClickAttached) return;
-    window._qatpMiddleClickAttached = true;
-
-
-    const handleMiddleEvent = (e) => {
-      if (e.button !== 1) return;
-
-
-      if (!e.target || !(e.target instanceof Element)) return;
-
-
-      const config = loadConfig();
-      if (!config.enableMiddleClick) return;
-
-
-      if (e.target.closest('a[href]')) return;
-
-
-      if (
-        e.target.closest(
-          'button, input, textarea, select, #gist-qatp-toolbar, #gist-qatp-file-board, #gist-qatp-dock-orb, #gist-qatp-config-modal-overlay'
-        )
-      ) {
-        return;
-      }
-
-
-      e.preventDefault();
-      e.stopImmediatePropagation();
-
-
-      if (e.type === 'auxclick') {
-        const cardContainer = e.target.closest('.js-gist-file, .file.js-gist-file, div[id^="file-"]');
-        if (cardContainer) {
-          cardContainer.classList.add('gist-qatp-spotlight');
-          setTimeout(() => {
-            cardContainer.classList.remove('gist-qatp-spotlight');
-          }, 1500);
-        }
-        runSmartAssemblyPipeline();
-      }
-    };
-
-
-    window.addEventListener('mousedown', handleMiddleEvent, { capture: true });
-    window.addEventListener('auxclick', handleMiddleEvent, { capture: true });
-  }
-
-
-  // ==========================================
-  // Safe DOM 設定面板 (M04 / v1.1.1 語意特徵與雲端同步 / OBS-A 純點號防禦)
-  // ==========================================
-  function openConfigModal() {
-    if (document.getElementById('gist-qatp-config-modal-overlay')) return;
-
-
-    const currentConfig = loadConfig();
-    const currentGistOwner = extractGistOwner();
-
-
-    const overlay = document.createElement('div');
-    overlay.id = 'gist-qatp-config-modal-overlay';
-
-
-    const modal = document.createElement('div');
-    modal.id = 'gist-qatp-config-modal';
-
-
-    // 1. Header
-    const header = document.createElement('div');
-    header.className = 'gist-qatp-modal-header';
-
-
-    const title = document.createElement('span');
-    title.textContent = '⚙️ GitHub Gist 一鍵 QATP 工具設定 (v1.1.1)';
-
-
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'gist-qatp-btn gist-qatp-btn-secondary';
-    closeBtn.style.padding = '2px 8px';
-    closeBtn.textContent = '✕';
-    closeBtn.addEventListener('click', () => document.body.removeChild(overlay));
-
-
-    header.appendChild(title);
-    header.appendChild(closeBtn);
-
-
-    // 2. Main (Sidebar + Content)
-    const main = document.createElement('div');
-    main.className = 'gist-qatp-modal-main';
-
-
-    const sidebar = document.createElement('div');
-    sidebar.className = 'gist-qatp-modal-sidebar';
-
-
-    const content = document.createElement('div');
-    content.className = 'gist-qatp-modal-content';
-
-
-    const tabDefinitions = [
-      { id: 'pane-appearance', label: '📑 排版外觀' },
-      { id: 'pane-strategy', label: '⚡ 裝配策略' },
-      { id: 'pane-regex', label: '🎯 語意特徵' },
-      { id: 'pane-cloud', label: '🌐 雲端中繼' }
-    ];
-
-
-    const tabButtons = [];
-    const tabPanes = [];
-
-
-    // --- Tab 1: 排版外觀 ---
-    const paneAppearance = document.createElement('div');
-    paneAppearance.id = 'pane-appearance';
-    paneAppearance.className = 'gist-qatp-tab-pane';
-
-
-    const rowGrid1 = document.createElement('div');
-    rowGrid1.className = 'gist-qatp-field-grid';
-
-
-    const colLayout = document.createElement('div');
-    colLayout.className = 'gist-qatp-field-row';
-    const lblLayout = document.createElement('span');
-    lblLayout.className = 'gist-qatp-field-label';
-    lblLayout.textContent = '按鈕排列佈局：';
-    const selectLayout = document.createElement('select');
-    selectLayout.className = 'gist-qatp-select';
-    [
-      { val: 'single', txt: '直排單排 (預設推薦)' },
-      { val: 'double', txt: '雙排雙欄網格' },
-      { val: 'horizontal', txt: '橫向單排展開' }
-    ].forEach((opt) => {
-      const o = document.createElement('option');
-      o.value = opt.val;
-      o.textContent = opt.txt;
-      selectLayout.appendChild(o);
-    });
-    selectLayout.value = currentConfig.layoutMode;
-    colLayout.appendChild(lblLayout);
-    colLayout.appendChild(selectLayout);
-
-
-    const colSide = document.createElement('div');
-    colSide.className = 'gist-qatp-field-row';
-    const lblSide = document.createElement('span');
-    lblSide.className = 'gist-qatp-field-label';
-    lblSide.textContent = '手柄吸附側：';
-    const selectSide = document.createElement('select');
-    selectSide.className = 'gist-qatp-select';
-    [
-      { val: 'left', txt: '靠左側 (預設推薦)' },
-      { val: 'right', txt: '靠右側' }
-    ].forEach((opt) => {
-      const o = document.createElement('option');
-      o.value = opt.val;
-      o.textContent = opt.txt;
-      selectSide.appendChild(o);
-    });
-    selectSide.value = currentConfig.orbSide;
-    colSide.appendChild(lblSide);
-    colSide.appendChild(selectSide);
-
-
-    rowGrid1.appendChild(colLayout);
-    rowGrid1.appendChild(colSide);
-    paneAppearance.appendChild(rowGrid1);
-
-
-    const rowGrid2 = document.createElement('div');
-    rowGrid2.className = 'gist-qatp-field-grid';
-
-
-    const colBoardEnable = document.createElement('div');
-    colBoardEnable.className = 'gist-qatp-field-row';
-    const cbBoardLabel = document.createElement('label');
-    cbBoardLabel.className = 'gist-qatp-field-checkbox';
-    cbBoardLabel.style.marginTop = '22px';
-    const cbBoard = document.createElement('input');
-    cbBoard.type = 'checkbox';
-    cbBoard.checked = currentConfig.showFileBoard;
-    const txtBoard = document.createElement('span');
-    txtBoard.textContent = '啟用獨立檔案狀態看板';
-    cbBoardLabel.appendChild(cbBoard);
-    cbBoardLabel.appendChild(txtBoard);
-    colBoardEnable.appendChild(cbBoardLabel);
-
-
-    const colBoardWidth = document.createElement('div');
-    colBoardWidth.className = 'gist-qatp-field-row';
-    const lblBoardWidth = document.createElement('span');
-    lblBoardWidth.className = 'gist-qatp-field-label';
-    lblBoardWidth.textContent = '看板最大寬度 (240 ~ 600 px)：';
-    const inputBoardWidth = document.createElement('input');
-    inputBoardWidth.className = 'gist-qatp-input';
-    inputBoardWidth.type = 'number';
-    inputBoardWidth.min = '240';
-    inputBoardWidth.max = '600';
-    inputBoardWidth.value = currentConfig.fileBoardMaxWidth;
-    colBoardWidth.appendChild(lblBoardWidth);
-    colBoardWidth.appendChild(inputBoardWidth);
-
-
-    rowGrid2.appendChild(colBoardEnable);
-    rowGrid2.appendChild(colBoardWidth);
-    paneAppearance.appendChild(rowGrid2);
-
-
-    const rowFs = document.createElement('div');
-    rowFs.className = 'gist-qatp-field-row';
-    const lblFs = document.createElement('span');
-    lblFs.className = 'gist-qatp-field-label';
-    lblFs.textContent = '全域字型大小 (12 ~ 20 px)：';
-    const inputFs = document.createElement('input');
-    inputFs.className = 'gist-qatp-input';
-    inputFs.type = 'number';
-    inputFs.min = '12';
-    inputFs.max = '20';
-    inputFs.value = currentConfig.buttonFontSize;
-    rowFs.appendChild(lblFs);
-    rowFs.appendChild(inputFs);
-    paneAppearance.appendChild(rowFs);
-
-
-    const rowBtnVis = document.createElement('div');
-    rowBtnVis.className = 'gist-qatp-field-row';
-    const lblBtnVis = document.createElement('span');
-    lblBtnVis.className = 'gist-qatp-field-label';
-    lblBtnVis.textContent = '快捷按鈕顯隱設定：';
-    rowBtnVis.appendChild(lblBtnVis);
-
-
-    const gridVis = document.createElement('div');
-    gridVis.className = 'gist-qatp-field-grid';
-
-
-    const makeVisCb = (labelText, checked) => {
-      const lbl = document.createElement('label');
-      lbl.className = 'gist-qatp-field-checkbox';
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.checked = checked;
-      const sp = document.createElement('span');
-      sp.textContent = labelText;
-      lbl.appendChild(cb);
-      lbl.appendChild(sp);
-      return { container: lbl, checkbox: cb };
-    };
-
-
-    const visSmart = makeVisCb('顯示 ⚡ 智能裝配', currentConfig.buttonVisibility.smart);
-    const visHandoff = makeVisCb('顯示 📝 一鍵加交接檔', currentConfig.buttonVisibility.handoff);
-    const visSaveCopy = makeVisCb('顯示 🚀 儲存並複製 QATP', currentConfig.buttonVisibility.saveCopy);
-    const visRelayClaude = makeVisCb('顯示 🌐 投送 Claude (Repo)', currentConfig.buttonVisibility.relayClaude);
-    const visExtract = makeVisCb('顯示 📋 僅提取 QATP', currentConfig.buttonVisibility.extractOnly);
-
-
-    gridVis.appendChild(visSmart.container);
-    gridVis.appendChild(visHandoff.container);
-    gridVis.appendChild(visSaveCopy.container);
-    gridVis.appendChild(visRelayClaude.container);
-    gridVis.appendChild(visExtract.container);
-    rowBtnVis.appendChild(gridVis);
-    paneAppearance.appendChild(rowBtnVis);
-
-
-    // --- Tab 2: 裝配策略 ---
-    const paneStrategy = document.createElement('div');
-    paneStrategy.id = 'pane-strategy';
-    paneStrategy.className = 'gist-qatp-tab-pane';
-
-
-    const rowGridStrat1 = document.createElement('div');
-    rowGridStrat1.className = 'gist-qatp-field-grid';
-
-
-    const colNamingMode = document.createElement('div');
-    colNamingMode.className = 'gist-qatp-field-row';
-    const lblNamingMode = document.createElement('span');
-    lblNamingMode.className = 'gist-qatp-field-label';
-    lblNamingMode.textContent = '代碼槽命名策略：';
-    const selectNamingMode = document.createElement('select');
-    selectNamingMode.className = 'gist-qatp-select';
-    [
-      { val: 'infer_code', txt: '智能前綴 code.<ext> (推薦)' },
-      { val: 'infer_name', txt: '萃取名稱 {Name}.<ext>' },
-      { val: 'custom', txt: '完全自訂檔名' }
-    ].forEach((opt) => {
-      const o = document.createElement('option');
-      o.value = opt.val;
-      o.textContent = opt.txt;
-      selectNamingMode.appendChild(o);
-    });
-    selectNamingMode.value = currentConfig.codeNamingMode;
-    colNamingMode.appendChild(lblNamingMode);
-    colNamingMode.appendChild(selectNamingMode);
-
-
-    const colCustomName = document.createElement('div');
-    colCustomName.className = 'gist-qatp-field-row';
-    const lblCustomName = document.createElement('span');
-    lblCustomName.className = 'gist-qatp-field-label';
-    lblCustomName.textContent = '代碼槽自訂檔名：';
-    const inputCustomName = document.createElement('input');
-    inputCustomName.className = 'gist-qatp-input';
-    inputCustomName.type = 'text';
-    inputCustomName.value = currentConfig.customCodeFileName;
-    colCustomName.appendChild(lblCustomName);
-    colCustomName.appendChild(inputCustomName);
-
-
-    rowGridStrat1.appendChild(colNamingMode);
-    rowGridStrat1.appendChild(colCustomName);
-    paneStrategy.appendChild(rowGridStrat1);
-
-
-    const rowGridStrat2 = document.createElement('div');
-    rowGridStrat2.className = 'gist-qatp-field-grid';
-
-
-    const colQatpFile = document.createElement('div');
-    colQatpFile.className = 'gist-qatp-field-row';
-    const lblQatpFile = document.createElement('span');
-    lblQatpFile.className = 'gist-qatp-field-label';
-    lblQatpFile.textContent = 'QATP 槽固定檔名：';
-    const inputQatpFile = document.createElement('input');
-    inputQatpFile.className = 'gist-qatp-input';
-    inputQatpFile.type = 'text';
-    inputQatpFile.value = currentConfig.qatpFileName;
-    colQatpFile.appendChild(lblQatpFile);
-    colQatpFile.appendChild(inputQatpFile);
-
-
-    const colHandoffFile = document.createElement('div');
-    colHandoffFile.className = 'gist-qatp-field-row';
-    const lblHandoffFile = document.createElement('span');
-    lblHandoffFile.className = 'gist-qatp-field-label';
-    lblHandoffFile.textContent = '一鍵加交接檔預設檔名 (法定 note)：';
-    const inputHandoffFile = document.createElement('input');
-    inputHandoffFile.className = 'gist-qatp-input';
-    inputHandoffFile.type = 'text';
-    inputHandoffFile.value = currentConfig.defaultFileName;
-    colHandoffFile.appendChild(lblHandoffFile);
-    colHandoffFile.appendChild(inputHandoffFile);
-
-
-    rowGridStrat2.appendChild(colQatpFile);
-    rowGridStrat2.appendChild(colHandoffFile);
-    paneStrategy.appendChild(rowGridStrat2);
-
-
-    const rowGridStrat3 = document.createElement('div');
-    rowGridStrat3.className = 'gist-qatp-field-grid';
-
-
-    const colAutoSubmit = document.createElement('div');
-    colAutoSubmit.className = 'gist-qatp-field-row';
-    const cbAutoSubmitLabel = document.createElement('label');
-    cbAutoSubmitLabel.className = 'gist-qatp-field-checkbox';
-    cbAutoSubmitLabel.style.marginTop = '12px';
-    const cbAutoSubmit = document.createElement('input');
-    cbAutoSubmit.type = 'checkbox';
-    cbAutoSubmit.checked = currentConfig.autoSubmitDualReady;
-    const txtAutoSubmit = document.createElement('span');
-    txtAutoSubmit.textContent = '雙槽齊全時自動儲存';
-    cbAutoSubmitLabel.appendChild(cbAutoSubmit);
-    cbAutoSubmitLabel.appendChild(txtAutoSubmit);
-    colAutoSubmit.appendChild(cbAutoSubmitLabel);
-
-
-    const colArchivedNew = document.createElement('div');
-    colArchivedNew.className = 'gist-qatp-field-row';
-    const cbArchivedNewLabel = document.createElement('label');
-    cbArchivedNewLabel.className = 'gist-qatp-field-checkbox';
-    cbArchivedNewLabel.style.marginTop = '12px';
-    const cbArchivedNew = document.createElement('input');
-    cbArchivedNew.type = 'checkbox';
-    cbArchivedNew.checked = currentConfig.autoNewGistOnFinished;
-    const txtArchivedNew = document.createElement('span');
-    txtArchivedNew.textContent = '已結案 Gist 自動開啟新 Gist';
-    cbArchivedNewLabel.appendChild(cbArchivedNew);
-    cbArchivedNewLabel.appendChild(txtArchivedNew);
-    colArchivedNew.appendChild(cbArchivedNewLabel);
-
-
-    rowGridStrat3.appendChild(colAutoSubmit);
-    rowGridStrat3.appendChild(colArchivedNew);
-    paneStrategy.appendChild(rowGridStrat3);
-
-
-    const rowGridStrat4 = document.createElement('div');
-    rowGridStrat4.className = 'gist-qatp-field-grid';
-
-
-    const colMiddleClick = document.createElement('div');
-    colMiddleClick.className = 'gist-qatp-field-row';
-    const cbMiddleClickLabel = document.createElement('label');
-    cbMiddleClickLabel.className = 'gist-qatp-field-checkbox';
-    cbMiddleClickLabel.style.marginTop = '12px';
-    const cbMiddleClick = document.createElement('input');
-    cbMiddleClick.type = 'checkbox';
-    cbMiddleClick.checked = currentConfig.enableMiddleClick;
-    const txtMiddleClick = document.createElement('span');
-    txtMiddleClick.textContent = '啟用滑鼠中鍵觸發智能裝配';
-    cbMiddleClickLabel.appendChild(cbMiddleClick);
-    cbMiddleClickLabel.appendChild(txtMiddleClick);
-    colMiddleClick.appendChild(cbMiddleClickLabel);
-
-
-    const colHotkey = document.createElement('div');
-    colHotkey.className = 'gist-qatp-field-row';
-    const lblHotkey = document.createElement('span');
-    lblHotkey.className = 'gist-qatp-field-label';
-    lblHotkey.textContent = '智能裝配熱鍵 (AHK 風格)：';
-    const inputHotkey = document.createElement('input');
-    inputHotkey.className = 'gist-qatp-input';
-    inputHotkey.type = 'text';
-    inputHotkey.value = currentConfig.smartAssemblyHotkey || 'F4';
-    colHotkey.appendChild(lblHotkey);
-    colHotkey.appendChild(inputHotkey);
-
-
-    rowGridStrat4.appendChild(colMiddleClick);
-    rowGridStrat4.appendChild(colHotkey);
-    paneStrategy.appendChild(rowGridStrat4);
-
-
-    const hintHotkey = document.createElement('span');
-    hintHotkey.className = 'gist-qatp-field-hint';
-    hintHotkey.textContent = '熱鍵支援多組逗號分隔 (例: F4, ^F4, !F4)；修飾前綴：^ 代表 Ctrl，+ 代表 Shift，! 代表 Alt；# (Win 鍵) 豁免不支援。輸入框打字自動放行。';
-    paneStrategy.appendChild(hintHotkey);
-
-
-    // --- Tab 3: 🎯 語意特徵 ---
-    const paneRegex = document.createElement('div');
-    paneRegex.id = 'pane-regex';
-    paneRegex.className = 'gist-qatp-tab-pane';
-
-
-    const rowCodeRegex = document.createElement('div');
-    rowCodeRegex.className = 'gist-qatp-field-row';
-    const lblCodeRegex = document.createElement('span');
-    lblCodeRegex.className = 'gist-qatp-field-label';
-    lblCodeRegex.textContent = '生產代碼特徵辨識正則 (codeRegex)：';
-    const inputCodeRegex = document.createElement('input');
-    inputCodeRegex.className = 'gist-qatp-input';
-    inputCodeRegex.type = 'text';
-    inputCodeRegex.value = currentConfig.codeRegex;
-    rowCodeRegex.appendChild(lblCodeRegex);
-    rowCodeRegex.appendChild(inputCodeRegex);
-    paneRegex.appendChild(rowCodeRegex);
-
-
-    const rowQatpPrimary = document.createElement('div');
-    rowQatpPrimary.className = 'gist-qatp-field-row';
-    const lblQatpPrimary = document.createElement('span');
-    lblQatpPrimary.className = 'gist-qatp-field-label';
-    lblQatpPrimary.textContent = 'QATP 第一核心特徵標記 (qatpPrimaryToken)：';
-    const inputQatpPrimary = document.createElement('input');
-    inputQatpPrimary.className = 'gist-qatp-input';
-    inputQatpPrimary.type = 'text';
-    inputQatpPrimary.value = currentConfig.qatpPrimaryToken || 'QATP';
-    rowQatpPrimary.appendChild(lblQatpPrimary);
-    rowQatpPrimary.appendChild(inputQatpPrimary);
-    paneRegex.appendChild(rowQatpPrimary);
-
-
-    const rowQatpSecondary = document.createElement('div');
-    rowQatpSecondary.className = 'gist-qatp-field-row';
-    const lblQatpSecondary = document.createElement('span');
-    lblQatpSecondary.className = 'gist-qatp-field-label';
-    lblQatpSecondary.textContent = 'QATP 第二上下文特徵正則 (qatpSecondaryPattern)：';
-    const inputQatpSecondary = document.createElement('input');
-    inputQatpSecondary.className = 'gist-qatp-input';
-    inputQatpSecondary.type = 'text';
-    inputQatpSecondary.value = currentConfig.qatpSecondaryPattern || DEFAULT_CONFIG_V2_1_1.qatpSecondaryPattern;
-    rowQatpSecondary.appendChild(lblQatpSecondary);
-    rowQatpSecondary.appendChild(inputQatpSecondary);
-
-
-    const hintQatp = document.createElement('span');
-    hintQatp.className = 'gist-qatp-field-hint';
-    hintQatp.textContent = 'QATP 判定採雙特徵交集門禁：前 20 行內必須同時包含特徵一與符合特徵二，且排除代碼宣告。';
-    rowQatpSecondary.appendChild(hintQatp);
-    paneRegex.appendChild(rowQatpSecondary);
-
-
-    const rowFilterRegex = document.createElement('div');
-    rowFilterRegex.className = 'gist-qatp-field-row';
-    const lblFilterRegex = document.createElement('span');
-    lblFilterRegex.className = 'gist-qatp-field-label';
-    lblFilterRegex.textContent = '交接檔特徵辨識正則 (filterRegex)：';
-    const inputFilterRegex = document.createElement('input');
-    inputFilterRegex.className = 'gist-qatp-input';
-    inputFilterRegex.type = 'text';
-    inputFilterRegex.value = currentConfig.filterRegex;
-    rowFilterRegex.appendChild(lblFilterRegex);
-    rowFilterRegex.appendChild(inputFilterRegex);
-    paneRegex.appendChild(rowFilterRegex);
-
-
-    const rowKeywords = document.createElement('div');
-    rowKeywords.className = 'gist-qatp-field-row';
-    const lblKeywords = document.createElement('span');
-    lblKeywords.className = 'gist-qatp-field-label';
-    lblKeywords.textContent = '交接檔強關鍵字清單 (noteKeywords，每行或以逗號分隔)：';
-    const inputKeywords = document.createElement('textarea');
-    inputKeywords.className = 'gist-qatp-textarea';
-    inputKeywords.rows = 4;
-    inputKeywords.value = (currentConfig.noteKeywords || DEFAULT_CONFIG_V2_1_1.noteKeywords).join('\n');
-    rowKeywords.appendChild(lblKeywords);
-    rowKeywords.appendChild(inputKeywords);
-    paneRegex.appendChild(rowKeywords);
-
-
-    // --- Tab 4: 🌐 雲端中繼 ---
-    const paneCloud = document.createElement('div');
-    paneCloud.id = 'pane-cloud';
-    paneCloud.className = 'gist-qatp-tab-pane';
-
-
-    // 區塊 A：Claude 中繼倉與多帳號插槽設定
-    const secRelay = document.createElement('div');
-    secRelay.className = 'gist-qatp-field-row';
-
-
-    const lblRelayTitle = document.createElement('span');
-    lblRelayTitle.className = 'gist-qatp-field-label';
-    lblRelayTitle.style.color = '#58a6ff';
-    lblRelayTitle.textContent = '【Project Bridge-Drop：Claude 中繼倉與多帳號插槽】';
-    secRelay.appendChild(lblRelayTitle);
-
-
-    const rowRelayRepoGrid = document.createElement('div');
-    rowRelayRepoGrid.className = 'gist-qatp-field-grid';
-
-
-    const colRelayRepo = document.createElement('div');
-    colRelayRepo.className = 'gist-qatp-field-row';
-    const lblRelayRepo = document.createElement('span');
-    lblRelayRepo.className = 'gist-qatp-field-label';
-    lblRelayRepo.textContent = '中繼目標倉庫名：';
-    const inputRelayRepo = document.createElement('input');
-    inputRelayRepo.className = 'gist-qatp-input';
-    inputRelayRepo.type = 'text';
-    inputRelayRepo.value = currentConfig.relayRepoName || 'qatp-relay';
-    colRelayRepo.appendChild(lblRelayRepo);
-    colRelayRepo.appendChild(inputRelayRepo);
-
-
-    const colRelayBranch = document.createElement('div');
-    colRelayBranch.className = 'gist-qatp-field-row';
-    const lblRelayBranch = document.createElement('span');
-    lblRelayBranch.className = 'gist-qatp-field-label';
-    lblRelayBranch.textContent = '中繼目標分支名：';
-    const inputRelayBranch = document.createElement('input');
-    inputRelayBranch.className = 'gist-qatp-input';
-    inputRelayBranch.type = 'text';
-    inputRelayBranch.value = currentConfig.relayRepoBranch || 'main';
-    colRelayBranch.appendChild(lblRelayBranch);
-    colRelayBranch.appendChild(inputRelayBranch);
-
-
-    rowRelayRepoGrid.appendChild(colRelayRepo);
-    rowRelayRepoGrid.appendChild(colRelayBranch);
-    secRelay.appendChild(rowRelayRepoGrid);
-
-
-    const ownerHint = document.createElement('div');
-    ownerHint.style.fontSize = '12px';
-    ownerHint.style.color = '#58a6ff';
-    ownerHint.style.margin = '4px 0';
-    ownerHint.textContent = `目前 Gist 帳號：${currentGistOwner || '(未進入 Gist 專案頁面)'}`;
-    secRelay.appendChild(ownerHint);
-
-
-    const slotInputs = [];
-    const savedSlots = Array.isArray(currentConfig.relaySlots) ? currentConfig.relaySlots : [];
-
-
-    for (let i = 0; i < 3; i++) {
-      const slotVal = savedSlots[i] || { account: '', token: '' };
-
-
-      const slotCard = document.createElement('div');
-      slotCard.className = 'gist-qatp-slot-card';
-
-
-      const slotHeader = document.createElement('div');
-      slotHeader.className = 'gist-qatp-slot-header';
-      slotHeader.textContent = `插槽 ${i + 1}`;
-
-
-      const slotInputsContainer = document.createElement('div');
-      slotInputsContainer.className = 'gist-qatp-slot-inputs';
-
-
-      const grpAccount = document.createElement('div');
-      grpAccount.className = 'gist-qatp-input-group';
-
-
-      const inputAcc = document.createElement('input');
-      inputAcc.className = 'gist-qatp-input';
-      inputAcc.type = 'text';
-      inputAcc.placeholder = 'GitHub 帳號，例如 wei9133';
-      inputAcc.value = slotVal.account || '';
-
-
-      const btnFillCurrent = document.createElement('button');
-      btnFillCurrent.className = 'gist-qatp-icon-btn';
-      btnFillCurrent.textContent = '填入當前';
-      btnFillCurrent.title = '帶入當前 Gist 擁有者帳號';
-      btnFillCurrent.addEventListener('click', () => {
-        if (currentGistOwner) {
-          inputAcc.value = currentGistOwner;
-          showToast(`已帶入帳號：${currentGistOwner}`, 'info', 1500);
-        } else {
-          showToast('當前非 Gist 頁面，無法提取帳號', 'warning', 1500);
-        }
-      });
-
-
-      grpAccount.appendChild(inputAcc);
-      grpAccount.appendChild(btnFillCurrent);
-      slotInputsContainer.appendChild(grpAccount);
-
-
-      const grpToken = document.createElement('div');
-      grpToken.className = 'gist-qatp-input-group';
-
-
-      const inputTok = document.createElement('input');
-      inputTok.className = 'gist-qatp-input';
-      inputTok.type = 'password';
-      inputTok.placeholder = 'GitHub Token (ghp_... 或 github_pat_...)';
-      inputTok.value = slotVal.token || '';
-
-
-      const btnEye = document.createElement('button');
-      btnEye.className = 'gist-qatp-icon-btn';
-      btnEye.textContent = '👁️';
-      btnEye.title = '顯示 / 隱藏 Token';
-      btnEye.addEventListener('click', () => {
-        inputTok.type = inputTok.type === 'password' ? 'text' : 'password';
-      });
-
-
-      const btnPing = document.createElement('button');
-      btnPing.className = 'gist-qatp-btn gist-qatp-btn-primary';
-      btnPing.style.padding = '4px 8px';
-      btnPing.style.fontSize = '12px';
-      btnPing.textContent = '🔍 測試 (Ping)';
-      btnPing.addEventListener('click', () => {
-        const repoName = inputRelayRepo.value.trim() || 'qatp-relay';
-        pingGitHubSlot(inputAcc.value.trim(), inputTok.value.trim(), repoName);
-      });
-
-
-      grpToken.appendChild(inputTok);
-      grpToken.appendChild(btnEye);
-      grpToken.appendChild(btnPing);
-      slotInputsContainer.appendChild(grpToken);
-
-
-      slotCard.appendChild(slotHeader);
-      slotCard.appendChild(slotInputsContainer);
-      secRelay.appendChild(slotCard);
-
-
-      slotInputs.push({ accountEl: inputAcc, tokenEl: inputTok });
-    }
-
-
-    paneCloud.appendChild(secRelay);
-
-
-    // 區塊 B：設定檔備份與跨瀏覽器遷移 (JSON 匯出 / 匯入)
-    const secBackup = document.createElement('div');
-    secBackup.className = 'gist-qatp-field-row';
-    secBackup.style.marginTop = '10px';
-
-
-    const lblBackupTitle = document.createElement('span');
-    lblBackupTitle.className = 'gist-qatp-field-label';
-    lblBackupTitle.style.color = '#58a6ff';
-    lblBackupTitle.textContent = '【設定檔備份與跨瀏覽器遷移】';
-    secBackup.appendChild(lblBackupTitle);
-
-
-    const rowBackupBtns = document.createElement('div');
-    rowBackupBtns.className = 'gist-qatp-action-row';
-
-
-    const btnExportConfig = document.createElement('button');
-    btnExportConfig.className = 'gist-qatp-btn gist-qatp-btn-secondary';
-    btnExportConfig.textContent = '📋 匯出設定 (複製 JSON)';
-    btnExportConfig.title = '複製當前所有設定至剪貼簿';
-    btnExportConfig.addEventListener('click', async () => {
-      const liveCfg = loadConfig();
-      liveCfg.relayRepoName = inputRelayRepo.value.trim() || 'qatp-relay';
-      liveCfg.relayRepoBranch = inputRelayBranch.value.trim() || 'main';
-      liveCfg.relaySlots = slotInputs.map((s) => ({
-        account: s.accountEl.value.trim(),
-        token: s.tokenEl.value.trim()
-      }));
-      const jsonStr = JSON.stringify(liveCfg, null, 2);
-      await writeToClipboard(jsonStr);
-      showToast('✅ 設定已複製！(⚠️ 內含 Token，僅供個人瀏覽器遷移，請勿外流)', 'warning', 4500);
-    });
-
-
-    const btnImportConfig = document.createElement('button');
-    btnImportConfig.className = 'gist-qatp-btn gist-qatp-btn-warm';
-    btnImportConfig.textContent = '📥 匯入設定 (貼上 JSON)';
-    btnImportConfig.title = '自剪貼簿貼入 JSON 還原組態';
-    btnImportConfig.addEventListener('click', () => {
-      const importOverlay = document.createElement('div');
-      importOverlay.style.position = 'fixed';
-      importOverlay.style.inset = '0';
-      importOverlay.style.background = 'rgba(0,0,0,0.7)';
-      importOverlay.style.zIndex = '100002';
-      importOverlay.style.display = 'flex';
-      importOverlay.style.alignItems = 'center';
-      importOverlay.style.justifyContent = 'center';
-
-
-      const importBox = document.createElement('div');
-      importBox.style.background = '#161b22';
-      importBox.style.border = '1px solid #30363d';
-      importBox.style.borderRadius = '8px';
-      importBox.style.padding = '16px';
-      importBox.style.width = '480px';
-      importBox.style.display = 'flex';
-      importBox.style.flexDirection = 'column';
-      importBox.style.gap = '10px';
-
-
-      const importTitle = document.createElement('span');
-      importTitle.style.fontWeight = '600';
-      importTitle.style.color = '#f0f6fc';
-      importTitle.textContent = '📥 貼上設定檔 JSON';
-
-
-      const importTa = document.createElement('textarea');
-      importTa.className = 'gist-qatp-textarea';
-      importTa.rows = 8;
-      importTa.placeholder = '在此處貼上導出的完整設定 JSON...';
-
-
-      const importActions = document.createElement('div');
-      importActions.className = 'gist-qatp-action-row';
-      importActions.style.justifyContent = 'flex-end';
-
-
-      const btnCancel = document.createElement('button');
-      btnCancel.className = 'gist-qatp-btn gist-qatp-btn-secondary';
-      btnCancel.textContent = '取消';
-      btnCancel.addEventListener('click', () => {
-        document.body.removeChild(importOverlay);
-      });
-
-
-      const btnConfirmImport = document.createElement('button');
-      btnConfirmImport.className = 'gist-qatp-btn gist-qatp-btn-smart';
-      btnConfirmImport.textContent = '確認匯入';
-      btnConfirmImport.addEventListener('click', () => {
-        const raw = importTa.value.trim();
-        try {
-          const parsed = JSON.parse(raw);
-          if (!parsed || typeof parsed !== 'object') {
-            throw new Error('解析結果非物件');
-          }
-          if (!Array.isArray(parsed.relaySlots) || parsed.relaySlots.length === 0) {
-            throw new Error('缺少必要 relaySlots 欄位');
-          }
-
-
-          const boundedSlots = parsed.relaySlots.slice(0, 3).map((s) => ({
-            account: (s && typeof s.account === 'string') ? s.account.trim() : '',
-            token: (s && typeof s.token === 'string') ? s.token.trim() : ''
-          }));
-          while (boundedSlots.length < 3) {
-            boundedSlots.push({ account: '', token: '' });
-          }
-          parsed.relaySlots = boundedSlots;
-
-
-          const merged = Object.assign({}, DEFAULT_CONFIG_V2_1_1, parsed);
-          saveConfig(merged);
-          injectStyles();
-
-
-          const existingToolbar = document.getElementById('gist-qatp-toolbar');
-          if (existingToolbar) existingToolbar.remove();
-          mountToolbar();
-
-
-          document.body.removeChild(importOverlay);
-          document.body.removeChild(overlay);
-          showToast('🎉 匯入成功！3 組帳號設定已就緒！', 'success', 3500);
-          openConfigModal();
+            const adapter = getCurrentAdapter();
+            if (!adapter) return;
+
+
+            let container = document.getElementById(UI_CONTAINER_ID);
+            let orb = document.getElementById(FLOATING_ORB_ID);
+
+
+            if (forceRemount) {
+                if (container) { container.remove(); container = null; }
+                if (orb) { orb.remove(); orb = null; }
+            }
+
+
+            if (globalConfig.isCollapsed) {
+                if (container) { container.remove(); container = null; }
+                if (!orb || !orb.isConnected || orb.parentNode !== document.body) {
+                    if (orb) { try { orb.remove(); } catch (e) {} }
+                    orb = createOrbElement(adapter);
+                    applySavedPosition(orb, adapter, true);
+                    document.body.appendChild(orb);
+                }
+            } else {
+                if (orb) { orb.remove(); orb = null; }
+                if (!container || !container.isConnected || container.parentNode !== document.body) {
+                    if (container) { try { container.remove(); } catch (e) {} }
+                    container = createUIElement(adapter);
+                    applySavedPosition(container, adapter, false);
+                    document.body.appendChild(container);
+                }
+            }
+            updateGearIndicator();
         } catch (err) {
-          console.error('[Import Error]', err);
-          showToast('❌ 匯入失敗：設定 JSON 格式無效或缺少必要插槽欄位', 'danger', 4000);
+            console.error('❌ [AI Copy] mountUI 掛載異常:', err);
         }
-      });
-
-
-      importActions.appendChild(btnCancel);
-      importActions.appendChild(btnConfirmImport);
-      importBox.appendChild(importTitle);
-      importBox.appendChild(importTa);
-      importBox.appendChild(importActions);
-      importOverlay.appendChild(importBox);
-      document.body.appendChild(importOverlay);
-    });
-
-
-    rowBackupBtns.appendChild(btnExportConfig);
-    rowBackupBtns.appendChild(btnImportConfig);
-    secBackup.appendChild(rowBackupBtns);
-    paneCloud.appendChild(secBackup);
-
-
-    // Google Docs 特徵 JSON 同步區
-    const rowSyncSection = document.createElement('div');
-    rowSyncSection.className = 'gist-qatp-field-row';
-    rowSyncSection.style.marginTop = '12px';
-
-
-    const headerDocsSection = document.createElement('div');
-    headerDocsSection.className = 'gist-qatp-field-header-row';
-
-
-    const lblSyncSection = document.createElement('span');
-    lblSyncSection.className = 'gist-qatp-field-label';
-    lblSyncSection.style.color = '#58a6ff';
-    lblSyncSection.textContent = '【Google Docs 特徵庫雲端動態同步】';
+    }
 
 
-    const linkDocsEdit = document.createElement('a');
-    linkDocsEdit.className = 'gist-qatp-link-btn';
-    linkDocsEdit.href = getGoogleDocEditUrl(currentConfig.jsonSyncUrl || DEFAULT_CONFIG_V2_1_1.jsonSyncUrl);
-    linkDocsEdit.target = '_blank';
-    linkDocsEdit.rel = 'noopener noreferrer';
-    linkDocsEdit.textContent = '🔗 文件編輯 ↗';
+    // ==========================================
+    // 13. 熱鍵調度矩陣：多熱鍵別名陣列解析、輸入框全域穿透與 Caret 阻斷
+    // ==========================================
+    function isSingleHotkeyMatch(event, rawStr) {
+        if (!rawStr) return false;
+        let str = rawStr.trim().toUpperCase();
+        if (!str) return false;
 
 
-    headerDocsSection.appendChild(lblSyncSection);
-    headerDocsSection.appendChild(linkDocsEdit);
-    rowSyncSection.appendChild(headerDocsSection);
+        let needCtrl = false;
+        let needAlt = false;
+        let needShift = false;
 
 
-    const lblSyncUrl = document.createElement('span');
-    lblSyncUrl.className = 'gist-qatp-field-label';
-    lblSyncUrl.textContent = 'Google Docs 共享連結 (含純文字 export 轉換)：';
-    const inputSyncUrl = document.createElement('input');
-    inputSyncUrl.className = 'gist-qatp-input';
-    inputSyncUrl.type = 'text';
-    inputSyncUrl.value = currentConfig.jsonSyncUrl || DEFAULT_CONFIG_V2_1_1.jsonSyncUrl;
-    inputSyncUrl.addEventListener('input', () => {
-      linkDocsEdit.href = getGoogleDocEditUrl(inputSyncUrl.value.trim());
-    });
-    rowSyncSection.appendChild(lblSyncUrl);
-    rowSyncSection.appendChild(inputSyncUrl);
+        // 1. AHK 符號前綴循環剝離 (^ = Ctrl, ! = Alt, + = Shift)
+        let parsed = true;
+        while (parsed && str.length > 1) {
+            if (str.startsWith('^')) {
+                needCtrl = true;
+                str = str.substring(1).trim();
+            } else if (str.startsWith('!')) {
+                needAlt = true;
+                str = str.substring(1).trim();
+            } else if (str.startsWith('+')) {
+                needShift = true;
+                str = str.substring(1).trim();
+            } else {
+                parsed = false;
+            }
+        }
 
 
-    const actionRow = document.createElement('div');
-    actionRow.className = 'gist-qatp-action-row';
+        // 2. 傳統文字組合鍵解析 (如 Ctrl+Alt+F4)
+        const parts = str.split('+').map(p => p.trim());
+        const targetKey = parts[parts.length - 1];
 
 
-    const btnCloudSync = document.createElement('button');
-    btnCloudSync.className = 'gist-qatp-btn gist-qatp-btn-smart';
-    btnCloudSync.textContent = '🔄 從雲端同步特徵';
-    btnCloudSync.addEventListener('click', async () => {
-      const url = inputSyncUrl.value.trim();
-      if (!url) {
-        showToast('請先輸入有效的 Google Docs 連結', 'warning');
-        return;
-      }
-      try {
-        const updated = await syncFromDocJson(url);
-        inputCodeRegex.value = updated.codeRegex;
-        inputQatpPrimary.value = updated.qatpPrimaryToken;
-        inputQatpSecondary.value = updated.qatpSecondaryPattern;
-        inputFilterRegex.value = updated.filterRegex;
-        inputKeywords.value = updated.noteKeywords.join('\n');
-      } catch (err) {
-        console.error('[Sync Error]', err);
-        showToast(err.message || '同步失敗', 'danger');
-      }
-    });
+        if (parts.includes('CTRL')) needCtrl = true;
+        if (parts.includes('ALT')) needAlt = true;
+        if (parts.includes('SHIFT')) needShift = true;
 
 
-    const btnExportJson = document.createElement('button');
-    btnExportJson.className = 'gist-qatp-btn gist-qatp-btn-secondary';
-    btnExportJson.textContent = '📋 複製特徵 JSON 範本';
-    btnExportJson.title = '複製標準脫敏 JSON 格式，可直接貼至 Google Docs 供團隊共享';
-    btnExportJson.addEventListener('click', async () => {
-      const sample = {
-        version: '1.1.1',
-        qatpPrimaryToken: inputQatpPrimary.value.trim() || 'QATP',
-        qatpSecondaryPattern: inputQatpSecondary.value.trim() || DEFAULT_CONFIG_V2_1_1.qatpSecondaryPattern,
-        filterRegex: inputFilterRegex.value.trim() || DEFAULT_CONFIG_V2_1_1.filterRegex,
-        noteKeywords: inputKeywords.value.split(/[\r\n,]+/).map((k) => k.trim()).filter(Boolean),
-        codeRegex: inputCodeRegex.value.trim() || DEFAULT_CONFIG_V2_1_1.codeRegex
-      };
-      await writeToClipboard(JSON.stringify(sample, null, 2));
-      showToast('🎉 標準特徵 JSON 已複製至剪貼簿！', 'success');
-    });
+        if (event.ctrlKey !== needCtrl) return false;
+        if (event.altKey !== needAlt) return false;
+        if (event.shiftKey !== needShift) return false;
 
 
-    actionRow.appendChild(btnCloudSync);
-    actionRow.appendChild(btnExportJson);
-    rowSyncSection.appendChild(actionRow);
-    paneCloud.appendChild(rowSyncSection);
+        const currentKey = event.key.toUpperCase();
+        return currentKey === targetKey || event.code.toUpperCase() === targetKey;
+    }
 
 
-    // QATP 試算表 CSV 端點
-    const rowCsvSection = document.createElement('div');
-    rowCsvSection.className = 'gist-qatp-field-row';
-    rowCsvSection.style.marginTop = '12px';
+    function isHotkeyMatch(event, hotkeyStr) {
+        if (typeof hotkeyStr !== 'string' || !hotkeyStr.trim()) return false;
+        const candidates = hotkeyStr.split(',').map(s => s.trim()).filter(Boolean);
+        if (candidates.length === 0) return false;
 
 
-    const headerCsvSection = document.createElement('div');
-    headerCsvSection.className = 'gist-qatp-field-header-row';
+        for (const cand of candidates) {
+            if (isSingleHotkeyMatch(event, cand)) {
+                return true;
+            }
+        }
+        return false;
+    }
 
 
-    const lblCsvSection = document.createElement('span');
-    lblCsvSection.className = 'gist-qatp-field-label';
-    lblCsvSection.style.color = '#58a6ff';
-    lblCsvSection.textContent = '【QATP 提示詞試算表端點 (INV-01)】';
+    function setupHotkeys() {
+        window.addEventListener('keydown', (e) => {
+            const summaryKeyStr = globalConfig.qaQueueSettings?.summaryHotkey || '';
+            const captureKeyStr = globalConfig.qaQueueSettings?.captureHotkey || '';
 
 
-    headerCsvSection.appendChild(lblCsvSection);
-    rowCsvSection.appendChild(headerCsvSection);
+            // 1. 強制阻斷 Caret Browsing 原生彈窗 (在 Capture 階段最前端優先攔截)
+            if (isHotkeyMatch(e, summaryKeyStr)) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
 
 
-    const headerPrimary = document.createElement('div');
-    headerPrimary.className = 'gist-qatp-field-header-row';
+            // 2. 滿額/總結匯出熱鍵判定 (穿透豁免輸入框阻斷)
+            if (isHotkeyMatch(e, summaryKeyStr)) {
+                handleSummaryAction();
+                return;
+            }
 
 
-    const lblCloudPrimary = document.createElement('span');
-    lblCloudPrimary.className = 'gist-qatp-field-label';
-    lblCloudPrimary.textContent = '主雲端試算表 CSV 下載端點：';
+            // 3. 採集暫存熱鍵判定 (穿透豁免輸入框阻斷)
+            if (isHotkeyMatch(e, captureKeyStr)) {
+                e.preventDefault();
+                e.stopPropagation();
+                handleCaptureAction();
+                return;
+            }
 
 
-    const linkPrimaryEdit = document.createElement('a');
-    linkPrimaryEdit.className = 'gist-qatp-link-btn';
-    linkPrimaryEdit.href = getGoogleSheetEditUrl(currentConfig.cloudEndpointPrimary || DEFAULT_CONFIG_V2_1_1.cloudEndpointPrimary);
-    linkPrimaryEdit.target = '_blank';
-    linkPrimaryEdit.rel = 'noopener noreferrer';
-    linkPrimaryEdit.textContent = '🔗 開啟主表 ↗';
+            // 4. 文字輸入性按鍵與 Alt+C 複製按鍵維持輸入框阻斷，防打字衝突
+            if (['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
 
 
-    headerPrimary.appendChild(lblCloudPrimary);
-    headerPrimary.appendChild(linkPrimaryEdit);
-    rowCsvSection.appendChild(headerPrimary);
+            // 既有複製快捷鍵
+            if (e.altKey && !e.shiftKey && (e.key === 'c' || e.key === 'C')) {
+                e.preventDefault();
+                handleCopyAction('SINGLE');
+            } else if (e.altKey && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
+                e.preventDefault();
+                handleCopyAction('FULL_THREAD');
+            }
+        }, true);
+    }
 
 
-    const inputCloudPrimary = document.createElement('input');
-    inputCloudPrimary.className = 'gist-qatp-input';
-    inputCloudPrimary.type = 'text';
-    inputCloudPrimary.value = currentConfig.cloudEndpointPrimary;
-    inputCloudPrimary.addEventListener('input', () => {
-      linkPrimaryEdit.href = getGoogleSheetEditUrl(inputCloudPrimary.value.trim());
-    });
-    rowCsvSection.appendChild(inputCloudPrimary);
+    function setupMenuCommands() {
+        if (typeof GM_registerMenuCommand !== 'undefined') {
+            GM_registerMenuCommand('⚙️ 📍 僅重置浮動按鈕與小光球位置', resetUiPosition);
+            GM_registerMenuCommand('⚙️ 🛠️ 開啟參數設定管理器', openManager);
+            GM_registerMenuCommand('🗑️ 物理清空 QA 採集暫存池', () => {
+                clearQaQueue();
+                showToast('🗑️ QA 採集暫存佇列已清空！');
+            });
+        }
+    }
 
 
-    const headerSecondary = document.createElement('div');
-    headerSecondary.className = 'gist-qatp-field-header-row';
+    let mountDebounceTimer = null;
 
 
-    const lblCloudSecondary = document.createElement('span');
-    lblCloudSecondary.className = 'gist-qatp-field-label';
-    lblCloudSecondary.textContent = '備援雲端試算表 CSV 下載端點：';
+    function init() {
+        injectStyles();
+        mountUI();
+        setupHotkeys();
+        setupMenuCommands();
 
 
-    const linkSecondaryEdit = document.createElement('a');
-    linkSecondaryEdit.className = 'gist-qatp-link-btn';
-    linkSecondaryEdit.href = getGoogleSheetEditUrl(currentConfig.cloudEndpointSecondary || DEFAULT_CONFIG_V2_1_1.cloudEndpointSecondary);
-    linkSecondaryEdit.target = '_blank';
-    linkSecondaryEdit.rel = 'noopener noreferrer';
-    linkSecondaryEdit.textContent = '🔗 開啟備援表 ↗';
+        setInterval(mountUI, 500);
 
 
-    headerSecondary.appendChild(lblCloudSecondary);
-    headerSecondary.appendChild(linkSecondaryEdit);
-    rowCsvSection.appendChild(headerSecondary);
+        const observer = new MutationObserver(() => {
+            if (mountDebounceTimer) clearTimeout(mountDebounceTimer);
+            mountDebounceTimer = setTimeout(() => {
+                mountUI();
+            }, 200);
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
 
 
-    const inputCloudSecondary = document.createElement('input');
-    inputCloudSecondary.className = 'gist-qatp-input';
-    inputCloudSecondary.type = 'text';
-    inputCloudSecondary.value = currentConfig.cloudEndpointSecondary;
-    inputCloudSecondary.addEventListener('input', () => {
-      linkSecondaryEdit.href = getGoogleSheetEditUrl(inputCloudSecondary.value.trim());
-    });
-    rowCsvSection.appendChild(inputCloudSecondary);
+        window.addEventListener('resize', () => {
+            const container = document.getElementById(UI_CONTAINER_ID);
+            if (container) clampContainerToViewport(container);
+            const orb = document.getElementById(FLOATING_ORB_ID);
+            if (orb) clampContainerToViewport(orb);
+            const toast = document.getElementById('ai-copy-toast');
+            if (toast && isToastPositioningMode) clampContainerToViewport(toast);
+        });
+    }
 
 
-    const lblCloudKw = document.createElement('span');
-    lblCloudKw.className = 'gist-qatp-field-label';
-    lblCloudKw.textContent = '試算表檢索關鍵字：';
-    const inputCloudKw = document.createElement('input');
-    inputCloudKw.className = 'gist-qatp-input';
-    inputCloudKw.type = 'text';
-    inputCloudKw.value = currentConfig.cloudKeyword || 'repo & grep';
-    rowCsvSection.appendChild(lblCloudKw);
-    rowCsvSection.appendChild(inputCloudKw);
-
-
-    paneCloud.appendChild(rowCsvSection);
-
-
-    tabPanes.push(paneAppearance, paneStrategy, paneRegex, paneCloud);
-    tabPanes.forEach((p) => content.appendChild(p));
-
-
-    tabDefinitions.forEach((def, index) => {
-      const tabBtn = document.createElement('button');
-      tabBtn.className = 'gist-qatp-tab-btn' + (index === 0 ? ' active' : '');
-      tabBtn.textContent = def.label;
-      tabBtn.addEventListener('click', () => {
-        tabButtons.forEach((b) => b.classList.remove('active'));
-        tabPanes.forEach((p) => p.classList.remove('active'));
-        tabBtn.classList.add('active');
-        tabPanes[index].classList.add('active');
-      });
-      tabButtons.push(tabBtn);
-      sidebar.appendChild(tabBtn);
-    });
-
-
-    paneAppearance.classList.add('active');
-
-
-    main.appendChild(sidebar);
-    main.appendChild(content);
-
-
-    // 3. Footer
-    const footer = document.createElement('div');
-    footer.className = 'gist-qatp-modal-footer';
-
-
-    const btnResetPos = document.createElement('button');
-    btnResetPos.className = 'gist-qatp-btn gist-qatp-btn-secondary';
-    btnResetPos.textContent = '🪞 重置所有浮動位置';
-    btnResetPos.addEventListener('click', () => {
-      resetToolbarPosition();
-      resetBoardPosition();
-      resetOrbPosition();
-      showToast('工具列、看板與手柄位置已全數歸位', 'success');
-    });
-
-
-    const btnSave = document.createElement('button');
-    btnSave.className = 'gist-qatp-btn gist-qatp-btn-primary';
-    btnSave.textContent = '💾 儲存設定';
-    btnSave.addEventListener('click', () => {
-      const parsedKeywords = inputKeywords.value
-        .split(/[\r\n,]+/)
-        .map((k) => k.trim())
-        .filter(Boolean);
-
-
-      const nextSlots = slotInputs.map((s) => ({
-        account: s.accountEl.value.trim(),
-        token: s.tokenEl.value.trim()
-      }));
-
-
-      const nextConfig = {
-        layoutMode: selectLayout.value,
-        orbSide: selectSide.value,
-        showFileBoard: cbBoard.checked,
-        fileBoardMaxWidth: parseInt(inputBoardWidth.value, 10) || 380,
-        buttonFontSize: parseInt(inputFs.value, 10) || 15,
-        buttonVisibility: {
-          smart: visSmart.checkbox.checked,
-          handoff: visHandoff.checkbox.checked,
-          saveCopy: visSaveCopy.checkbox.checked,
-          relayClaude: visRelayClaude.checkbox.checked,
-          extractOnly: visExtract.checkbox.checked
-        },
-        codeNamingMode: selectNamingMode.value,
-        customCodeFileName: inputCustomName.value.trim() || 'code',
-        qatpFileName: inputQatpFile.value.trim() || 'QATP.md',
-        defaultFileName: inputHandoffFile.value.trim() || 'note',
-        autoNewGistOnFinished: cbArchivedNew.checked,
-        autoSubmitDualReady: cbAutoSubmit.checked,
-        enableMiddleClick: cbMiddleClick.checked,
-        smartAssemblyHotkey: inputHotkey.value.trim() || 'F4',
-        codeRegex: inputCodeRegex.value.trim() || DEFAULT_CONFIG_V2_1_1.codeRegex,
-        qatpPrimaryToken: inputQatpPrimary.value.trim() || DEFAULT_CONFIG_V2_1_1.qatpPrimaryToken,
-        qatpSecondaryPattern: inputQatpSecondary.value.trim() || DEFAULT_CONFIG_V2_1_1.qatpSecondaryPattern,
-        qatpRegex: currentConfig.qatpRegex || DEFAULT_CONFIG_V2_1_1.qatpRegex,
-        filterRegex: inputFilterRegex.value.trim() || DEFAULT_CONFIG_V2_1_1.filterRegex,
-        noteKeywords: parsedKeywords.length > 0 ? parsedKeywords : DEFAULT_CONFIG_V2_1_1.noteKeywords,
-        jsonSyncUrl: inputSyncUrl.value.trim() || DEFAULT_CONFIG_V2_1_1.jsonSyncUrl,
-        cloudEndpointPrimary: inputCloudPrimary.value.trim() || DEFAULT_CONFIG_V2_1_1.cloudEndpointPrimary,
-        cloudEndpointSecondary: inputCloudSecondary.value.trim() || DEFAULT_CONFIG_V2_1_1.cloudEndpointSecondary,
-        cloudKeyword: inputCloudKw.value.trim() || DEFAULT_CONFIG_V2_1_1.cloudKeyword,
-        relayRepoName: inputRelayRepo.value.trim() || 'qatp-relay',
-        relayRepoBranch: inputRelayBranch.value.trim() || 'main',
-        relaySlots: nextSlots
-      };
-
-
-      if (!safeFileRegex.test(nextConfig.defaultFileName) || !safeFileRegex.test(nextConfig.customCodeFileName) || !safeFileRegex.test(nextConfig.qatpFileName) || !safeFileRegex.test(nextConfig.relayRepoName)) {
-        showToast('檔名或倉庫名格式不正確，僅支援英數、底線、破折號與點 (嚴禁全點號)', 'danger');
-        return;
-      }
-
-
-      if (!/^[a-zA-Z0-9_\-\.\/]+$/.test(nextConfig.relayRepoBranch)) {
-        showToast('分支名稱格式不正確，僅支援英數、底線、破折號、點與斜線', 'danger');
-        return;
-      }
-
-
-      saveConfig(nextConfig);
-      injectStyles();
-
-
-      const existingToolbar = document.getElementById('gist-qatp-toolbar');
-      if (existingToolbar) existingToolbar.remove();
-      mountToolbar();
-
-
-      const existingBoard = document.getElementById('gist-qatp-file-board');
-      if (existingBoard) existingBoard.remove();
-      updateFileBoard();
-
-
-      // P3-06: 換邊記憶百分比，樣式防殘影
-      const orb = document.getElementById('gist-qatp-dock-orb');
-      if (orb) {
-        let currentPos = null;
-        try {
-          currentPos = GM_getValue(STORAGE_ORB_KEY, null);
-        } catch (e) {}
-        const topPct = currentPos && typeof currentPos.topPercent === 'number' ? currentPos.topPercent : DEFAULT_ORB_POSITION.topPercent;
-        const updatedOrbPos = { side: nextConfig.orbSide, topPercent: topPct };
-        try {
-          GM_setValue(STORAGE_ORB_KEY, updatedOrbPos);
-        } catch (e) {}
-        applyOrbPosition(orb, updatedOrbPos);
-      }
-
-
-      document.body.removeChild(overlay);
-      showToast('⚙️ 設定已成功儲存並生效！', 'success');
-    });
-
-
-    footer.appendChild(btnResetPos);
-    footer.appendChild(btnSave);
-
-
-    modal.appendChild(header);
-    modal.appendChild(main);
-    modal.appendChild(footer);
-    overlay.appendChild(modal);
-
-
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) document.body.removeChild(overlay);
-    });
-
-
-    document.body.appendChild(overlay);
-  }
-
-
-  // ==========================================
-  // 位置管理與動態視窗出界防呆 (VIEWPORT_MARGIN = 8)
-  // ==========================================
-  function applyPosition(elem, pos, fallback) {
-    if (!elem) return;
-    const margin = VIEWPORT_MARGIN;
-    const winWidth = window.innerWidth;
-    const winHeight = window.innerHeight;
-    const elWidth = elem.offsetWidth || 220;
-    const elHeight = elem.offsetHeight || 100;
-
-
-    let targetLeft, targetTop;
-
-
-    if (pos && typeof pos.left === 'number' && typeof pos.top === 'number') {
-      targetLeft = Math.max(margin, Math.min(pos.left, winWidth - elWidth - margin));
-      targetTop = Math.max(margin, Math.min(pos.top, winHeight - elHeight - margin));
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
     } else {
-      targetLeft = Math.max(margin, winWidth - elWidth - (fallback ? fallback.right : 24));
-      targetTop = fallback ? fallback.top : 72;
+        init();
     }
-
-
-    elem.style.left = `${targetLeft}px`;
-    elem.style.top = `${targetTop}px`;
-    elem.style.right = 'auto';
-    elem.style.bottom = 'auto';
-  }
-
-
-  function applyBoardPosition(board, pos) {
-    applyPosition(board, pos, DEFAULT_BOARD_POSITION);
-  }
-
-
-  function resetToolbarPosition() {
-    try {
-      GM_deleteValue(STORAGE_POS_KEY);
-    } catch (e) {}
-
-
-    const toolbar = document.getElementById('gist-qatp-toolbar');
-    if (toolbar) {
-      applyPosition(toolbar, null, DEFAULT_POSITION);
-    }
-  }
-
-
-  function resetBoardPosition() {
-    try {
-      GM_deleteValue(STORAGE_BOARD_POS_KEY);
-    } catch (e) {}
-
-
-    const board = document.getElementById('gist-qatp-file-board');
-    if (board) {
-      applyBoardPosition(board, null);
-    }
-  }
-
-
-  function applyOrbPosition(orb, pos) {
-    const config = loadConfig();
-    const side = (pos && (pos.side === 'left' || pos.side === 'right')) ? pos.side : config.orbSide;
-    const topPercent = (pos && typeof pos.topPercent === 'number') ? Math.max(5, Math.min(95, pos.topPercent)) : DEFAULT_ORB_POSITION.topPercent;
-
-
-    orb.className = side === 'left' ? 'gist-qatp-dock-left' : 'gist-qatp-dock-right';
-    orb.style.top = `${topPercent}%`;
-  }
-
-
-  function resetOrbPosition() {
-    try {
-      GM_deleteValue(STORAGE_ORB_KEY);
-    } catch (e) {}
-
-
-    const orb = document.getElementById('gist-qatp-dock-orb');
-    if (orb) {
-      applyOrbPosition(orb, null);
-    }
-  }
-
-
-  // ==========================================
-  // 框體拖曳邏輯通用綁定 (INV-06 Resize 單例化加固)
-  // P3-08: 滑鼠移出視窗失焦防禦
-  // ==========================================
-  function bindElementDrag(elem, storageKey) {
-    let isDragging = false;
-    let startX = 0;
-    let startY = 0;
-    let initialLeft = 0;
-    let initialTop = 0;
-
-
-    const onMouseMove = (e) => {
-      if (!isDragging) return;
-      e.preventDefault();
-
-
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
-
-
-      const elWidth = elem.offsetWidth;
-      const elHeight = elem.offsetHeight;
-      const margin = VIEWPORT_MARGIN;
-
-
-      const newLeft = Math.max(margin, Math.min(initialLeft + dx, window.innerWidth - elWidth - margin));
-      const newTop = Math.max(margin, Math.min(initialTop + dy, window.innerHeight - elHeight - margin));
-
-
-      elem.style.left = `${newLeft}px`;
-      elem.style.top = `${newTop}px`;
-      elem.style.right = 'auto';
-      elem.style.bottom = 'auto';
-    };
-
-
-    const onMouseUp = () => {
-      if (!isDragging) return;
-      isDragging = false;
-
-
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-
-
-      const currentPos = {
-        left: parseInt(elem.style.left, 10),
-        top: parseInt(elem.style.top, 10)
-      };
-
-
-      try {
-        GM_setValue(storageKey, currentPos);
-      } catch (e) {
-        console.warn('[QATP] 無法保存元素位置', e);
-      }
-    };
-
-
-    elem.addEventListener('mousedown', (e) => {
-      if (e.target.closest('button, input, select, textarea, a, label')) {
-        return;
-      }
-
-
-      if (e.button !== 0) return;
-      isDragging = true;
-      startX = e.clientX;
-      startY = e.clientY;
-
-
-      const rect = elem.getBoundingClientRect();
-      initialLeft = rect.left;
-      initialTop = rect.top;
-
-
-      document.addEventListener('mousemove', onMouseMove);
-      document.addEventListener('mouseup', onMouseUp);
-
-
-      window.addEventListener('blur', onMouseUp, { once: true });
-      document.addEventListener('mouseleave', onMouseUp, { once: true });
-    });
-
-
-    if (!window._qatpResizeAttached) {
-      window._qatpResizeAttached = true;
-      window.addEventListener('resize', () => {
-        const toolbar = document.getElementById('gist-qatp-toolbar');
-        if (toolbar) {
-          const rect = toolbar.getBoundingClientRect();
-          applyPosition(toolbar, { left: rect.left, top: rect.top }, DEFAULT_POSITION);
-        }
-        const board = document.getElementById('gist-qatp-file-board');
-        if (board) {
-          const rect = board.getBoundingClientRect();
-          applyBoardPosition(board, { left: rect.left, top: rect.top });
-        }
-      });
-    }
-  }
-
-
-  function bindToolbarDrag(toolbar) {
-    bindElementDrag(toolbar, STORAGE_POS_KEY);
-  }
-
-
-  function bindBoardDrag(board) {
-    bindElementDrag(board, STORAGE_BOARD_POS_KEY);
-  }
-
-
-  // ==========================================
-  // 側邊吸附手柄與手勢引擎
-  // ==========================================
-  function mountDockOrb() {
-    if (document.getElementById('gist-qatp-dock-orb')) return;
-
-
-    const orb = document.createElement('div');
-    orb.id = 'gist-qatp-dock-orb';
-    orb.title = '點擊：開啟設定 ｜ 垂直拖動：滑動 ｜ 向內滑：一鍵智能裝配';
-
-
-    const icon = document.createElement('span');
-    icon.className = 'gist-qatp-dock-icon';
-    icon.textContent = '📑';
-    orb.appendChild(icon);
-
-
-    let savedPos = null;
-    try {
-      savedPos = GM_getValue(STORAGE_ORB_KEY, null);
-    } catch (e) {}
-
-
-    applyOrbPosition(orb, savedPos);
-    document.body.appendChild(orb);
-
-
-    let isInteracting = false;
-    let startX = 0;
-    let startY = 0;
-    let startTime = 0;
-
-
-    const onMouseMove = (e) => {
-      if (!isInteracting) return;
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
-
-
-      const newTopPx = Math.max(20, Math.min(window.innerHeight - 50, e.clientY - 19));
-      orb.style.top = `${newTopPx}px`;
-
-
-      const isLeft = orb.classList.contains('gist-qatp-dock-left');
-      const isInward = isLeft ? dx > 50 : dx < -50;
-
-
-      if (Math.abs(dx) > 50 && isInward) {
-        isInteracting = false;
-        document.removeEventListener('mousemove', onMouseMove);
-        document.removeEventListener('mouseup', onMouseUp);
-        showToast('⚡ 偵測到向內滑動手勢，正在發起智能裝配...', 'success', 1500);
-        runSmartAssemblyPipeline();
-      }
-    };
-
-
-    const onMouseUp = (e) => {
-      if (!isInteracting) return;
-      isInteracting = false;
-
-
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-
-
-      const dist = Math.hypot(e.clientX - startX, e.clientY - startY);
-      const elapsed = Date.now() - startTime;
-
-
-      if (dist < 5 && elapsed < 250) {
-        openConfigModal();
-        return;
-      }
-
-
-      const finalSide = e.clientX < window.innerWidth / 2 ? 'left' : 'right';
-      const topPercent = Math.round((parseInt(orb.style.top, 10) / window.innerHeight) * 100);
-
-
-      const newPos = { side: finalSide, topPercent };
-      applyOrbPosition(orb, newPos);
-
-
-      try {
-        GM_setValue(STORAGE_ORB_KEY, newPos);
-      } catch (err) {
-        console.warn('[QATP] 無法保存吸附手柄位置', err);
-      }
-    };
-
-
-    orb.addEventListener('mousedown', (e) => {
-      if (e.button !== 0) return;
-      isInteracting = true;
-      startX = e.clientX;
-      startY = e.clientY;
-      startTime = Date.now();
-
-
-      document.addEventListener('mousemove', onMouseMove);
-      document.addEventListener('mouseup', onMouseUp);
-
-
-      window.addEventListener('blur', onMouseUp, { once: true });
-      document.addEventListener('mouseleave', onMouseUp, { once: true });
-    });
-  }
-
-
-  // ==========================================
-  // 工具列渲染與掛載 (實體 A / 按鈕顯隱過濾 / 頂部雙層自適應膠囊佈局)
-  // ==========================================
-  function mountToolbar() {
-    let toolbar = document.getElementById('gist-qatp-toolbar');
-
-
-    if (!toolbar) {
-      const config = loadConfig();
-
-
-      toolbar = document.createElement('div');
-      toolbar.id = 'gist-qatp-toolbar';
-
-
-      const topBar = document.createElement('div');
-      topBar.className = 'gist-qatp-topbar';
-
-
-      const topbarRow1 = document.createElement('div');
-      topbarRow1.className = 'gist-qatp-topbar-row1';
-
-
-      const brandTitle = document.createElement('span');
-      brandTitle.className = 'gist-qatp-title-brand';
-      brandTitle.textContent = '⚡ Gist QATP';
-
-
-      const btnGear = document.createElement('button');
-      btnGear.className = 'gist-qatp-btn-gear';
-      btnGear.textContent = '⚙️';
-      btnGear.title = '打開設定管理器';
-      btnGear.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        openConfigModal();
-      });
-
-
-      topbarRow1.appendChild(brandTitle);
-      topbarRow1.appendChild(btnGear);
-      topBar.appendChild(topbarRow1);
-
-
-      const topbarRow2 = document.createElement('div');
-      topbarRow2.className = 'gist-qatp-topbar-row2';
-
-
-      const pillForceNew = document.createElement('label');
-      pillForceNew.className = 'gist-qatp-pill-label';
-      pillForceNew.title = '強制換新 Gist (勾選後點擊裝配將直接另開全新 Gist，生效一次後自動取消)';
-
-
-      const cbForceNew = document.createElement('input');
-      cbForceNew.type = 'checkbox';
-      cbForceNew.id = 'gist-qatp-force-new-cb';
-      cbForceNew.className = 'gist-qatp-pill-cb cb-green';
-
-
-      const txtForceNew = document.createElement('span');
-      txtForceNew.className = 'gist-qatp-pill-text';
-      txtForceNew.textContent = '開新Gist';
-
-
-      pillForceNew.appendChild(cbForceNew);
-      pillForceNew.appendChild(txtForceNew);
-
-
-      const pillMiddleClick = document.createElement('label');
-      pillMiddleClick.className = 'gist-qatp-pill-label';
-      pillMiddleClick.title = '滑鼠中鍵智能裝配 (點擊空白處或檔案卡片直接裝配)';
-
-
-      const cbMiddleClick = document.createElement('input');
-      cbMiddleClick.type = 'checkbox';
-      cbMiddleClick.id = 'gist-qatp-middle-click-cb';
-      cbMiddleClick.className = 'gist-qatp-pill-cb cb-blue';
-      cbMiddleClick.checked = !!config.enableMiddleClick;
-      cbMiddleClick.addEventListener('change', () => {
-        const latestConfig = loadConfig();
-        latestConfig.enableMiddleClick = cbMiddleClick.checked;
-        saveConfig(latestConfig);
-        showToast(latestConfig.enableMiddleClick ? '🖱️ 已啟用滑鼠中鍵智能裝配' : '🖱️ 已停用滑鼠中鍵智能裝配', 'info', 1500);
-      });
-
-
-      const txtMiddleClick = document.createElement('span');
-      txtMiddleClick.className = 'gist-qatp-pill-text';
-      txtMiddleClick.textContent = '接管中鍵';
-
-
-      pillMiddleClick.appendChild(cbMiddleClick);
-      pillMiddleClick.appendChild(txtMiddleClick);
-
-
-      topbarRow2.appendChild(pillForceNew);
-      topbarRow2.appendChild(pillMiddleClick);
-      topBar.appendChild(topbarRow2);
-
-
-      toolbar.appendChild(topBar);
-
-
-      const btnContainer = document.createElement('div');
-      btnContainer.className = `gist-qatp-button-container gist-qatp-layout-${config.layoutMode}`;
-
-
-      // 按鈕 1: ⚡ 智能裝配
-      const btnSmart = document.createElement('button');
-      btnSmart.className = 'gist-qatp-btn gist-qatp-btn-smart';
-      btnSmart.textContent = '⚡ 智能裝配';
-      btnSmart.title = '首動預建雙槽位，多語言特徵探針智能吃單';
-      if (config.buttonVisibility && !config.buttonVisibility.smart) {
-        btnSmart.style.display = 'none';
-      }
-      btnSmart.addEventListener('click', (e) => {
-        e.preventDefault();
-        runSmartAssemblyPipeline();
-      });
-
-
-      // 按鈕 2: 📝 一鍵加交接檔
-      const btnHandoff = document.createElement('button');
-      btnHandoff.className = 'gist-qatp-btn gist-qatp-btn-warm';
-      btnHandoff.textContent = '📝 一鍵加交接檔';
-      btnHandoff.title = '讀取剪貼簿，正則檢核前三行後自動追加檔案並儲存';
-      if (config.buttonVisibility && !config.buttonVisibility.handoff) {
-        btnHandoff.style.display = 'none';
-      }
-      btnHandoff.addEventListener('click', (e) => {
-        e.preventDefault();
-        startHandoffProcess();
-      });
-
-
-      // 按鈕 3: 🚀 儲存並複製 QATP
-      const btnSave = document.createElement('button');
-      btnSave.className = 'gist-qatp-btn gist-qatp-btn-primary';
-      btnSave.textContent = '🚀 儲存並複製 QATP';
-      btnSave.title = '提交保存當前 Gist，跳轉後自動複製提示詞';
-      if (config.buttonVisibility && !config.buttonVisibility.saveCopy) {
-        btnSave.style.display = 'none';
-      }
-      btnSave.addEventListener('click', (e) => {
-        e.preventDefault();
-        triggerSaveAction(true);
-      });
-
-
-      // 按鈕 4: 🌐 投送 Claude (Repo)
-      const btnRelay = document.createElement('button');
-      btnRelay.className = 'gist-qatp-btn gist-qatp-btn-emerald';
-      btnRelay.textContent = '🌐 投送 Claude (Repo)';
-      btnRelay.title = '跨倉鏡像至 GitHub Relay 倉庫並複製 Claude 沙盒引導指令';
-      if (config.buttonVisibility && !config.buttonVisibility.relayClaude) {
-        btnRelay.style.display = 'none';
-      }
-      btnRelay.addEventListener('click', (e) => {
-        e.preventDefault();
-        mirrorToGitHubRelay('1');
-      });
-
-
-      // 按鈕 5: 📋 僅提取 QATP
-      const btnExtract = document.createElement('button');
-      btnExtract.className = 'gist-qatp-btn gist-qatp-btn-secondary';
-      btnExtract.textContent = '📋 僅提取 QATP';
-      btnExtract.title = '直接提取當前 Gist 網址並組裝複製提示詞';
-      if (config.buttonVisibility && !config.buttonVisibility.extractOnly) {
-        btnExtract.style.display = 'none';
-      }
-      btnExtract.addEventListener('click', (e) => {
-        e.preventDefault();
-        runExtractAndCopyPipeline();
-      });
-
-
-      btnContainer.appendChild(btnSmart);
-      btnContainer.appendChild(btnHandoff);
-      btnContainer.appendChild(btnSave);
-      btnContainer.appendChild(btnRelay);
-      btnContainer.appendChild(btnExtract);
-      toolbar.appendChild(btnContainer);
-
-
-      document.body.appendChild(toolbar);
-
-
-      let savedPos = null;
-      try {
-        savedPos = GM_getValue(STORAGE_POS_KEY, null);
-      } catch (e) {}
-
-
-      applyPosition(toolbar, savedPos, DEFAULT_POSITION);
-      bindToolbarDrag(toolbar);
-    }
-
-
-    updateFileBoard();
-  }
-
-
-  // ==========================================
-  // 跨頁換頁哨兵監聽器 (加固延遲 600ms / 容器探針 / 剪貼簿防污染)
-  // 切片 3: 傳遞 relayMode 模式標籤至 mirrorToGitHubRelay
-  // ==========================================
-  function checkSessionGuards() {
-    // 哨兵 0: 跨倉中繼投送哨兵 (最高優先級，編輯態 ➔ 檢視態自動投送)
-    let pendingRelay = null;
-    try {
-      pendingRelay = sessionStorage.getItem(SESSION_KEY_RELAY);
-    } catch (e) {}
-
-
-    if (pendingRelay && !isEditPage() && !isNewPage()) {
-      const currentHref = window.location.href.split('#')[0].split('?')[0];
-      const gistRegex = /^https:\/\/gist\.github\.com\/[^\/\s]+\/[a-f0-9]+$/;
-      if (gistRegex.test(currentHref)) {
-        try {
-          sessionStorage.removeItem(SESSION_KEY_RELAY);
-        } catch (e) {}
-
-
-        setTimeout(() => {
-          mirrorToGitHubRelay(pendingRelay); // 傳入模式標籤 ('1' 或 'handoff')
-        }, 300);
-        return;
-      }
-    }
-
-
-    // 哨兵 1: 跨頁智能裝配流程 (非編輯態 ➔ 編輯/新建態)
-    let pendingSmart = null;
-    try {
-      pendingSmart = sessionStorage.getItem(SESSION_KEY_SMART);
-    } catch (e) {}
-
-
-    if (pendingSmart === '1' && isEditorEnvironment()) {
-      try {
-        sessionStorage.removeItem(SESSION_KEY_SMART);
-      } catch (e) {}
-      setTimeout(() => {
-        runSmartAssemblyPipeline();
-      }, 400);
-      return;
-    }
-
-
-    // 哨兵 2: 跨頁加檔流水線 (檢視態 ➔ 編輯態)
-    let pendingHandoff = null;
-    try {
-      pendingHandoff = sessionStorage.getItem(SESSION_KEY_HANDOFF);
-    } catch (e) {}
-
-
-    if (pendingHandoff === '1' && isEditPage()) {
-      try {
-        sessionStorage.removeItem(SESSION_KEY_HANDOFF);
-      } catch (e) {}
-
-
-      setTimeout(() => {
-        const startTime = Date.now();
-        const probeTimer = setInterval(() => {
-          const files = document.querySelectorAll('.js-gist-file');
-          if (files.length > 0) {
-            clearInterval(probeTimer);
-            executeHandoffPipeline();
-          } else if (Date.now() - startTime > 3000) {
-            clearInterval(probeTimer);
-            executeHandoffPipeline();
-          }
-        }, 100);
-      }, 600);
-      return;
-    }
-
-
-    // 哨兵 3: 既有 QATP 複製哨兵 (編輯態 ➔ 檢視態)
-    let pendingQatp = null;
-    try {
-      pendingQatp = sessionStorage.getItem(SESSION_KEY_QATP);
-    } catch (e) {}
-
-
-    if (pendingQatp === '1' && !isEditPage() && !isNewPage()) {
-      const currentHref = window.location.href.split('#')[0].split('?')[0];
-      const gistRegex = /^https:\/\/gist\.github\.com\/[^\/\s]+\/[a-f0-9]+$/;
-      if (gistRegex.test(currentHref)) {
-        try {
-          sessionStorage.removeItem(SESSION_KEY_QATP);
-        } catch (e) {}
-
-
-        setTimeout(() => {
-          runExtractAndCopyPipeline();
-        }, 300);
-      }
-    }
-  }
-
-
-  // ==========================================
-  // 油猴選單註冊
-  // ==========================================
-  if (typeof GM_registerMenuCommand === 'function') {
-    GM_registerMenuCommand('⚡ 執行智能裝配', () => {
-      runSmartAssemblyPipeline();
-    });
-    GM_registerMenuCommand('🌐 投送 Claude (Repo)', () => {
-      mirrorToGitHubRelay('1');
-    });
-    GM_registerMenuCommand('⚙️ 打開設定管理器', () => {
-      openConfigModal();
-    });
-    GM_registerMenuCommand('🪞 一鍵重置所有懸浮位置', () => {
-      resetToolbarPosition();
-      resetBoardPosition();
-      resetOrbPosition();
-      showToast('所有介面位置已重置歸位', 'success');
-    });
-  }
-
-
-  // ==========================================
-  // 初始化與 Turbo / PJAX 掛載 (P3-11: 子模組隔離執行)
-  // ==========================================
-  function safeExec(fn, moduleName) {
-    try {
-      fn();
-    } catch (err) {
-      console.error(`[QATP Init Error] ${moduleName} 載入失敗:`, err);
-    }
-  }
-
-
-  function init() {
-    safeExec(injectStyles, 'injectStyles');
-    safeExec(mountToolbar, 'mountToolbar');
-    safeExec(mountDockOrb, 'mountDockOrb');
-    safeExec(setupMiddleClickDispatcher, 'setupMiddleClickDispatcher');
-    safeExec(setupKeyboardDispatcher, 'setupKeyboardDispatcher');
-    safeExec(checkSessionGuards, 'checkSessionGuards');
-  }
-
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
-
-
-  document.addEventListener('turbo:load', init);
-  document.addEventListener('pjax:end', init);
 })();
