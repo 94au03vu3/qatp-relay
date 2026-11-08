@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         AI 雙模式乾淨複製器
 // @namespace    https://github.com/
-// @version      4.3.3
-// @description  精準過濾 AI 思考過程與工具欄雜訊，一鍵複製 Markdown。支援 ChatGPT、DeepSeek、通義千問、Kimi、Google AI Studio、智譜 AI、Mistral AI Playground、Perplexity AI、Z.AI 及 MiniMax Agent 旗艦 10 合 1。v4.3.3 實裝 Z.AI 成果物智能階梯降級、切片最長代碼塊旗標解耦、寬容備援雙換行保底與死代碼物理退役。
+// @version      4.3.4
+// @description  精準過濾 AI 思考過程與工具欄雜訊，一鍵複製 Markdown。支援 ChatGPT、Claude、DeepSeek、通義千問、Kimi、Google AI Studio、智譜 AI、Mistral AI Playground、Perplexity AI、Z.AI 及 MiniMax Agent 旗艦 11 合 1。v4.3.4 實裝 Claude 雙軌 Artifacts 抽屜擴充、資料生命週期對稱治理與動態水合煞車。
 // @author       Frontend Integration Engineering Team
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
+// @match        https://claude.ai/*
 // @match        https://chat.deepseek.com/*
 // @match        https://chat.qwen.ai/*
 // @match        https://tongyi.aliyun.com/*
@@ -35,8 +36,6 @@
 // @noframes
 // @run-at       document-idle
 // @license      MIT
-// @downloadURL https://update.greasyfork.org/scripts/591228/AI%20%E9%9B%99%E6%A8%A1%E5%BC%8F%E4%B9%BE%E6%B7%A8%E8%A4%87%E8%A3%BD%E5%99%A8.user.js
-// @updateURL https://update.greasyfork.org/scripts/591228/AI%20%E9%9B%99%E6%A8%A1%E5%BC%8F%E4%B9%BE%E6%B7%A8%E8%A4%87%E8%A3%BD%E5%99%A8.meta.js
 // ==/UserScript==
 
 
@@ -45,7 +44,7 @@
 
 
     // ==========================================
-    // 0. 全局常數與預設資料結構 (Global Config v4.3.3 定稿)
+    // 0. 全局常數與預設資料結構 (Global Config v4.3.4 定稿)
     // ==========================================
     const CONFIG_KEY = 'ai_copy_global_config_v3';
     const QA_QUEUE_KEY = 'ai_copy_qa_queue_v1';
@@ -60,6 +59,7 @@
         qwen:       { id: 'qwen',       label: '千問' },
         kimi:       { id: 'kimi',       label: 'Kimi' },
         chatgpt:    { id: 'chatgpt',    label: 'ChatGPT' },
+        claude:     { id: 'claude',     label: 'Claude' },
         perplexity: { id: 'perplexity', label: 'Perplexity' },
         zhipu:      { id: 'zhipu',      label: '智譜' },
         zai:        { id: 'zai',        label: 'Z.AI' },
@@ -74,10 +74,14 @@
         orbPosition: null,  // 小光球螢幕座標 { left, top }
         toastPosition: null,// Toast 獨立本機座標 { left, top }
         isCollapsed: false, // 是否處於小光球收納狀態
-        siteTabOrder: ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'],
+        siteTabOrder: ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'claude', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'],
         jsonSyncUrl: 'https://docs.google.com/document/d/1csaLbqi49GJhWLutrhkMdTwy4eOuXgmK29zS6arHCTI/edit?usp=sharing',
+        exportScope: {
+            content: true,
+            coords: false,
+            layout: false
+        },
         toastSettings: {
-            anchor: 'center', // 'left' | 'center' | 'right'
             fontSize: 18,
             background: 'linear-gradient(135deg, rgba(88, 28, 135, 0.95), rgba(124, 58, 237, 0.92))'
         },
@@ -85,14 +89,15 @@
             captureHotkey: 'F4',
             summaryHotkey: 'F7',
             ttlHours: 2,
-            targetCount: 5,               // 滿額站點數閾值 (0 為停用)
-            keepQueueOnAutoSummary: false,// 滿額自動總結後是否保留佇列 (滾動更新模式)
+            targetCount: 6,               // 滿額站點數閾值 (0 為停用)
+            keepQueueOnAutoSummary: true, // 滿額自動總結後是否保留佇列 (滾動更新模式)
             siteActions: {
                 aistudio: 'SINGLE',
                 deepseek: 'SINGLE',
                 qwen: 'SINGLE',
                 kimi: 'SINGLE',
                 chatgpt: 'SINGLE',
+                claude: 'SINGLE',
                 perplexity: 'SINGLE',
                 zhipu: 'SINGLE',
                 zai: 'PREVIEW',
@@ -122,7 +127,7 @@
         aiStudioSettings: {
             primaryEngine: 'native_menu',
             sliceLayout: 'staircase',
-            purplePosition: 'right',
+            purplePosition: 'inherit',
             wheelSwitchScope: 'capsule_only', // 'capsule_only' | 'control_group' | 'entire_toolbar'
             activeModuleId: 'module_1',
             fallbackAction: 'warn_block',     // 'warn_block' | 'lenient_full' | 'custom_string'
@@ -266,6 +271,7 @@
                     qwen: '3rd',
                     kimi: '4th',
                     chatgpt: '5th',
+                    claude: '5th',
                     perplexity: '5th',
                     zhipu: '6th',
                     zai: '6th',
@@ -278,6 +284,7 @@
                     qwen: '\n\n',
                     kimi: '\n\n',
                     chatgpt: '\n\n',
+                    claude: '\n\n',
                     perplexity: '\n\n',
                     zhipu: '\n\n',
                     zai: '\n\n',
@@ -297,6 +304,7 @@
                     qwen: '',
                     kimi: '',
                     chatgpt: '',
+                    claude: '',
                     perplexity: '',
                     zhipu: '',
                     zai: '',
@@ -309,6 +317,7 @@
                     qwen: '\n\n',
                     kimi: '\n\n',
                     chatgpt: '\n\n',
+                    claude: '\n\n',
                     perplexity: '\n\n',
                     zhipu: '\n\n',
                     zai: '\n\n',
@@ -328,6 +337,7 @@
                     qwen: '',
                     kimi: '',
                     chatgpt: '',
+                    claude: '',
                     perplexity: '',
                     zhipu: '',
                     zai: '',
@@ -340,6 +350,7 @@
                     qwen: '\n\n',
                     kimi: '\n\n',
                     chatgpt: '\n\n',
+                    claude: '\n\n',
                     perplexity: '\n\n',
                     zhipu: '\n\n',
                     zai: '\n\n',
@@ -351,6 +362,21 @@
     };
 
 
+    // 【雙層覆寫隔離演算法 (applyLocalOnlyOverrides)】
+    function applyLocalOnlyOverrides(targetConfig, sourceConfig) {
+        if (!targetConfig || !sourceConfig) return;
+        targetConfig.uiPosition = sourceConfig.uiPosition ?? null;
+        targetConfig.orbPosition = sourceConfig.orbPosition ?? null;
+        targetConfig.toastPosition = sourceConfig.toastPosition ?? null;
+        targetConfig.isCollapsed = Boolean(sourceConfig.isCollapsed);
+        if (sourceConfig.aiStudioSettings && targetConfig.aiStudioSettings) {
+            targetConfig.aiStudioSettings.sliceLayout = sourceConfig.aiStudioSettings.sliceLayout;
+            targetConfig.aiStudioSettings.purplePosition = sourceConfig.aiStudioSettings.purplePosition;
+            targetConfig.aiStudioSettings.activeModuleId = sourceConfig.aiStudioSettings.activeModuleId;
+        }
+    }
+
+
     // 【遷移合約與結構深層補齊】
     function sanitizeConfig(data) {
         if (!data || typeof data !== 'object') return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
@@ -358,8 +384,8 @@
         if (!data.activeProfileId || !data.profiles[data.activeProfileId]) data.activeProfileId = 'profile_1';
 
 
-        // 1. 補齊 10 站點排序矩陣
-        const defaultSites = ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
+        // 1. 補齊 11 站點排序矩陣
+        const defaultSites = ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'claude', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
         if (!Array.isArray(data.siteTabOrder)) {
             data.siteTabOrder = [...defaultSites];
         } else {
@@ -372,16 +398,27 @@
         // 2. 補齊雲端同步設定、Toast 座標與收納狀態
         if (typeof data.jsonSyncUrl !== 'string') data.jsonSyncUrl = DEFAULT_CONFIG.jsonSyncUrl;
         if (typeof data.isCollapsed !== 'boolean') data.isCollapsed = false;
+        if (typeof data.uiPosition !== 'object') data.uiPosition = null;
         if (typeof data.orbPosition !== 'object') data.orbPosition = null;
         if (typeof data.toastPosition !== 'object') data.toastPosition = null;
 
 
-        // 補齊 toastSettings
+        // 補齊 exportScope
+        if (!data.exportScope || typeof data.exportScope !== 'object') {
+            data.exportScope = JSON.parse(JSON.stringify(DEFAULT_CONFIG.exportScope));
+        } else {
+            if (typeof data.exportScope.content !== 'boolean') data.exportScope.content = true;
+            if (typeof data.exportScope.coords !== 'boolean') data.exportScope.coords = false;
+            if (typeof data.exportScope.layout !== 'boolean') data.exportScope.layout = false;
+        }
+
+
+        // 補齊 toastSettings (幽靈欄位 anchor 徹底拔除)
         if (!data.toastSettings || typeof data.toastSettings !== 'object') {
             data.toastSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.toastSettings));
         } else {
             const ts = data.toastSettings;
-            if (!['left', 'center', 'right'].includes(ts.anchor)) ts.anchor = 'center';
+            delete ts.anchor;
             if (typeof ts.fontSize !== 'number' || ts.fontSize <= 0) ts.fontSize = 18;
             if (typeof ts.background !== 'string' || !ts.background.trim()) {
                 ts.background = DEFAULT_CONFIG.toastSettings.background;
@@ -396,9 +433,9 @@
             const qs = data.qaQueueSettings;
             if (typeof qs.captureHotkey !== 'string') qs.captureHotkey = 'F4';
             if (typeof qs.summaryHotkey !== 'string') qs.summaryHotkey = 'F7';
-            if (typeof qs.ttlHours !== 'number' || qs.ttlHours <= 0) qs.ttlHours = 2;
-            if (typeof qs.targetCount !== 'number' || qs.targetCount < 0) qs.targetCount = 5;
-            if (typeof qs.keepQueueOnAutoSummary !== 'boolean') qs.keepQueueOnAutoSummary = false;
+            if (typeof qs.ttlHours !== 'number' || qs.ttlHours < 0) qs.ttlHours = 2;
+            if (typeof qs.targetCount !== 'number' || qs.targetCount < 0) qs.targetCount = 6;
+            if (typeof qs.keepQueueOnAutoSummary !== 'boolean') qs.keepQueueOnAutoSummary = true;
 
 
             const validActions = ['SINGLE', 'SINGLE_CLEAN', 'PREVIEW', 'PREVIEW_CLEAN'];
@@ -473,7 +510,7 @@
             const as = data.aiStudioSettings;
             if (!['native_menu', 'pencil_edit', 'dom_parser'].includes(as.primaryEngine)) as.primaryEngine = 'native_menu';
             if (!['grid_3_2', 'staircase', 'single_row'].includes(as.sliceLayout)) as.sliceLayout = 'staircase';
-            if (!['right', 'bottom', 'inherit'].includes(as.purplePosition)) as.purplePosition = 'right';
+            if (!['right', 'bottom', 'inherit'].includes(as.purplePosition)) as.purplePosition = 'inherit';
             if (!['capsule_only', 'control_group', 'entire_toolbar'].includes(as.wheelSwitchScope)) as.wheelSwitchScope = 'capsule_only';
             if (!['module_1', 'module_2', 'module_3'].includes(as.activeModuleId)) as.activeModuleId = 'module_1';
             if (!['warn_block', 'lenient_full', 'custom_string'].includes(as.fallbackAction)) as.fallbackAction = 'warn_block';
@@ -549,6 +586,9 @@
                 data.profiles[key] = JSON.parse(JSON.stringify(DEFAULT_CONFIG.profiles[key]));
             } else {
                 const p = data.profiles[key];
+                if (typeof p.enabled !== 'boolean') {
+                    p.enabled = DEFAULT_CONFIG.profiles[key]?.enabled ?? true;
+                }
                 if (typeof p.enablePrefix !== 'boolean') p.enablePrefix = true;
                 if (typeof p.enableSuffix !== 'boolean') p.enableSuffix = true;
                 if (!p.prefixes || typeof p.prefixes !== 'object') p.prefixes = {};
@@ -556,8 +596,8 @@
 
 
                 defaultSites.forEach(siteKey => {
-                    if (typeof p.prefixes[siteKey] === 'undefined' || (key === 'profile_1' && siteKey === 'minimax' && p.prefixes[siteKey] === '7th')) {
-                        p.prefixes[siteKey] = DEFAULT_CONFIG.profiles[key].prefixes[siteKey] || (siteKey === 'minimax' ? '8th' : '');
+                    if (typeof p.prefixes[siteKey] === 'undefined') {
+                        p.prefixes[siteKey] = DEFAULT_CONFIG.profiles[key].prefixes[siteKey] ?? '';
                     }
                     if (typeof p.suffixes[siteKey] === 'undefined') {
                         p.suffixes[siteKey] = '\n\n';
@@ -593,6 +633,7 @@
                 }
             } catch (e) {
                 console.error('⚠️ [AI Copy] Storage 寫入失敗:', e);
+                showToast('❌ 設定儲存失敗！可能是儲存空間已滿或被隱私模式阻擋。', true, 4000);
             }
         }
     };
@@ -623,12 +664,14 @@
         }
 
 
-        // TTL 逾時自滅檢查 (依設定時長計算)
-        const ttlHours = globalConfig.qaQueueSettings?.ttlHours || 2;
-        const ttlMs = ttlHours * 60 * 60 * 1000;
-        if (Date.now() - (raw.lastUpdated || 0) > ttlMs) {
-            raw = { lastUpdated: Date.now(), items: {} };
-            setQaQueue(raw);
+        // TTL 逾時自滅檢查 (0 為永不過期)
+        const ttlHours = globalConfig.qaQueueSettings?.ttlHours ?? 2;
+        if (ttlHours > 0) {
+            const ttlMs = ttlHours * 60 * 60 * 1000;
+            if (Date.now() - (raw.lastUpdated || 0) > ttlMs) {
+                raw = { lastUpdated: Date.now(), items: {} };
+                setQaQueue(raw);
+            }
         }
         return raw;
     }
@@ -643,6 +686,7 @@
             }
         } catch (e) {
             console.error('⚠️ [AI Copy] QA Queue 寫入失敗:', e);
+            showToast('❌ 設定儲存失敗！可能是儲存空間已滿或被隱私模式阻擋。', true, 4000);
         }
     }
 
@@ -789,7 +833,7 @@
             toast.style.setProperty('pointer-events', 'none', 'important');
 
 
-            // 100% 物理左上角真理座標記錄，絕不二次加上或扣除 width/2
+            // 100% 物理左上角真理座標記錄
             const rect = toast.getBoundingClientRect();
             globalConfig.toastPosition = {
                 left: `${Math.round(rect.left)}px`,
@@ -923,37 +967,29 @@
             }
 
 
-            if (confirm('確定使用此雲端配置「覆蓋」純內容設定嗎？\n(為防止按鈕跑位，本機懸浮卡片、小光球、Toast 座標與排版佈局將 100% 嚴格保留)')) {
-                const preservedUiPos = globalConfig.uiPosition;
-                const preservedOrbPos = globalConfig.orbPosition;
-                const preservedToastPos = globalConfig.toastPosition;
-                const preservedToastAnchor = globalConfig.toastSettings?.anchor;
-                const preservedCollapsed = globalConfig.isCollapsed;
-                const preservedSliceLayout = globalConfig.aiStudioSettings?.sliceLayout;
-                const preservedPurplePos = globalConfig.aiStudioSettings?.purplePosition;
-                const preservedModuleId = globalConfig.aiStudioSettings?.activeModuleId;
-                const preservedQaSettings = globalConfig.qaQueueSettings;
+            if (confirm('確定使用此雲端配置「覆蓋」純內容設定嗎？\n(為防止按鈕跑位，本機懸浮卡片、小光球、Toast 座標與自訂熱鍵將 100% 嚴格保留)')) {
+                const preservedLocal = JSON.parse(JSON.stringify(globalConfig));
+                const preservedHotkeys = {
+                    captureHotkey: globalConfig.qaQueueSettings?.captureHotkey,
+                    summaryHotkey: globalConfig.qaQueueSettings?.summaryHotkey
+                };
 
 
                 globalConfig = sanitizeConfig(parsed);
+                applyLocalOnlyOverrides(globalConfig, preservedLocal);
 
 
-                globalConfig.uiPosition = preservedUiPos;
-                globalConfig.orbPosition = preservedOrbPos;
-                globalConfig.toastPosition = preservedToastPos;
-                if (preservedToastAnchor && globalConfig.toastSettings) {
-                    globalConfig.toastSettings.anchor = preservedToastAnchor;
+                if (preservedHotkeys.captureHotkey && globalConfig.qaQueueSettings) {
+                    globalConfig.qaQueueSettings.captureHotkey = preservedHotkeys.captureHotkey;
                 }
-                globalConfig.isCollapsed = preservedCollapsed;
-                if (preservedSliceLayout) globalConfig.aiStudioSettings.sliceLayout = preservedSliceLayout;
-                if (preservedPurplePos) globalConfig.aiStudioSettings.purplePosition = preservedPurplePos;
-                if (preservedModuleId) globalConfig.aiStudioSettings.activeModuleId = preservedModuleId;
-                if (preservedQaSettings) globalConfig.qaQueueSettings = preservedQaSettings;
+                if (preservedHotkeys.summaryHotkey && globalConfig.qaQueueSettings) {
+                    globalConfig.qaQueueSettings.summaryHotkey = preservedHotkeys.summaryHotkey;
+                }
 
 
                 Storage.set(globalConfig);
                 if (typeof onSuccessCallback === 'function') onSuccessCallback();
-                showToast('🎉 雲端內容配置已成功同步覆蓋 (本機座標完好保留)！');
+                showToast('🎉 雲端內容配置已成功同步覆蓋 (本機座標與熱鍵完好保留)！');
             }
         } catch (err) {
             console.error('❌ [AI Copy] 雲端 JSON 同步失敗:', err);
@@ -1534,7 +1570,7 @@
 
 
     // ==========================================
-    // 6. 平台適配器 (Adapters Pattern - 10 大站點陣容)
+    // 6. 平台適配器 (Adapters Pattern - 11 大站點陣容)
     // ==========================================
     const Adapters = {
         ChatGPT: {
@@ -1574,6 +1610,29 @@
                 });
 
 
+                cleanUniversalNoise(clone);
+                return clone;
+            }
+        },
+        Claude: {
+            id: 'claude',
+            name: 'Claude',
+            isMatch: () => location.hostname.includes('claude.ai'),
+            getAiNodes: () => {
+                const candidates = Array.from(document.querySelectorAll('.standard-markdown, [class*="font-claude-message"]'));
+                return candidates.filter(node => {
+                    if (node.closest(`#${UI_CONTAINER_ID}`) || node.closest(`#${FLOATING_ORB_ID}`)) return false;
+                    const isUser = node.closest('[data-testid="user-message"], [class*="user-message"]');
+                    const text = node.innerText ? node.innerText.trim() : '';
+                    return !isUser && text.length > 0;
+                });
+            },
+            getUserNodes: () => {
+                const nodes = Array.from(document.querySelectorAll('[data-testid="user-message"], [class*="user-message"]'));
+                return nodes.filter(n => n.innerText && n.innerText.trim().length > 0);
+            },
+            cleanNode: (node) => {
+                const clone = node.cloneNode(true);
                 cleanUniversalNoise(clone);
                 return clone;
             }
@@ -1858,14 +1917,14 @@
             },
             getMarkdownAsync: async (node) => {
                 try {
-                    const allButtons = Array.from(document.querySelectorAll('button'));
+                    const allButtons = Array.from(node.querySelectorAll('button'));
                     const validButtons = allButtons.filter(b => {
                         if (b.closest('pre')) return false;
                         const cName = b.className || '';
                         if (typeof cName === 'string' && (cName.includes('copy-code') || cName.includes('absolute'))) return false;
 
 
-                        const pathEl = b.querySelector('path');
+                        const pathEl = b.querySelector('svg path');
                         if (!pathEl) return false;
                         const d = pathEl.getAttribute('d') || '';
                         return d.startsWith('M12.668');
@@ -1924,6 +1983,7 @@
 
     function getCurrentAdapter() {
         if (Adapters.ChatGPT.isMatch()) return Adapters.ChatGPT;
+        if (Adapters.Claude.isMatch()) return Adapters.Claude;
         if (Adapters.DeepSeek.isMatch()) return Adapters.DeepSeek;
         if (Adapters.Qwen.isMatch()) return Adapters.Qwen;
         if (Adapters.Kimi.isMatch()) return Adapters.Kimi;
@@ -1938,8 +1998,20 @@
 
 
     // ==========================================
-    // 7. 切片雙引擎、Z.AI 與 MiniMax 預覽提取管線
+    // 7. 切片雙引擎、Claude、Z.AI 與 MiniMax 預覽提取管線
     // ==========================================
+    function isClaudeArtifactActive() {
+        const candidates = Array.from(document.querySelectorAll('[data-testid*="artifact"], [class*="artifact"], .font-mono, [role="region"], [aria-label*="Artifact"]'));
+        for (const el of candidates) {
+            const rect = el.getBoundingClientRect();
+            if (rect.left > window.innerWidth * 0.4 && rect.width > 200 && rect.height > 100) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+
     function isZaiPreviewActive() {
         // 1. Z.AI 右側抽屜 Markdown Prose
         const proseViewers = Array.from(document.querySelectorAll('.markdown-prose, [class*="markdown-prose"]'));
@@ -2102,6 +2174,56 @@
     }
 
 
+    async function getClaudeDeliverableText() {
+        if (!isClaudeArtifactActive()) return null;
+
+
+        const allButtons = Array.from(document.querySelectorAll('button'));
+        const copyBtns = allButtons.filter(b => {
+            const rect = b.getBoundingClientRect();
+            if (rect.top >= 80 || rect.left <= window.innerWidth * 0.5 || rect.width <= 20) return false;
+            const txt = (b.textContent || b.getAttribute('aria-label') || '').trim();
+            return /^(複製|Copy)$/i.test(txt);
+        });
+
+
+        if (copyBtns.length === 0) {
+            // 嘗試檢索 Artifacts 容器內的 DOM 轉譯
+            const artifactRegion = document.querySelector('[data-testid*="artifact"], [class*="artifact"], [role="region"]');
+            if (artifactRegion) {
+                return domToMarkdown(artifactRegion, Adapters.Claude.cleanNode);
+            }
+            return null;
+        }
+
+
+        const targetBtn = copyBtns[copyBtns.length - 1];
+        targetBtn.click();
+        await new Promise(r => setTimeout(r, 200));
+
+
+        if (navigator.clipboard && navigator.clipboard.readText) {
+            const clipText = await navigator.clipboard.readText();
+            if (clipText && clipText.trim().length > 0) {
+                return clipText.trim();
+            }
+        }
+        return null;
+    }
+
+
+    async function handleClaudePreviewAction() {
+        const text = await getClaudeDeliverableText();
+        if (!text || !text.trim()) {
+            showToast('⚠️ 右側無 Artifacts 成果物，已為您複製最後對話內容！', false, 2600);
+            await handleCopyAction('SINGLE_CLEAN');
+            return;
+        }
+        copyToClipboard(text);
+        showToast(`✅ 已複製右側 Artifacts 成果物 (共 ${text.length} 字)！`);
+    }
+
+
     async function getZaiDeliverableText() {
         const isDrawerOpen = isZaiPreviewActive();
 
@@ -2151,27 +2273,33 @@
         }
 
 
-        // 6. 觸發開門與輪詢
+        // 6. 觸發開門與水合煞車輪詢
         showToast('⏳ 正在自動開啟 Z.AI 成果物抽屜...');
         targetBtn.click();
 
 
         const startTime = Date.now();
         let text = '';
+        let lastObservedText = '';
+        let stableRounds = 0;
+
+
         while (Date.now() - startTime < 10000) {
             await new Promise(r => setTimeout(r, 200));
             text = getZaiPreviewText();
-            if (text && text.length > 50) {
-                break;
+            if (text && text.length > 30) {
+                if (text === lastObservedText) {
+                    stableRounds++;
+                    if (stableRounds >= 2) break; // 連續 400ms 水合沈澱煞車
+                } else {
+                    lastObservedText = text;
+                    stableRounds = 0;
+                }
             }
         }
 
 
-        if (text && text.length > 0) {
-            await new Promise(r => setTimeout(r, 200));
-        }
-
-
+        await new Promise(r => setTimeout(r, 150));
         const finalText = text || getZaiPreviewText();
         return (finalText && finalText.trim()) ? finalText : null;
     }
@@ -2293,6 +2421,8 @@
 
         const startTime = Date.now();
         let isReady = false;
+        let lastObservedText = '';
+        let stableRounds = 0;
 
 
         while (Date.now() - startTime < 10000) {
@@ -2300,8 +2430,16 @@
             if (drawer) {
                 const txt = (drawer.innerText || drawer.textContent || '').trim();
                 if (txt.length > 30) {
-                    isReady = true;
-                    break;
+                    if (txt === lastObservedText) {
+                        stableRounds++;
+                        if (stableRounds >= 2) {
+                            isReady = true;
+                            break; // 連續 400ms 水合煞車
+                        }
+                    } else {
+                        lastObservedText = txt;
+                        stableRounds = 0;
+                    }
                 }
             }
             await new Promise(r => setTimeout(r, 200));
@@ -2348,9 +2486,8 @@
         }
 
 
-        if (contentText && contentText.trim()) {
-            await new Promise(r => setTimeout(r, 1800));
-        }
+        // 僅保留 150ms 微任務延遲
+        await new Promise(r => setTimeout(r, 150));
 
 
         return { contentText, fromFiber };
@@ -2366,7 +2503,6 @@
 
 
         const { contentText, fromFiber } = result;
-        // 綠鍵純淨化回歸，不拼接 Profile 前後綴
         copyToClipboard(contentText.trim());
         showToast(`✅ 已成功複製成果物 (${fromFiber ? '無損 Raw MD' : '降級文本'}，共 ${contentText.length} 字)！`);
     }
@@ -2483,14 +2619,14 @@
 
 
     async function resolveAffixContent(rawAffixStr, affixType = '前綴') {
-        if (typeof rawAffixStr !== 'string' || !rawAffixStr) return '';
+        if (typeof rawAffixStr !== 'string' || !rawAffixStr) return { content: '', isDegraded: false };
         const trimmed = rawAffixStr.trim();
-        if (!trimmed) return '';
+        if (!trimmed) return { content: '', isDegraded: false };
 
 
         const isUrl = /^[^\S\r\n]*https?:\/\/[^\s]+[^\S\r\n]*$/i.test(rawAffixStr);
         if (!isUrl) {
-            return rawAffixStr;
+            return { content: rawAffixStr, isDegraded: false };
         }
 
 
@@ -2501,15 +2637,30 @@
 
 
             if (isHtmlResponse(rawText)) {
-                showToast(`⚠️ 雲端${affixType}檔案非共享狀態，已跳過！`, true);
-                return '';
+                return { content: '', isDegraded: true };
             }
-            return sanitizeAffixText(rawText);
+            return { content: sanitizeAffixText(rawText), isDegraded: false };
         } catch (err) {
             console.warn(`⚠️ [AI Copy] 雲端${affixType}載入失敗:`, err);
-            showToast(`⚠️ 雲端${affixType}載入失敗，已跳過`, true);
-            return '';
+            return { content: '', isDegraded: true };
         }
+    }
+
+
+    // 【切片酬載組合演算法 (composeSlicePayload)】
+    function composeSlicePayload(prefix, body, rawSuffix) {
+        const p = prefix ?? '';
+        const b = (body ?? '').trim();
+        const s = rawSuffix ?? '';
+        let tail = '\n\n';
+        if (s.endsWith('\n\n')) {
+            tail = s;
+        } else if (s.endsWith('\n')) {
+            tail = s + '\n';
+        } else if (s.length > 0) {
+            tail = s + '\n\n';
+        }
+        return `${p}${b}${tail}`;
     }
 
 
@@ -2539,10 +2690,11 @@
         const rawSuffix = (typeof btnDef.suffix === 'string') ? btnDef.suffix : '';
 
 
-        const resolvedPrefix = await resolveAffixContent(rawPrefix, '前綴');
+        const prefixRes = await resolveAffixContent(rawPrefix, '前綴');
+        let safePrefix = prefixRes.content;
+        const prefixDegraded = prefixRes.isDegraded;
 
 
-        let safePrefix = resolvedPrefix;
         if (safePrefix && safePrefix.trim().length > 0 && !safePrefix.endsWith('\n')) {
             safePrefix += '\n\n';
         }
@@ -2563,9 +2715,10 @@
 
         let safeSuffix = rawSuffix;
         if (safeSuffix === '\n' || safeSuffix === '\n\n') {
-            // 原樣保留純換行，不經 resolveAffixContent 避免被 trimEnd 抹除
+            // 原樣保留純換行
         } else if (safeSuffix) {
-            safeSuffix = await resolveAffixContent(safeSuffix, '後綴');
+            const suffixRes = await resolveAffixContent(safeSuffix, '後綴');
+            safeSuffix = suffixRes.content;
             if (safeSuffix && safeSuffix.trim().length > 0 && !safeSuffix.startsWith('\n')) {
                 safeSuffix = '\n\n' + safeSuffix;
             }
@@ -2597,12 +2750,18 @@
                     }
                     targetText = fullText.replace(regex, btnDef.replaceValue || '');
                 } catch (e) {
-                    console.warn('⚠️ [AI Copy] 替換正則解析失敗:', e);
+                    console.warn('⚠️ [AI Copy] 替換正則語法無效:', e);
+                    showToast('❌ 替換正則語法無效，操作已中止！', true, 4000);
+                    return;
                 }
             }
-            const finalPayload = `${safePrefix}${targetText.trim()}${finalSuffix}`;
+            const finalPayload = composeSlicePayload(safePrefix, targetText, finalSuffix);
             copyToClipboard(finalPayload);
-            showToast(`🧹 已局部清洗：「${btnDef.name}」！`);
+            if (prefixDegraded) {
+                showToast(`⚠️ 雲端前綴載入失敗，本次複製已自動省略前綴！ (已局部清洗：「${btnDef.name}」)`);
+            } else {
+                showToast(`🧹 已局部清洗：「${btnDef.name}」！`);
+            }
             return;
         }
 
@@ -2625,11 +2784,13 @@
 
 
         if (targetText !== null) {
-            const finalPayload = `${safePrefix}${targetText.trim()}${finalSuffix.endsWith('\n') ? finalSuffix : (finalSuffix + '\n\n')}`;
+            const finalPayload = composeSlicePayload(safePrefix, targetText, finalSuffix);
             copyToClipboard(finalPayload);
 
 
-            if (safePrefix && safePrefix.trim()) {
+            if (prefixDegraded) {
+                showToast(`⚠️ 雲端前綴載入失敗，本次複製已自動省略前綴！ (已截取：「${btnDef.name}」)`);
+            } else if (safePrefix && safePrefix.trim()) {
                 showToast(`✂️ 已截取 (含專屬前綴)：「${btnDef.name}」！`);
             } else if (usedFallback) {
                 showToast(`🛟 已由備援正則截取：「${btnDef.name}」！`);
@@ -2641,13 +2802,12 @@
             if (fallbackAction === 'warn_block') {
                 showToast(`🛑 截取失敗：未找到「${btnDef.name}」目標錨點！`, true, 4000);
             } else if (fallbackAction === 'lenient_full') {
-                // 寬容降級雙換行保底
-                const finalPayload = `${safePrefix}${fullText.trim()}${finalSuffix.endsWith('\n') ? finalSuffix : (finalSuffix + '\n\n')}`;
+                const finalPayload = composeSlicePayload(safePrefix, fullText, finalSuffix);
                 copyToClipboard(finalPayload);
                 showToast(`⚠️ 未在回覆中找到目標錨點，已複製全量文本！`);
             } else if (fallbackAction === 'custom_string') {
                 const placeholder = globalConfig.aiStudioSettings?.fallbackCustomText || '[ERROR: 錨點切片未命中]';
-                const finalPayload = `${safePrefix}${placeholder}${safeSuffix}`;
+                const finalPayload = composeSlicePayload(safePrefix, placeholder, safeSuffix);
                 copyToClipboard(finalPayload);
                 showToast(`⚠️ 未命中目標錨點，已複製失敗佔位字串！`);
             }
@@ -2656,19 +2816,25 @@
 
 
     // ==========================================
-    // 7.1 跨站點採集多態提取 (Z.AI 智能階梯降級支援)
+    // 7.1 跨站點採集多態提取 (Claude / Z.AI 智能階梯降級支援)
     // ==========================================
     async function extractSiteTextByAction(adapter, action) {
         let rawText = null;
 
 
         if (action === 'PREVIEW' || action === 'PREVIEW_CLEAN') {
-            if (adapter.id === 'zai') {
+            if (adapter.id === 'claude') {
+                const deliverableText = await getClaudeDeliverableText();
+                if (deliverableText && deliverableText.trim()) {
+                    rawText = deliverableText;
+                } else {
+                    rawText = await getAssistantMarkdownText(adapter);
+                }
+            } else if (adapter.id === 'zai') {
                 const deliverableText = await getZaiDeliverableText();
                 if (deliverableText && deliverableText.trim()) {
                     rawText = deliverableText;
                 } else {
-                    // 平滑階梯降級提取最新對話
                     rawText = await getAssistantMarkdownText(adapter);
                 }
             } else if (adapter.id === 'minimax') {
@@ -2856,14 +3022,14 @@
 
 
         const count = Object.keys(queue.items).length;
-        const targetCount = globalConfig.qaQueueSettings?.targetCount ?? 5;
-        const keepQueue = globalConfig.qaQueueSettings?.keepQueueOnAutoSummary ?? false;
+        const targetCount = globalConfig.qaQueueSettings?.targetCount ?? 6;
+        const keepQueue = globalConfig.qaQueueSettings?.keepQueueOnAutoSummary ?? true;
 
 
         // 滿額 N 站自動總結 / 滾動更新管線
         if (targetCount > 0 && count >= targetCount) {
             const items = Object.values(queue.items || {});
-            const siteOrder = globalConfig.siteTabOrder || ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
+            const siteOrder = globalConfig.siteTabOrder || ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'claude', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
             items.sort((a, b) => {
                 let idxA = siteOrder.indexOf(a.siteId);
                 let idxB = siteOrder.indexOf(b.siteId);
@@ -2904,7 +3070,7 @@
         }
 
 
-        const siteOrder = globalConfig.siteTabOrder || ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
+        const siteOrder = globalConfig.siteTabOrder || ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'claude', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
         items.sort((a, b) => {
             let idxA = siteOrder.indexOf(a.siteId);
             let idxB = siteOrder.indexOf(b.siteId);
@@ -3241,7 +3407,6 @@
             .ai-copy-slice-4 { background: #4f46e5; }
             .ai-copy-slice-4:hover { background: #4338ca; }
 
-            /* 移除 background 的 !important，支援動態行內樣式覆寫 */
             .ai-copy-toast-node {
                 position: fixed;
                 bottom: 80px;
@@ -3257,16 +3422,15 @@
                 opacity: 0;
                 transition: opacity 0.3s ease, transform 0.3s ease;
                 transform: translate(-50%, 10px);
-                pointer-events: none; /* 平日消除空氣牆 */
+                pointer-events: none;
                 user-select: none;
                 white-space: nowrap;
             }
 
-            /* Toast 進入定位/拖曳模式時的提權解鎖 */
             .ai-copy-toast-node.ai-copy-toast-active {
                 pointer-events: auto !important;
                 cursor: grab !important;
-                transition: none !important; /* 拖曳時強制關閉過渡動畫，杜絕位移延遲 */
+                transition: none !important;
             }
             .ai-copy-toast-node.ai-copy-toast-active:active {
                 cursor: grabbing !important;
@@ -3665,7 +3829,6 @@
             initialTop = rect.top;
 
 
-            // 確保絕對數值化 left/top，消除 auto 或百分比干擾
             container.style.left = `${initialLeft}px`;
             container.style.top = `${initialTop}px`;
             container.style.right = 'auto';
@@ -3704,7 +3867,7 @@
 
 
         const title = document.createElement('span');
-        title.textContent = '⚙️ AI 雙模式乾淨複製器 - 參數設定管理器 v4.3.3';
+        title.textContent = '⚙️ AI 雙模式乾淨複製器 - 參數設定管理器 v4.3.4';
 
 
         const btnCloseX = document.createElement('button');
@@ -3905,7 +4068,7 @@
 
 
         const tabBtns = {};
-        const siteOrder = globalConfig.siteTabOrder || ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
+        const siteOrder = globalConfig.siteTabOrder || ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'claude', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
         if (!siteOrder.includes(currentPrefixTab)) currentPrefixTab = siteOrder[0];
 
 
@@ -4000,7 +4163,7 @@
 
 
         const tabBtns = {};
-        const siteOrder = globalConfig.siteTabOrder || ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
+        const siteOrder = globalConfig.siteTabOrder || ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'claude', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
         if (!siteOrder.includes(currentSuffixTab)) currentSuffixTab = siteOrder[0];
 
 
@@ -4069,7 +4232,7 @@
         const desc = document.createElement('div');
         desc.style.cssText = 'font-size: 12px; color: #9aa0a6; line-height: 1.4;';
         const capKey = globalConfig.qaQueueSettings?.captureHotkey || 'F4';
-        desc.textContent = `請設定 10 大站點之權重序號與【${capKey} 快捷採集模式】。點擊下方按鈕後，前後綴與總結匯出順序將依序號嚴格排列：`;
+        desc.textContent = `請設定 11 大站點之權重序號與【${capKey} 快捷採集模式】。點擊下方按鈕後，前後綴與總結匯出順序將依序號嚴格排列：`;
         container.appendChild(desc);
 
 
@@ -4078,7 +4241,7 @@
 
 
         const inputsMap = [];
-        const siteOrder = globalConfig.siteTabOrder || ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
+        const siteOrder = globalConfig.siteTabOrder || ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'claude', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
         const siteActions = globalConfig.qaQueueSettings?.siteActions || {};
 
 
@@ -4422,7 +4585,8 @@
         // 1. 背景顏色自訂與原生拾色器
         const colorBox = document.createElement('div');
         colorBox.style.cssText = 'display: flex; align-items: center; gap: 8px;';
-        
+
+
         const colorLbl = document.createElement('span');
         colorLbl.style.cssText = 'font-size: 12px; color: #e8eaed;';
         colorLbl.textContent = '🎨 提示背景色：';
@@ -4524,13 +4688,6 @@
         capInput.placeholder = '留空停用';
         capInput.value = globalConfig.qaQueueSettings?.captureHotkey ?? 'F4';
         capInput.style.cssText = 'width: 100px; background: #2d2f31; color: #8ab4f8; border: 1px solid #5f6368; border-radius: 4px; padding: 3px 6px; font-size: 12px; text-align: center; font-weight: bold;';
-        capInput.oninput = () => {
-            if (!globalConfig.qaQueueSettings) globalConfig.qaQueueSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.qaQueueSettings));
-            globalConfig.qaQueueSettings.captureHotkey = capInput.value.trim();
-            Storage.set(globalConfig);
-        };
-        capBox.appendChild(capLbl);
-        capBox.appendChild(capInput);
 
 
         // 總結熱鍵
@@ -4544,11 +4701,38 @@
         sumInput.placeholder = '留空停用';
         sumInput.value = globalConfig.qaQueueSettings?.summaryHotkey ?? 'F7';
         sumInput.style.cssText = 'width: 100px; background: #2d2f31; color: #8ab4f8; border: 1px solid #5f6368; border-radius: 4px; padding: 3px 6px; font-size: 12px; text-align: center; font-weight: bold;';
-        sumInput.oninput = () => {
+
+
+        function validateAndSaveHotkeys() {
+            const capVal = capInput.value.trim();
+            const sumVal = sumInput.value.trim();
+
+
+            if (capVal && sumVal && capVal.toUpperCase() === sumVal.toUpperCase()) {
+                capInput.style.borderColor = '#ef4444';
+                sumInput.style.borderColor = '#ef4444';
+                showToast('⚠️ 採集熱鍵與總結熱鍵不能相同！', true, 3000);
+                return;
+            }
+
+
+            capInput.style.borderColor = '#5f6368';
+            sumInput.style.borderColor = '#5f6368';
+
+
             if (!globalConfig.qaQueueSettings) globalConfig.qaQueueSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.qaQueueSettings));
-            globalConfig.qaQueueSettings.summaryHotkey = sumInput.value.trim();
+            globalConfig.qaQueueSettings.captureHotkey = capVal;
+            globalConfig.qaQueueSettings.summaryHotkey = sumVal;
             Storage.set(globalConfig);
-        };
+        }
+
+
+        capInput.oninput = validateAndSaveHotkeys;
+        sumInput.oninput = validateAndSaveHotkeys;
+
+
+        capBox.appendChild(capLbl);
+        capBox.appendChild(capInput);
         sumBox.appendChild(sumLbl);
         sumBox.appendChild(sumInput);
 
@@ -4570,8 +4754,8 @@
         const targetInput = document.createElement('input');
         targetInput.type = 'number';
         targetInput.min = '0';
-        targetInput.max = '10';
-        targetInput.value = globalConfig.qaQueueSettings?.targetCount ?? 5;
+        targetInput.max = '11';
+        targetInput.value = globalConfig.qaQueueSettings?.targetCount ?? 6;
         targetInput.style.cssText = 'width: 48px; background: #2d2f31; color: #8ab4f8; border: 1px solid #5f6368; border-radius: 4px; padding: 3px 6px; font-size: 12px; text-align: center; font-weight: bold;';
         targetInput.oninput = () => {
             if (!globalConfig.qaQueueSettings) globalConfig.qaQueueSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.qaQueueSettings));
@@ -4587,7 +4771,7 @@
         keepQueueLabel.style.cssText = 'display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; font-size: 12px; color: #e8eaed;';
         const keepQueueCheck = document.createElement('input');
         keepQueueCheck.type = 'checkbox';
-        keepQueueCheck.checked = globalConfig.qaQueueSettings?.keepQueueOnAutoSummary ?? false;
+        keepQueueCheck.checked = globalConfig.qaQueueSettings?.keepQueueOnAutoSummary ?? true;
         keepQueueCheck.onchange = () => {
             if (!globalConfig.qaQueueSettings) globalConfig.qaQueueSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.qaQueueSettings));
             globalConfig.qaQueueSettings.keepQueueOnAutoSummary = keepQueueCheck.checked;
@@ -4602,6 +4786,31 @@
         autoSummaryRow.appendChild(keepQueueLabel);
 
 
+        // TTL 時長設定行
+        const ttlRow = document.createElement('div');
+        ttlRow.style.cssText = 'display: flex; gap: 12px; align-items: center; justify-content: space-between; border-top: 1px dashed #3c4043; padding-top: 6px;';
+        const ttlBox = document.createElement('div');
+        ttlBox.style.cssText = 'display: flex; align-items: center; gap: 6px;';
+        const ttlLbl = document.createElement('span');
+        ttlLbl.style.cssText = 'font-size: 12px; color: #e8eaed;';
+        ttlLbl.textContent = '⏳ 暫存池過期時長 (小時，0為永不)：';
+        const ttlInput = document.createElement('input');
+        ttlInput.type = 'number';
+        ttlInput.min = '0';
+        ttlInput.max = '72';
+        ttlInput.value = globalConfig.qaQueueSettings?.ttlHours ?? 2;
+        ttlInput.style.cssText = 'width: 48px; background: #2d2f31; color: #8ab4f8; border: 1px solid #5f6368; border-radius: 4px; padding: 3px 6px; font-size: 12px; text-align: center; font-weight: bold;';
+        ttlInput.oninput = () => {
+            if (!globalConfig.qaQueueSettings) globalConfig.qaQueueSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.qaQueueSettings));
+            const val = parseInt(ttlInput.value, 10);
+            globalConfig.qaQueueSettings.ttlHours = (isNaN(val) || val < 0) ? 2 : val;
+            Storage.set(globalConfig);
+        };
+        ttlBox.appendChild(ttlLbl);
+        ttlBox.appendChild(ttlInput);
+        ttlRow.appendChild(ttlBox);
+
+
         const hotkeyHint = document.createElement('div');
         hotkeyHint.style.cssText = 'font-size: 11px; color: #9aa0a6; line-height: 1.4;';
         hotkeyHint.textContent = '💡 支援逗號分隔多熱鍵 (如: F4, ^F4)；支援輸入框全域穿透；若留空欄位則 100% 釋放攔截，交由桌面 AHK。';
@@ -4610,6 +4819,7 @@
         hotkeyGroup.appendChild(hotkeyTitle);
         hotkeyGroup.appendChild(hotkeysRow);
         hotkeyGroup.appendChild(autoSummaryRow);
+        hotkeyGroup.appendChild(ttlRow);
         hotkeyGroup.appendChild(hotkeyHint);
 
 
@@ -4690,6 +4900,38 @@
         layoutRow.appendChild(layoutLabel);
         layoutRow.appendChild(layoutSelect);
         container.appendChild(layoutRow);
+
+
+        // 2.1 紫鍵排列位置覆寫
+        const purplePosRow = document.createElement('div');
+        purplePosRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #1e1f20; padding: 8px 12px; border-radius: 6px; border: 1px solid #3c4043;';
+        const purplePosLabel = document.createElement('span');
+        purplePosLabel.style.cssText = 'font-weight: 600; font-size: 13px; color: #8ab4f8;';
+        purplePosLabel.textContent = '🟣 AI Studio 紫鍵位置覆寫：';
+        const purplePosSelect = document.createElement('select');
+        Object.assign(purplePosSelect.style, {
+            backgroundColor: '#2d2f31', color: '#e8eaed', border: '1px solid #5f6368', borderRadius: '4px', padding: '4px 8px', fontSize: '12px', fontWeight: '600', cursor: 'pointer'
+        });
+        [
+            { id: 'inherit', txt: '繼承全域設定 (預設推薦)' },
+            { id: 'bottom', txt: '置底換行 (2行)' },
+            { id: 'right', txt: '靠右橫排 (1行)' }
+        ].forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p.id;
+            opt.textContent = p.txt;
+            if (settings.purplePosition === p.id) opt.selected = true;
+            purplePosSelect.appendChild(opt);
+        });
+        purplePosSelect.onchange = () => {
+            settings.purplePosition = purplePosSelect.value;
+            Storage.set(globalConfig);
+            mountUI(true);
+            showToast('🟣 已更新 AI Studio 紫鍵位置！');
+        };
+        purplePosRow.appendChild(purplePosLabel);
+        purplePosRow.appendChild(purplePosSelect);
+        container.appendChild(purplePosRow);
 
 
         // 3. 滾輪範圍與失敗處置
@@ -5067,7 +5309,7 @@
             card.appendChild(paneViewRule);
 
 
-		// 子面板 2：專屬前後綴 (實裝 🔗 雲端直達 ↗ 動態跳轉按鈕)
+            // 子面板 2：專屬前後綴 (實裝 🔗 雲端直達 ↗ 動態跳轉按鈕)
             const paneViewAffix = document.createElement('div');
             paneViewAffix.style.cssText = 'display: none; flex-direction: column; gap: 6px;';
 
@@ -5276,7 +5518,7 @@
 
 
         const btnCloudSync = document.createElement('button');
-        btnCloudSync.textContent = '🔄 一鍵從雲端同步配置 (純內容覆蓋，隔離本機座標)';
+        btnCloudSync.textContent = '🔄 一鍵從雲端同步配置 (純內容覆蓋，隔離本機座標與熱鍵)';
         btnCloudSync.className = 'ai-copy-btn-primary';
         btnCloudSync.style.cssText = 'background: #047857; color: #ffffff; width: 100%; padding: 8px;';
         btnCloudSync.onmouseover = () => btnCloudSync.style.background = '#059669';
@@ -5301,7 +5543,7 @@
         container.appendChild(divider);
 
 
-        // 2. 模組化備份精靈
+        // 2. 模組化備份精靈 (接線持久化 exportScope)
         const wizTitle = document.createElement('div');
         wizTitle.style.cssText = 'font-weight: 600; color: #9aa0a6; font-size: 12px;';
         wizTitle.textContent = '📦 模組化配置匯出精靈 (可自選導出範疇)：';
@@ -5312,19 +5554,36 @@
         wizBox.style.cssText = 'background: #1e1f20; border: 1px solid #3c4043; border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 6px;';
 
 
-        const chkMod1 = document.createElement('input'); chkMod1.type = 'checkbox'; chkMod1.checked = true;
+        const exportScope = globalConfig.exportScope || { content: true, coords: false, layout: false };
+
+
+        const chkMod1 = document.createElement('input'); chkMod1.type = 'checkbox'; chkMod1.checked = exportScope.content !== false;
         const lblMod1 = document.createElement('label'); lblMod1.style.cssText = 'font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 6px;';
         lblMod1.appendChild(chkMod1); lblMod1.appendChild(document.createTextNode('模組一：前後綴、站點排序與採集動作、雜訊規則、15組切片正則及熱鍵偏好 (內容設定)'));
 
 
-        const chkMod2 = document.createElement('input'); chkMod2.type = 'checkbox'; chkMod2.checked = false;
+        const chkMod2 = document.createElement('input'); chkMod2.type = 'checkbox'; chkMod2.checked = exportScope.coords === true;
         const lblMod2 = document.createElement('label'); lblMod2.style.cssText = 'font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 6px;';
         lblMod2.appendChild(chkMod2); lblMod2.appendChild(document.createTextNode('模組二：主卡片懸浮座標、小光球座標、Toast座標與收折狀態 (螢幕位置，遷移整機可選)'));
 
 
-        const chkMod3 = document.createElement('input'); chkMod3.type = 'checkbox'; chkMod3.checked = false;
+        const chkMod3 = document.createElement('input'); chkMod3.type = 'checkbox'; chkMod3.checked = exportScope.layout === true;
         const lblMod3 = document.createElement('label'); lblMod3.style.cssText = 'font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 6px;';
         lblMod3.appendChild(chkMod3); lblMod3.appendChild(document.createTextNode('模組三：AI Studio 排版佈局 (3+2/階梯/單排) 與紫鍵獨立設定'));
+
+
+        function saveExportScope() {
+            if (!globalConfig.exportScope) globalConfig.exportScope = {};
+            globalConfig.exportScope.content = chkMod1.checked;
+            globalConfig.exportScope.coords = chkMod2.checked;
+            globalConfig.exportScope.layout = chkMod3.checked;
+            Storage.set(globalConfig);
+        }
+
+
+        chkMod1.onchange = saveExportScope;
+        chkMod2.onchange = saveExportScope;
+        chkMod3.onchange = saveExportScope;
 
 
         wizBox.appendChild(lblMod1);
@@ -5335,6 +5594,15 @@
 
         function generateExportPayload() {
             const payload = JSON.parse(JSON.stringify(globalConfig));
+            if (!chkMod1.checked) {
+                delete payload.profiles;
+                delete payload.siteTabOrder;
+                delete payload.qaQueueSettings;
+                delete payload.noiseSettings;
+                if (payload.aiStudioSettings && payload.aiStudioSettings.modules) {
+                    delete payload.aiStudioSettings.modules;
+                }
+            }
             if (!chkMod2.checked) {
                 delete payload.uiPosition;
                 delete payload.orbPosition;
@@ -5403,11 +5671,13 @@
                 try {
                     const parsed = JSON.parse(evt.target.result);
                     if (parsed && typeof parsed === 'object') {
-                        globalConfig = sanitizeConfig(parsed);
+                        const newConfig = sanitizeConfig(parsed);
+                        applyLocalOnlyOverrides(newConfig, globalConfig);
+                        globalConfig = newConfig;
                         Storage.set(globalConfig);
                         mountUI(true);
                         renderPaneCloud(container);
-                        showToast('✅ JSON 設定檔匯入成功！');
+                        showToast('✅ JSON 設定檔匯入成功 (本機座標與排版已完好保全)！');
                     } else {
                         showToast('❌ JSON 格式不符合規範！', true);
                     }
@@ -5508,6 +5778,7 @@
         const isMistral = adapter.id === 'mistral';
         const isZai = adapter.id === 'zai';
         const isMiniMax = adapter.id === 'minimax';
+        const isClaude = adapter.id === 'claude';
         const settings = globalConfig.aiStudioSettings || DEFAULT_CONFIG.aiStudioSettings;
         const curModId = settings.activeModuleId || 'module_1';
         const curMod = settings.modules?.[curModId] || DEFAULT_CONFIG.aiStudioSettings.modules.module_1;
@@ -5626,25 +5897,26 @@
         }
 
 
-        // 藍鍵 / 雙軌按鈕分裂機制
+        // 藍鍵 / 雙軌按鈕分裂機制 (納入 Claude)
         let btnSingleBlue = null;
         let btnPreviewGreen = null;
 
 
-        if (isZai || isMiniMax) {
+        if (isZai || isMiniMax || isClaude) {
             btnSingleBlue = document.createElement('button');
-            btnSingleBlue.textContent = isZai ? '📋 複製最後對話' : '📋 複製最後回覆';
+            btnSingleBlue.textContent = (isZai || isClaude) ? '📋 複製最後對話' : '📋 複製最後回覆';
             btnSingleBlue.className = 'ai-copy-btn';
-            btnSingleBlue.title = `${isZai ? '複製左側最後回覆對話' : '複製最後回覆'} (Alt + C，按住可拖曳)`;
+            btnSingleBlue.title = `${(isZai || isClaude) ? '複製左側最後回覆對話' : '複製最後回覆'} (Alt + C，按住可拖曳)`;
             btnSingleBlue.onclick = () => handleCopyAction('SINGLE');
 
 
             btnPreviewGreen = document.createElement('button');
             btnPreviewGreen.textContent = '📄 複製右側預覽';
             btnPreviewGreen.className = 'ai-copy-btn-docx';
-            btnPreviewGreen.title = isZai ? '提取右側預覽內容為 Markdown (按住可拖曳)' : '提取右側成果物為 Markdown (按住可拖曳)';
+            btnPreviewGreen.title = isClaude ? '提取右側 Artifacts 成果物為 Markdown (按住可拖曳)' : (isZai ? '提取右側預覽內容為 Markdown (按住可拖曳)' : '提取右側成果物為 Markdown (按住可拖曳)');
             btnPreviewGreen.onclick = () => {
-                if (isZai) handleZaiPreviewAction();
+                if (isClaude) handleClaudePreviewAction();
+                else if (isZai) handleZaiPreviewAction();
                 else handleMiniMaxDeliverableCopyAction();
             };
         } else {
