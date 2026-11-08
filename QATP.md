@@ -79,43 +79,47 @@
 
 ## 【貳、 QA 測試驗證任務書 (QATP)】
 
-> **表頭規格預設值顯式定錨**：  
-> 1. 目標版本號：`4.3.4`  
-> 2. 目標語系：`繁體中文 (zh-TW)`  
-> 3. By-Design 豁免清單：`詳見下方第 1 小節`  
-> 4. Profile：`Profile-WebScript`
+> 🔒 **規格預設值顯式定錨**：  
+> **1. 目標版本號**：`4.3.4`  
+> **2. 目標語系**：`JavaScript (ES2022+ / Tampermonkey Userscript)`  
+> **3. By-Design 豁免清單**：`見下方第 1 小節清單`  
+> **4. Profile**：`Profile-WebScript`
 
 ---
 
-### 0. 🧬 Phase 0：獨立白箱代碼靜態風險排查 (Static Code Audit)
+### 0. 🧬 【強制優先】Phase 0：獨立白箱代碼靜態風險排查 (Static Code Audit)
 
-* **0.1 【Shell / CLI / 外部進程與路徑轉義漏洞排查】**：  
-  本腳本為瀏覽器沙盒前端 Userscript，未涉及本機 Shell、子進程創建或 CLI 命令拼接，無命令列注入風險。
-* **0.2 【字串與正則邊界吞噬排查】**：  
-  `applyNoiseRegexes` 與 `UNIVERSAL_NOISE_SELECTORS` 維持單行排除邊界；切片引擎 `executeSingleMatchSlice` 針對代碼塊目標強制解耦並補齊 `g` 旗標；`composeSlicePayload` 確保末端雙換行物理保底，不存在跨行文本吞噬現象。
-* **0.3 【系統資源競爭、死鎖、洩漏與跨執行緒 GUI 讀寫排查】**：  
-  `mountDebounceTimer` 具備延遲清理；`setupDraggableUI` 於指針按下時先期解除歷史事件監聽；Z.AI 與 MiniMax 抽屜檢索配備 10000ms 超時終止閥與連續長度穩定偵測機制，無死循環隱患。
-* **0.4 【全域頂層範圍語法崩潰與入口盲區排查 (Zero-Meltdown Audit)】**：  
-  IIFE 頂層無裸露異步存取；正則字面量 `\n` 為合法字元序列；`GM_registerMenuCommand` 前置註冊且無條件掛載，入口安全存活。
-* **0.5 【災難救援與脫困指令執行環境能力邊界排查 (Runtime Context Feasibility)】**：  
-  選單註冊之 `resetUiPosition`、`openManager` 及 `clearQaQueue` 均封裝為安全原生函式；`Storage.get` 具備 `localStorage` 降級容錯，環境邊界無越界風險。
+* **0.1 【Shell / CLI / 外部進程與路徑轉義漏洞排查】**：
+  - 本專案為純前端 Userscript，未調用本地系統進程或 Shell 命令，不涉及 CLI 逸出漏洞。`[PASS]`
+* **0.2 【字串與正則邊界吞噬排查】**：
+  - 審查 `findRegexClosingSlash` 反向連續反斜線偶數校驗，閉合斜線鎖定邏輯嚴密；
+  - 審查 `DEFAULT_CONFIG.noiseSettings`，正則均具備排除型單行邊界 `[^\n]*\n?`，無危險之跨行 `.*?` 與 `s` 旗標共構問題；
+  - 審查 `composeSlicePayload`，後綴補白嚴格保底為 `\n\n`，杜絕字串沾黏。`[PASS]`
+* **0.3 【系統資源競爭、死鎖、洩漏與跨執行緒 GUI 讀寫排查】**：
+  - `mountDebounceTimer` 設定 200ms 防抖；`init` 之輪詢排程具備 `container.isConnected` 門禁，杜絕重複重繪；
+  - MiniMax Fiber 橋接通訊監聽器於 `onResponse` 觸發或超時後均呼叫 `removeEventListener`，無事件監聽洩漏。`[PASS]`
+* **0.4 🚨 【全域頂層範圍語法崩潰與入口盲區排查 (Zero-Meltdown Audit)】**：
+  - 頂層無裸露執行語句；`Storage.get()` 在初始化開端安全捕獲所有 JSON 解析異常；
+  - 油猴元數據閉合規範，語法解析 0 報錯。`[PASS]`
+* **0.5 🛡️ 【災難救援與脫困指令執行環境能力邊界排查 (Runtime Context Feasibility)】**：
+  - 油猴選單註冊三大無條件救援命令；`Storage.set` 與 `setQaQueue` 寫入失敗均以獨立紅色 Toast 警報提示，提供操作者明確指引。`[PASS]`
 
 ---
 
-### 1. 🛡️ 架構妥協與驗收豁免須知 (By-Design Exceptions)
+### 1. 🛡️ 【強制】架構妥協與驗收豁免須知 (By-Design Exceptions)
 
-1. **Claude.ai 原生代理降級 DOM 轉譯**：  
-   在連線不穩或串流輸出尚未完畢時，若 Claude 原生複製按鈕未就緒，腳本自動回退調用 DOM 解析轉譯，此為預期平滑容錯行為。  
-   *不可豁免鐵律自查：無衝突。*
-2. **TTL 為 0 永不逾時自滅**：  
-   `qaQueueSettings.ttlHours` 設定為 `0` 時，暫存佇列永不因時間衰減清除，僅能手動按 F7 或右鍵齒輪清空，屬預期設計。  
-   *不可豁免鐵律自查：無衝突。*
-3. **AI Studio 紫鍵位置 inherit 動態連動**：  
-   `aiStudioSettings.purplePosition` 設為 `'inherit'` 時，紫鍵排列順序跟隨全域 `uiSettings.purplePosition`，屬解耦預期行為。  
-   *不可豁免鐵律自查：無衝突。*
-4. **綠鍵複製成果物純淨無前後綴**：  
-   Z.AI 與 MiniMax 點擊綠鍵導出右側成果物時，恆定產出純淨 Markdown，不裝配 Profile 前後綴，前後綴裝配專屬保留予 F4 採集管線。  
-   *不可豁免鐵律自查：無衝突。*
+1. **Claude 成果物未開啟時之智能階梯降級 【By-Design / 預期行為】**：
+   - *說明*：若 Claude 頁面右側未開啟 Artifacts 抽屜，手動點擊綠鍵（📄 複製右側預覽）或按 F4 採集熱鍵時，腳本將彈出友善提示並自動降級複製左側最後對話之純淨 Markdown（F4 正常帶入 `5th\n\n` 標籤），不拋紅字中斷流程。  
+   - *不可豁免鐵律自查*：無衝突（未引起載入崩潰，未破壞資料完整性）。
+2. **Claude 綠鍵手動複製恒定純淨直出 【By-Design / 預期行為】**：
+   - *說明*：點擊 Claude 綠鍵恒定輸出 100% 純淨 Artifacts 文本，不附帶 Profile 前綴（`5th`）；如需標籤應透過 F4 採集動作達成。  
+   - *不可豁免鐵律自查*：無衝突。
+3. **雙熱鍵同鍵輸入即時阻斷 【By-Design / 預期行為】**：
+   - *說明*：若在設定面板將採集與總結熱鍵設為完全相同字串，系統將外框標紅、阻斷寫入儲存並彈出警報，防範兩者互鎖。  
+   - *不可豁免鐵律自查*：無衝突。
+4. **雲端前綴解析失敗之容錯降級 【By-Design / 預期行為】**：
+   - *說明*：若雲端文件非共享或網路超時，複製操作照常執行並自動略過前綴，同時彈出降級提示 Toast。  
+   - *不可豁免鐵律自查*：無衝突。
 
 ---
 
@@ -123,170 +127,159 @@
 
 #### 🌟 維度一：新功能驗收 (TC-NEW-xx)
 
-* **TC-NEW-01: Claude.ai 平台適配與回覆複製驗收**
-  - **測試情境**：於 `https://claude.ai/chat/*` 頁面測試對話回覆複製。
-  - **操作步驟**：
-    1. 開啟 Claude.ai 對話頁面，觀察懸浮工具列是否正常掛載。
-    2. 點擊藍色「📋 複製最後回覆」按鈕。
-    3. 檢視剪貼簿文字。
-  - **預期結果**：成功取得 Markdown 格式文字，且開頭正確裝配 `5th\n\n` 前綴標籤。
-  - **AST 語意錨點推演**：錨定 `Adapters.Claude` 物件內 `getMarkdownAsync` 函式，程式碼優先檢索包含複製標籤之 `button` 觸發點擊，經 200ms 讓步後由 `readText` 讀回；若異常則回退至 `domToMarkdown(node, Adapters.Claude.cleanNode)`。
+* **TC-NEW-01：Claude.ai 站點適配與雙軌按鈕分裂驗證**
+  - **測試情境**：載入 `https://claude.ai/chat/...` 頁面，檢視懸浮卡片按鈕結構。
+  - **操作步驟**：開啟 Claude 對話頁面，觀察懸浮工具列。
+  - **預期結果**：識別為 Claude 平台；呈現藍鍵「📋 複製最後對話」與綠鍵「📄 複製右側預覽」（顏色為翡翠綠 `#10b981`）。
+  - **代碼 AST 語意錨點推演**：`createUIElement 內 緊鄰 isZai || isMiniMax || isClaude`，條件滿足時分支建立雙軌藍綠按鈕。
+  - **初審標籤**：`[PASS]`
 
-* **TC-NEW-02: 雲端同步個人熱鍵隔離與採集動作接納驗收 (FIX-01)**
-  - **測試情境**：本機自訂採集熱鍵為 `F9`，由雲端同步覆蓋配置。
+* **TC-NEW-02：Claude Artifacts 抽屜純淨直出與無抽屜階梯平滑降級**
+  - **測試情境**：在 Claude 開啟/未開啟 Artifacts 時點擊綠鍵與按 F4。
   - **操作步驟**：
-    1. 開啟設定管理器，於介面排版將採集熱鍵設定為 `F9`。
-    2. 於雲端同步分頁點擊一鍵同步，載入雲端設定檔（雲端內含 `targetCount: 6` 與 11 站 `siteActions`）。
-    3. 檢查同步完成後的設定值。
-  - **預期結果**：本機之 `captureHotkey` 維持為 `F9` 不被覆蓋，而 `targetCount` 正確更新為雲端之 `6`，11 站採集動作亦全數接納雲端資料。
-  - **AST 語意錨點推演**：錨定 `syncFromJsonDoc` 函式內 `preservedHotkeys` 賦值處，本機熱鍵字串獨立於 `globalConfig = sanitizeConfig(parsed)` 後回填，採集矩陣與滿額閾值完整接納雲端物件。
+    1. 在無 Artifacts 對話點擊綠鍵；
+    2. 在含 Artifacts 對話點擊綠鍵。
+  - **預期結果**：
+    1. 彈出提示 `⚠️ 右側無 Artifacts 成果物，已為您複製最後對話內容！` 並複製純淨對話 Markdown；
+    2. 點擊右側頂部複製鈕直出 Raw MD，剪貼簿內容不含 `5th` 前綴。
+  - **代碼 AST 語意錨點推演**：`handleClaudePreviewAction 內 緊鄰 text = await getClaudeDeliverableText()`，若為 null 則調用 `handleCopyAction('SINGLE_CLEAN')`。
+  - **初審標籤**：`[PASS]`
 
-* **TC-NEW-03: 模組化匯出精靈複選框聯動與裁剪驗收 (FIX-02, FIX-06)**
-  - **測試情境**：於「🌐 雲端匯出」面板取消勾選「模組一：內容設定」後導出配置。
-  - **操作步驟**：
-    1. 開啟設定管理器至「🌐 雲端匯出」面板。
-    2. 取消勾選「模組一」複選框，保留模組二與模組三。
-    3. 點擊「複製自訂 JSON」。
-    4. 檢查剪貼簿內之 JSON 內容。
-  - **預期結果**：產出之 JSON 字典中，`profiles`、`siteTabOrder`、`qaQueueSettings`、`noiseSettings` 欄位已全數被刪除剔除，僅保留坐標與佈局偏好。
-  - **AST 語意錨點推演**：錨定 `generateExportPayload` 函式內 `if (!chkMod1.checked)` 判斷分支，明確執行 `delete payload.profiles` 等鍵值剝離邏輯；勾選狀態寫入 `globalConfig.exportScope`。
+* **TC-NEW-03：雲端配置同步與本機座標熱鍵隔離驗證**
+  - **測試情境**：設定自訂卡片座標與自訂熱鍵（如 `F8`），執行 Google Docs 雲端同步。
+  - **操作步驟**：點擊「一鍵從雲端同步配置」，確認覆蓋。
+  - **預期結果**：本機卡片、小光球、Toast 座標與 `captureHotkey: F8` 完好保留；雲端帶入之 11 站 `siteActions` 與 `targetCount: 6` 成功更新。
+  - **代碼 AST 語意錨點推演**：`syncFromJsonDoc 內 緊鄰 applyLocalOnlyOverrides(globalConfig, preservedLocal)`，個人熱鍵自 `preservedHotkeys` 獨立還原。
+  - **初審標籤**：`[PASS]`
 
-* **TC-NEW-04: 本機 JSON 匯入防跑位保護驗收 (FIX-03)**
-  - **測試情境**：匯入含有異質螢幕坐標之外部備份 JSON 檔案。
-  - **操作步驟**：
-    1. 人為構造一份包含 `uiPosition: { left: "10px", top: "10px" }` 的外部 JSON 檔。
-    2. 於「🌐 雲端匯出」面板點擊「📤 匯入 JSON 檔案並自癒覆蓋」載入該檔。
-    3. 檢視本機懸浮卡片與小光球位置。
-  - **預期結果**：設定資料自癒更新，但懸浮卡片與小光球完全維持本機原有坐標，未被外部檔案重置或位移。
-  - **AST 語意錨點推演**：錨定 `fileInput.onchange` 事件處理器內 `applyLocalOnlyOverrides(globalConfig, preservedLocal)` 呼叫處，外部解析物件於寫入 Storage 前已被本機快照還原覆蓋。
+* **TC-NEW-04：模組化匯出精靈接線與勾選狀態持久化**
+  - **測試情境**：在雲端匯出分頁取消勾選「模組一：內容設定」，複製自訂 JSON。
+  - **操作步驟**：勾選/取消勾選核取方塊，檢查產出 JSON 物件並重新整理頁面。
+  - **預期結果**：匯出之 JSON 不含 `profiles`、`siteTabOrder` 與 `qaQueueSettings`；重整頁面後勾選狀態自 `globalConfig.exportScope` 完整復原。
+  - **代碼 AST 語意錨點推演**：`generateExportPayload 內 緊鄰 if (!chkMod1.checked)`，相關業務欄位被明確刪除；`chkMod1.onchange` 觸發 `saveExportScope` 寫入儲存。
+  - **初審標籤**：`[PASS]`
 
 ---
 
 #### 🔄 維度二：關鍵防禦機制實體存活審查 (TC-REG-xx)
 
-* **TC-REG-01: 切片替換模式正則語法錯誤阻斷防禦 (FIX-12)**
-  - **測試情境**：使用者於切片規則中輸入錯誤正則表達式（如未閉合括號）。
-  - **操作步驟**：
-    1. 於 AI Studio 切片按鈕設定一組 replace 模式規則，輸入正則 `/[abc(/gi`。
-    2. 點擊該切片按鈕觸發執行。
-  - **預期結果**：介面即刻彈出紅色報錯 Toast 提示「❌ 替換正則語法無效，操作已中止！」，流程中斷，未將未清洗的全文複製至剪貼簿。
-  - **AST 語意錨點推演**：錨定 `handleSliceCopyAction` 函式內 `if (btnDef.mode === 'replace')` 之 `try-catch` 區塊，當正則構造拋出例外時，直接執行 `showToast(..., true, 4000); return;`。
+* **TC-REG-01：AI Studio 紫鍵排版位置繼承與解耦存活審查**
+  - **測試情境**：檢查 AI Studio 面板與全域紫鍵排版連動行為。
+  - **操作步驟**：於管理器檢視 AI Studio 設定，紫鍵位置預設應為「繼承全域設定」。
+  - **預期結果**：`DEFAULT_CONFIG.aiStudioSettings.purplePosition` 為 `'inherit'`；`resolvePurplePosition` 遇 `'inherit'` 正確回退至全域 `uiSettings.purplePosition`。
+  - **代碼 AST 語意錨點推演**：`resolvePurplePosition 內 緊鄰 if (aiSetting === 'right' || aiSetting === 'bottom') return aiSetting`，非 right/bottom 則回退全域。
+  - **初審標籤**：`[PASS]`
 
-* **TC-REG-02: 切片載荷雙換行保底機制審查 (FIX-13)**
-  - **測試情境**：切片規則命中或寬容全量複製時之後綴換行規範性檢核。
-  - **操作步驟**：
-    1. 執行任意切片複製操作。
-    2. 讀取剪貼簿字串尾端字元。
-  - **預期結果**：無論是正常切片、備援切片或寬容降級複製，產出字串末端嚴格以 `\n\n` 結尾，與下文黏貼完全隔離。
-  - **AST 語意錨點推演**：錨定 `composeSlicePayload` 函式，檢核條件 `if (!basePayload.endsWith('\n\n'))`，若為單換行則補 `\n`，若無換行則補 `\n\n`。
+* **TC-REG-02：切片替換正則語法錯誤阻斷防禦**
+  - **測試情境**：切片規則為 `replace` 模式但輸入非法正則（如 `/[abc/` 缺少閉合括號）。
+  - **操作步驟**：觸發該切片按鈕。
+  - **預期結果**：主動攔截語法錯誤，彈出紅色報錯 Toast `❌ 替換正則語法無效，操作已中止！`，中斷執行，絕不複製未清洗之全文。
+  - **代碼 AST 語意錨點推演**：`handleSliceCopyAction 內 緊鄰 catch (e) { showToast('❌ 替換正則語法無效，操作已中止！', true, 4000); return; }`。
+  - **初審標籤**：`[PASS]`
 
-* **TC-REG-03: 雲端專屬前後綴載入失敗提示降級防禦 (FIX-14)**
-  - **測試情境**：切片前綴填入無效之 Google Docs URL（如 404 或未授權連結）。
-  - **操作步驟**：
-    1. 設定切片前綴為不存在之網址。
-    2. 點擊該切片按鈕觸發截取。
-  - **預期結果**：前綴拉取失敗後，彈出黃色警示 Toast「⚠️ 雲端前綴載入失敗，本次複製已自動省略前綴！」，切片正文依然成功寫入剪貼簿。
-  - **AST 語意錨點推演**：錨定 `resolveAffixContent` 函式 `catch` 區塊，例外捕獲時調用提示函式並回傳空字串 `''`。
+* **TC-REG-03：切片降級後綴補白標準化與雙換行保底**
+  - **測試情境**：切片正則未命中，系統處置選用 `lenient_full` 寬容複製全量文本。
+  - **操作步驟**：觸發切片並貼入文字編輯器，檢查結尾換行。
+  - **預期結果**：輸出文字末端強制補齊雙換行 `\n\n`，與下文完全隔離不沾黏。
+  - **代碼 AST 語意錨點推演**：調用 `composeSlicePayload`，其內部實裝 `s.endsWith('\n\n') ? s : (s.endsWith('\n') ? s + '\n' : s + '\n\n')` 保底。
+  - **初審標籤**：`[PASS]`
 
 ---
 
 #### ⚠️ 維度三：架構風險與極端情境識別 (TC-RISK-xx)
 
-* **TC-RISK-01: MiniMax 成果物抽屜水合動態探針煞車驗收 (FIX-16)**
-  - **測試情境**：在 MiniMax Agent 對話產生成果物抽屜時點擊綠鍵。
-  - **操作步驟**：
-    1. 點擊綠鍵「📄 複製右側預覽」。
-    2. 計時觀察抽屜文字載入至彈出成功 Toast 之耗時。
-  - **預期結果**：在抽屜文字穩定約 400ms 後即刻煞車放行，經 150ms 微讓步完成複製，全程於 600ms 左右完成，無原版 1800ms 固定等待延遲。
-  - **AST 語意錨點推演**：錨定 `getMiniMaxDeliverableText` 函式內輪詢迴圈，檢驗 `curLen === lastLen` 且 `stableCount >= 2` 時觸發 `break`，隨後之延遲讓步已縮減為 `setTimeout(r, 150)`。
+* **TC-RISK-01：MiniMax 與 Z.AI 成果物抽屜連續兩輪內容動態水合煞車**
+  - **測試情境**：在 MiniMax / Z.AI 開啟長篇 Markdown 成果物抽屜，檢測輪詢與讓步耗時。
+  - **操作步驟**：點擊綠鍵提取成果物。
+  - **預期結果**：內容加載完成後連續兩輪 (400ms) 內容穩定即刻煞車退出輪詢，讓步微任務 150ms 後完成複製，無 1800ms 呆滯死等。
+  - **代碼 AST 語意錨點推演**：`getMiniMaxDeliverableText 內 緊鄰 if (txt === lastObservedText) { stableRounds++; if (stableRounds >= 2) break; }`。
+  - **初審標籤**：`[PASS]`
 
-* **TC-RISK-02: 雙熱鍵同鍵衝突防呆攔截驗收 (FIX-10)**
-  - **測試情境**：使用者於介面排版中將採集熱鍵與總結熱鍵設為同一按鍵。
-  - **操作步驟**：
-    1. 開啟設定管理器「🎨 介面排版」。
-    2. 將採集熱鍵填入 `F4`，總結熱鍵亦填入 `F4`。
-  - **預期結果**：介面即刻彈出紅色警告 Toast「⚠️ 採集熱鍵與總結熱鍵不可設為同鍵！」，並阻斷寫入 Storage。
-  - **AST 語意錨點推演**：錨定 `renderPaneUI` 內 `capInput.oninput` 與 `sumInput.oninput` 事件，比對 `capVal.toUpperCase() === sumVal.toUpperCase()`，命中即中斷回傳。
+* **TC-RISK-02：採集與總結雙熱鍵同鍵衝突防呆**
+  - **測試情境**：使用者於介面排版面板將採集熱鍵與總結熱鍵皆填入 `F4`。
+  - **操作步驟**：輸入熱鍵名稱。
+  - **預期結果**：輸入框外框即時標紅，彈出警告 Toast `⚠️ 採集熱鍵與總結熱鍵不能相同！`，阻斷儲存寫入。
+  - **代碼 AST 語意錨點推演**：`validateAndSaveHotkeys 內 緊鄰 if (capVal && sumVal && capVal.toUpperCase() === sumVal.toUpperCase())`。
+  - **初審標籤**：`[PASS]`
 
-* **TC-RISK-03: Z.AI 原生代理複製按鈕檢索輪次侷限化驗收 (FIX-17)**
-  - **測試情境**：於 Z.AI 進行多輪對話，測試最末輪回覆之原生代理複製。
-  - **操作步驟**：
-    1. 產生 3 輪以上長對話回覆。
-    2. 按下 Alt+C 觸發最後回覆複製。
-  - **預期結果**：複製按鈕尋標嚴格鎖定於最後一輪容器內部，未誤點擊前幾輪歷史回覆之複製鈕。
-  - **AST 語意錨點推演**：錨定 `Adapters.Zai.getMarkdownAsync` 函式，搜尋起點宣告為 `const container = node.closest('.chat-assistant, [class*="chat-assistant"]') || node.parentElement || document`，篩選範圍嚴格封閉於該節點。
+* **TC-RISK-03：Z.AI 原生代理按鈕跨輪次誤奪防禦**
+  - **測試情境**：在多輪對話歷史中，點擊非末輪之複製操作。
+  - **操作步驟**：檢視原生複製按鈕檢索範圍。
+  - **預期結果**：複製按鈕檢索範圍嚴格限定於傳入之 `node.closest('.chat-assistant')` 內，絕不跨輪次搜尋全域按鈕。
+  - **代碼 AST 語意錨點推演**：`Adapters.Zai.getMarkdownAsync 內 緊鄰 const allButtons = Array.from(node.querySelectorAll('button'))`。
+  - **初審標籤**：`[PASS]`
 
 ---
 
 #### 🏛️ 維度四：靜態資料庫殘缺自癒推演 (TC-DEBT-xx)
 
-* **TC-DEBT-01: 歷史殘留設定檔與 profiles.enabled 回填自癒 (FIX-04, FIX-08, FIX-09)**
-  - **測試情境**：載入一份來自 v4.3.0 且缺失 `enabled` 與 `uiPosition` 型別異常之損毀設定檔。
-  - **操作步驟**：
-    1. 模擬輸入 `{ activeProfileId: 'profile_1', profiles: { profile_1: { prefixes: {} } }, uiPosition: 12345 }` 觸發 `sanitizeConfig`。
-    2. 檢查修復後之組態物件。
-  - **預期結果**：`uiPosition` 自動修復為 `null`；`profiles.profile_1.enabled` 自動補齊為 `true`；11 大站點的前後綴字典完成無損填補，未抹除既有內容。
-  - **AST 語意錨點推演**：錨定 `sanitizeConfig` 函式頂部，`typeof data.uiPosition !== 'object'` 強制歸零；遍歷 profiles 檢查 `typeof p.enabled !== 'boolean'` 賦予預設值。
+* **TC-DEBT-01：舊版配置升級與葉節點缺失深層自癒**
+  - **測試情境**：載入未包含 `exportScope`、`profiles.*.enabled` 與 `claude` 站點之 v4.3.0 舊設定檔。
+  - **操作步驟**：呼叫 `sanitizeConfig(oldData)`。
+  - **預期結果**：補齊 `claude` 於 `siteTabOrder` 與 `siteActions`；補齊 `exportScope: { content: true, coords: false, layout: false }`；`profiles.*.enabled` 回補為 `true`。
+  - **代碼 AST 語意錨點推演**：`sanitizeConfig 內 緊鄰 if (typeof p.enabled !== 'boolean') p.enabled = ...` 及各站點補全迴圈。
+  - **初審標籤**：`[PASS]`
 
-* **TC-DEBT-02: 幽靈欄位 anchor 拔除與 Storage 寫入失敗告警 (FIX-05, FIX-15)**
-  - **測試情境**：檢驗全檔是否存在 `toastSettings.anchor` 殘留；模擬儲存配額超限。
-  - **操作步驟**：
-    1. 於全檔搜尋 `anchor` 標識符。
-    2. 模擬 `GM_setValue` 與 `localStorage.setItem` 同時拋出例外。
-  - **預期結果**：全檔未發現任何 `toastSettings.anchor` 變數或邏輯；儲存失敗時控制台輸出錯誤且畫面彈出紅色報錯 Toast。
-  - **AST 語意錨點推演**：`DEFAULT_CONFIG.toastSettings` 已無 `anchor` 鍵值；錨定 `Storage.set` 與 `setQaQueue` 之 `catch` 區塊，均已掛載 `showToast('❌ 設定儲存失敗...', true, 4000)`。
+* **TC-DEBT-02：幽靈欄位 toastSettings.anchor 物理拔除驗證**
+  - **測試情境**：全量代碼文字檢索 `toastSettings.anchor` 或 `.anchor`。
+  - **操作步驟**：搜尋全文 AST。
+  - **預期結果**：`DEFAULT_CONFIG`、`sanitizeConfig` 與同步邏輯中已無任何 `anchor` 殘留（`delete ts.anchor` 作為防禦清除）。
+  - **代碼 AST 語意錨點推演**：`sanitizeConfig 內 緊鄰 delete ts.anchor`。
+  - **初審標籤**：`[PASS (Retired)]`
 
 ---
 
 ### 3. 驗收報告格式要求 (Mandatory Output Schema)
 
 #### 3.1 測試環境與涵蓋範圍總覽
-- 目標版本號：`4.3.4`
-- 執行環境：`Profile-WebScript (Tampermonkey / Violentmonkey)`
-- 支援瀏覽器：`Sleipnir / Brave / Firefox`
-- 覆蓋站點數：11 旗艦大模型站點全覆蓋
+* **測試環境**：Chromium / Gecko (Violentmonkey / Tampermonkey)
+* **涵蓋範圍**：11 大旗艦 AI 平台全覆蓋 (ChatGPT, Claude, DeepSeek, Qwen, Kimi, AI Studio, Zhipu, Mistral, Perplexity, Z.AI, MiniMax)
+* **定錨參數**：目標版本 `4.3.4` ｜ 語系 `JavaScript (Userscript)` ｜ Profile `Profile-WebScript`
 
 #### 3.2 四大維度逐項檢驗表格
 
-| 案例編號 | 測試案例目標概要 | AST 語意檢驗特徵錨點 | 終審標籤 |
-| :--- | :--- | :--- | :--- |
-| **TC-NEW-01** | Claude.ai 平台適配與代理複製 | `Adapters.Claude.getMarkdownAsync` 內檢索按鈕點擊 | `[PASS]` |
-| **TC-NEW-02** | 雲端同步個人熱鍵隔離與採集動作接納 | `syncFromJsonDoc` 內 `preservedHotkeys` 獨立還原 | `[PASS]` |
-| **TC-NEW-03** | 模組化匯出精靈複選框聯動與裁剪 | `generateExportPayload` 內 `!chkMod1.checked` 刪除鍵值 | `[PASS]` |
-| **TC-NEW-04** | 本機 JSON 匯入防跑位保護 | `fileInput.onchange` 內 `applyLocalOnlyOverrides` | `[PASS]` |
-| **TC-REG-01** | 切片替換模式正則語法錯誤阻斷 | `handleSliceCopyAction` 內 `replace` 正則例外捕獲 | `[PASS]` |
-| **TC-REG-02** | 切片載荷雙換行保底機制 | `composeSlicePayload` 結尾 `\n\n` 補齊邏輯 | `[PASS]` |
-| **TC-REG-03** | 雲端專屬前後綴載入失敗提示降級 | `resolveAffixContent` 內 `catch` 彈出警告並回傳空字串 | `[PASS]` |
-| **TC-RISK-01** | MiniMax 成果物抽屜水合動態探針煞車 | `getMiniMaxDeliverableText` 內連續長度穩定偵測與 150ms | `[PASS]` |
-| **TC-RISK-02** | 雙熱鍵同鍵衝突防呆攔截 | `renderPaneUI` 內大小寫比對阻斷 | `[PASS]` |
-| **TC-RISK-03** | Z.AI 原生代理按鈕檢索輪次侷限化 | `Adapters.Zai.getMarkdownAsync` 內 `closest` 限制容器 | `[PASS]` |
-| **TC-DEBT-01** | 歷史殘留設定檔與 profiles 自癒 | `sanitizeConfig` 內 `uiPosition` 與 `enabled` 補全 | `[PASS]` |
-| **TC-DEBT-02** | anchor 幽靈欄位拔除與儲存失敗告警 | `Storage.set` 與 `setQaQueue` 內失敗彈出紅字 Toast | `[PASS (Retired)]` |
-
----
+| 案例編號 | 維度 | 驗證核心目標 | 實體代碼對應邏輯錨點 | 終審標籤 |
+| :--- | :---: | :--- | :--- | :---: |
+| **TC-NEW-01** | 維度一 | Claude 雙軌藍綠按鈕分裂 | `createUIElement` 內 `isClaude` 分流 | `[PASS]` |
+| **TC-NEW-02** | 維度一 | Claude Artifacts 提取與階梯降級 | `handleClaudePreviewAction` | `[PASS]` |
+| **TC-NEW-03** | 維度一 | 雲端同步隔離座標與熱鍵 | `syncFromJsonDoc` 內 `applyLocalOnlyOverrides` | `[PASS]` |
+| **TC-NEW-04** | 維度一 | 模組化匯出精靈接線與持久化 | `generateExportPayload` 內 `chkMod1` | `[PASS]` |
+| **TC-REG-01** | 維度二 | AI Studio 紫鍵排版繼承全域 | `resolvePurplePosition` 內 `inherit` 回退 | `[PASS]` |
+| **TC-REG-02** | 維度二 | 切片 replace 語法錯誤阻斷 | `handleSliceCopyAction` 內 `catch (e)` 報錯中斷 | `[PASS]` |
+| **TC-REG-03** | 維度二 | 切片降級後綴補白雙換行保底 | `composeSlicePayload` 統一換行封裝 | `[PASS]` |
+| **TC-RISK-01** | 維度三 | MiniMax/Z.AI 動態水合煞車 | `getMiniMaxDeliverableText` 內 `stableRounds` | `[PASS]` |
+| **TC-RISK-02** | 維度三 | 雙熱鍵同鍵衝突即時防呆 | `validateAndSaveHotkeys` 內標紅與 Toast | `[PASS]` |
+| **TC-RISK-03** | 維度三 | Z.AI 原生按鈕侷限化搜尋 | `Adapters.Zai.getMarkdownAsync` 輪次內查詢 | `[PASS]` |
+| **TC-DEBT-01** | 維度四 | 舊版升級深層自癒補齊 | `sanitizeConfig` 補齊 `exportScope` 與各站 | `[PASS]` |
+| **TC-DEBT-02** | 維度四 | 幽靈欄位 anchor 物理拔除 | `sanitizeConfig` 內 `delete ts.anchor` | `[PASS (Retired)]` |
 
 #### 3.2.1 🕹️ 人類實機操作核對專區 (Manual Live Verification Area)
 
 | 實機項目編號 | 驗證操作目標 | 實體代碼對應邏輯錨點 | 實機回填要求 | 當前專區狀態 |
-| :--- | :--- | :--- | :--- | :--- |
-| **MV-01** | Claude.ai 實體點擊與前綴裝配實測 | `Adapters.Claude` 內 `getMarkdownAsync` | 於 Claude 對話回覆點擊藍鍵，貼回剪貼簿開頭字串（應帶 `5th\n\n`） | 待回填 |
-| **MV-02** | MiniMax 抽屜動態水合煞車體感 | `getMiniMaxDeliverableText` 內輪詢煞車 | 於 MiniMax 抽屜點擊綠鍵，記錄複製完成體感時間（應在 1 秒內無卡頓） | 待回填 |
-| **MV-03** | 雙熱鍵同鍵輸入防呆實測 | `renderPaneUI` 內熱鍵輸入監聽處 | 於設定介面將採集與總結均鍵入 F4，確認紅色警告 Toast 彈出 | 待回填 |
-
----
+| :--- | :--- | :--- | :--- | :---: |
+| **MV-01** | Claude.ai 實機抽屜直出 | `getClaudeDeliverableText 內 targetBtn.click()` | 貼回點擊綠鍵複製 Artifacts 之 Markdown 文本 | 待回填 |
+| **MV-02** | MiniMax 動態水合提速實測 | `getMiniMaxDeliverableText 內 stableRounds >= 2` | 記錄開門至複製成功之控制台耗時 (預期 < 800ms) | 待回填 |
+| **MV-03** | 三瀏覽器熱鍵穿透實測 | `setupHotkeys 內 isHotkeyMatch(e, captureKeyStr)` | 於 Sleipnir / Brave / Firefox 輸入框內按 F4 實測 | 待回填 |
 
 #### 3.3 🚨 發現之缺陷與異常清單 (Defects & Observations)
-經全量靜態白箱代碼審查，12 項測試案例未發現任何一票否決之 P0/P1 缺陷。
+* **常規清單**：無阻斷性缺陷（0 項）。
 
 #### 3.3.1 🧬 清單外白箱代碼缺陷 (Off-List Static Vulnerabilities)
-無清單外語法或邏輯漏洞。
-
----
+* **審查結論**：未發現任何清單外白箱語法缺陷、記憶體洩漏或死鎖風險。
 
 #### 3.4 最終 PASS / FAIL 簽核結論與發布建議
 
-【6-A 技術手冊封存核准】  
-3.2 表格內全量 12 項靜態代碼測試案例全數達成 `[PASS]` 或 `[PASS (Retired)]`，無任何未決待處置項，AST 語意閉環自洽。正式簽發 6-A 技術手冊封存核准，解除 ENG 開發交付責任。  
-3.2.1 專區之 3 項實機操作核驗項目（MV-01 ~ MV-03）移入【6-B 維運追蹤管理】獨立追蹤，不反向阻礙本版本代碼封存。
+* **簽核結論**：
+  🎉 **【6-A 技術手冊封存核准】**
+* **判定依據**：
+  1. 3.2 表格內全量 12 項靜態測試案例（TC-NEW 4項、TC-REG 3項、TC-RISK 3項、TC-DEBT 2項）全數為四態閉環標籤 `[PASS]` / `[PASS (Retired)]`；
+  2. AST 架構數學自洽，未檢測出任何 P0/P1 級架構缺陷；
+  3. 0 項 🟡 未決待處置項，符合 6-A 交付責任解除標準。
+* **發布建議**：
+  - **6-A 技術封存**：正式解除 ENG（研發工程團隊）交付責任，允許代碼合併與技術手冊封存；
+  - **6-B 維運追蹤管理**：3.2.1 專區之 3 項實機驗證（`MV-01` ~ `MV-03`）獨立移入【6-B 維運與動態追蹤待辦】，由測試人員於實機環境回填，不阻礙本次發布與交接檔產出。
 
-建議正式核准 `v4.3.4` 發布，後續接收到技術交接檔文本時，依【肆、任務切換 Hook】啟動交接檔審核模式。
+---
+
+## 【肆、 跨輪次任務切換解除鎖定協定 (Task Switch Hook)】
+常駐監聽已就緒。後續對話若提供《AI 雙模式乾淨複製器 v4.3.4 技術交接文檔》，將立即切換至【交接檔審查模式】，執行 AST Bottom-Up 等式數學閉環、變數讀寫活性、妥協案 51 繼承與反向驗證指標核驗！
