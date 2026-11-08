@@ -1,0 +1,809 @@
+# 📘 【AI 雙模式乾淨複製器 v4.3.4】正式技術交接文檔 (Engineering Handover Document)
+
+
+- **腳本名稱**：AI 雙模式乾淨複製器 (ChatGPT / Claude / DeepSeek / Qwen / Kimi / Google AI Studio / 智譜 AI / Mistral AI Playground / Perplexity AI / Z.AI / MiniMax Agent 旗艦 11 合 1、3 模組輪播膠囊、按鈕級獨立前後綴管線、卡片內嵌膠囊雙子頁籤 UI、換行多條瀑布流備援切片引擎、前後綴面板雙行自適應佈局、Z.AI 雙軌分裂 DOCX/CodeMirror 提取引擎、MiniMax 主世界 React Fiber 穿透橋樑、Claude 雙軌 Artifacts 抽屜擴充、動態水合煞車提速、成果物抽屜一鍵開門與動態輪詢門禁、切片前後綴 Google Docs 雲端動態非同步解析管線、雲端 Markdown 前綴自癒清洗器、容器空氣牆穿透契約、拖曳動態微光虛線輪廓、雙軌綠鍵翡翠綠永駐、預設直排階梯雙欄佈局、QATP 雲端 URL 預設裝配、自癒清洗順序校準、DOM 監聽 200ms 防抖節流與按鈕級寬容等冪分割線探針、跨站點 QA 採集暫存池與雙熱鍵總結匯出即焚管線、齒輪動態狀態燈號、2小時 TTL 自滅防線、生產代碼正則校準、按鈕級獨立採集動作映射、AHK 語法修飾鍵雙向相容、Caret Browsing 阻斷、滿額自動總結與滾動更新管線、多熱鍵別名陣列與全域輸入框穿透防線、雙熱鍵同鍵防呆、Toast 自由拖曳錨點定位與 18px 視覺重構、AI Studio 迭代需求異質定界符閉合捕獲、Z.AI Artifacts Live DOM 結構化轉譯、4 態正交採集矩陣、Toast 行內提權防鎖死、Z.AI 成果物智能階梯降級、切片最長代碼塊旗標解耦、寬容備援雙換行保底、專屬前後綴雲端直達按鈕、資料生命週期對稱治理與幽靈欄位物理拔除版 v4.3.4)
+- **當前版本**：`v4.3.4` (Golden Master - Claude 雙軌 Artifacts 抽屜擴充、資料生命週期對稱治理、動態水合煞車、熱鍵空字串還原防呆與幽靈欄位清除定稿版)
+- **主要維護團隊**：Frontend Integration Engineering Team
+- **適用站點**：Google AI Studio (Gemini), Claude (Claude.ai), DeepSeek, 通義千問 (Qwen/Aliyun), Kimi (Moonshot), ChatGPT (OpenAI), 智譜 AI (ChatGLM / BigModel), Mistral AI Playground (console.mistral.ai), Perplexity AI (www.perplexity.ai), Z.AI (chat.z.ai), MiniMax Agent (agent.minimax.io)
+- **對應定稿原始碼**：`v4.3.4` 正式發布原始碼（100% 通過白箱語法校驗與 AST 架構審查：實裝 `Adapters.Claude` 4 項命名空間方法；升級雙軌按鈕分裂架構納入 Claude；實裝 `isClaudeArtifactActive`、`getClaudeDeliverableText` 與 `handleClaudePreviewAction` 抽屜直取與友善階梯降級；實裝 `applyLocalOnlyOverrides` 隔離本機專屬狀態；重構 `syncFromJsonDoc` 確保 11 站採集規則與滿額開關接納雲端新規格並以 `!== undefined` 嚴格型別校驗保全自訂/清空熱鍵；實裝 `composeSlicePayload` 統一後綴雙換行防沾黏；切片 `replace` 模式追加正則語法錯誤阻斷防禦；實裝 MiniMax 與 Z.AI 連續 2 輪穩定動態水合煞車；介面排版面板補齊 `ttlHours` (0~72h) 與雙熱鍵同鍵衝突防呆；模組化匯出精靈接線 `exportScope` 持久化；升級 `openManager` 標題為 v4.3.4；物理拔除幽靈欄位 `toastSettings.anchor`）
+
+
+---
+
+
+## 零、 舊版對照清單 (Pre-Handover Mapping Verification)
+
+
+### 0.1 舊版章節對照清單
+| 舊版 (v4.3.3) 章節標題 | 舊版層級 | 新版 (v4.3.4) 對應標題 | 新版層級 | 狀態說明 |
+| :--- | :--- | :--- | :--- | :--- |
+| 零、 舊版對照清單 | H2 | 零、 舊版對照清單 | H2 | 保留並擴充（納入 v4.3.3 ➔ v4.3.4 映射） |
+| 一、 Metadata 對照與版本演進 | H2 | 一、 Metadata 對照與版本演進 | H2 | 保留並更新版本號至 v4.3.4，追加 Claude @match 規則 |
+| 二、 全局常數、CONFIG 與變數歸屬技術語義表 | H2 | 二、 全局常數、CONFIG 與變數歸屬技術語義表 | H2 | 保留並標註退役常數，更新 11 站字典清單與 exportScope |
+| 三、 核心函式級變更登錄與架構追蹤 | H2 | 三、 核心函式級變更登錄與架構追蹤 | H2 | 保留並實施自底向上結算 (#1~#161) |
+| 四、 設計妥協與歷史避坑指南 (Anti-Regression) | H2 | 四、 設計妥協與歷史避坑指南 (Anti-Regression) | H2 | 100% 繼承歷史妥協案 1~50，增量立案【妥協案 51】 |
+| 五、 拖曳座標儲存、小光球收折、油猴選單歸位與視窗邊界限制機制 | H2 | 五、 拖曳座標儲存、小光球收折、油猴選單歸位與視窗邊界限制機制 | H2 | 完整保留 |
+| 六、 安全邊界、雲端同步與外部依賴規格 | H2 | 六、 安全邊界、雲端同步與外部依賴規格 | H2 | 保留並升級雲端覆蓋隔離協定 (接入 applyLocalOnlyOverrides) |
+| 七、 運行期緊急脫困手冊 | H2 | 七、 運行期緊急脫困手冊 | H2 | 保留並更新 11 站自癒修復指令 |
+| 八、 UX 決策技術化與隱性效能設計揭露 | H2 | 八、 UX 決策技術化與隱性效能設計揭露 | H2 | 保留並追加動態水合煞車、熱鍵防呆與 Claude 雙軌佈局揭露 |
+| 九、 已知限制與防禦性設計聲明 (Known Limitations) | H2 | 九、 已知限制與防禦性設計聲明 (Known Limitations) | H2 | 保留並新增 Claude 階梯平滑降級與雙熱鍵衝突阻斷聲明 |
+| 十、 工程交付與發布規格 (Release Specification) | H2 | 十、 工程交付與發布規格 (Release Specification) | H2 | 保留並更新（提供 v4.3.4 終端使用者發布摘要） |
+| 十一、 反向驗證清單（全量逐項展開標註 指標 1 至 41） | H2 | 十一、 反向驗證清單（全量逐項展開標註 指標 1 至 41） | H2 | 依 v2.6.0 規範全量展開 41 項指標，逐項獨立標註 |
+| 十二、 產出前結構性自檢報告 | H2 | 十二、 產出前結構性自檢報告 | H2 | 完整保留並更新自檢指標 |
+
+
+### 0.2 舊版表格對照清單
+| 舊版表格名稱 | 所在章節 | 新版對應位置 | 狀態說明 |
+| :--- | :--- | :--- | :--- |
+| Metadata 變更摘要表 | 1.1 | 1.1 | 保留並更新至 v4.3.4，記錄 claude.ai 匹配 |
+| 功能 / 函式首次出現版本映射表 | 1.2 | 1.2 | 保留並追加 v4.3.4 實裝之 Claude 雙軌、覆蓋隔離、動態煞車等特性 |
+| 變數歸屬與技術分類表 | 2.1 | 2.1 | 完整保留，新增 exportScope、11 站字典並剔除 toastSettings.anchor |
+| 雙層匯出與本機座標隔離比對表 | 2.2 | 2.2 | 完整保留並更新接線狀態 |
+| 全量原始碼函式登錄清單 | 3.1 | 3.1 | 序號連續遞增編號 (#1~#161)，Bottom-Up 結算對齊 |
+
+
+### 0.3 舊版函式對照清單
+| 舊版函式 / 閉包名稱 | 舊版分類 | 新版對應條目 | 狀態說明 |
+| :--- | :--- | :--- | :--- |
+| `(IIFE 總入口)` ~ `Storage.set` | B / A / D | 全數對應保留於 3.1 核心清單 (#1~#4) | **100% 完整繼承** |
+| *(無)* | 新增 (A) | `applyLocalOnlyOverrides` (#5) | **【v4.3.4 新增】** 抽出本機專屬狀態隔離覆寫純邏輯 |
+| `getQaQueue` | A (舊 #5) | `getQaQueue` (#6) | **【v4.3.4 升級】** 支援 `ttlHours: 0` 永不過期 |
+| `setQaQueue` | A (舊 #6) | `setQaQueue` (#7) | **【v4.3.4 升級】** 追加 catch 區塊儲存失敗 Toast 報警 |
+| `clearQaQueue` ~ `fetchCloudData:gmPromise` | A / C | 全數對應保留於 3.1 核心清單 (#8~#19) | **100% 完整繼承** |
+| `syncFromJsonDoc` | A (舊 #19) | `syncFromJsonDoc` (#20) | **【v4.3.4 升級】** 接入 applyLocalOnlyOverrides，以 `!== undefined` 還原熱鍵 |
+| `cleanUniversalNoise` ~ `Adapters.ChatGPT.cleanNode` | A / C / D | 全數對應保留於 3.1 核心清單 (#21~#45) | **100% 完整繼承** |
+| *(無)* | 新增 (D) | `Adapters.Claude.isMatch` (#46) | **【v4.3.4 新增】** Claude 平台特徵識別 |
+| *(無)* | 新增 (D) | `Adapters.Claude.getAiNodes` (#47) | **【v4.3.4 新增】** 抓取 Claude 對話回覆節點 |
+| *(無)* | 新增 (D) | `Adapters.Claude.getUserNodes` (#48) | **【v4.3.4 新增】** 抓取 Claude 使用者提問節點 |
+| *(無)* | 新增 (D) | `Adapters.Claude.cleanNode` (#49) | **【v4.3.4 新增】** 剝離 Claude 通用雜訊節點 |
+| `Adapters.DeepSeek.isMatch` ~ `getCurrentAdapter` | D / A | 全數對應保留於 3.1 核心清單 (#50~#89) | **100% 完整繼承** (getCurrentAdapter 納入 Claude) |
+| *(無)* | 新增 (A) | `isClaudeArtifactActive` (#90) | **【v4.3.4 新增】** Claude 右側 Artifacts 抽屜狀態探針 |
+| `isZaiPreviewActive` ~ `closeZaiPreviewDrawer` | A / C | 全數對應保留於 3.1 核心清單 (#91~#97) | **100% 完整繼承** |
+| *(無)* | 新增 (A) | `getClaudeDeliverableText` (#98) | **【v4.3.4 新增】** Claude 成果物提取 (含 Hotfix-01 try-catch 降級) |
+| *(無)* | 新增 (A) | `handleClaudePreviewAction` (#99) | **【v4.3.4 新增】** Claude 綠鍵點擊處理與友善降級 |
+| `getZaiDeliverableText` | A (舊 #91) | `getZaiDeliverableText` (#100) | **【v4.3.4 升級】** 實裝動態水合煞車，縮短等待至 150ms |
+| `handleZaiPreviewAction` ~ `executeMatchSlice` | A | 全數對應保留於 3.1 核心清單 (#101~#107) | **100% 完整繼承** |
+| `getMiniMaxDeliverableText` | A (舊 #94) | `getMiniMaxDeliverableText` (#103) | **【v4.3.4 升級】** 實裝動態水合煞車 (Hotfix-03: txt.length > 0) 與 150ms 讓步 |
+| `resolveAffixContent` | A (舊 #100) | `resolveAffixContent` (#109) | **【v4.3.4 升級】** 回傳 `{ content, isDegraded }` 標記雲端前綴異常 |
+| *(無)* | 新增 (A) | `composeSlicePayload` (#110) | **【v4.3.4 新增】** 切片酬載組合演算法，保證末端雙換行 |
+| `handleSliceCopyAction` | A (舊 #101) | `handleSliceCopyAction` (#111) | **【v4.3.4 升級】** replace 模式語法錯誤阻斷，調用 composeSlicePayload |
+| `extractSiteTextByAction` | A (舊 #102) | `extractSiteTextByAction` (#112) | **【v4.3.4 升級】** 支援 Claude PREVIEW/PREVIEW_CLEAN 階梯平滑降級 |
+| `handleCopyAction` ~ `renderPaneRules` | A / C | 全數對應保留於 3.1 核心清單 (#113~#137) | **100% 完整繼承** (11 站雙行自適應支援) |
+| `renderPaneUI` | A (舊 #128) | `renderPaneUI` (#138) | **【v4.3.4 升級】** 補齊 ttlHours 數值框與雙熱鍵同鍵防呆驗證 |
+| *(無)* | 新增 (C) | `renderPaneUI:validateAndSaveHotkeys` (#139) | **【v4.3.4 新增】** 熱鍵同鍵衝突校驗與標紅警報閉環 |
+| `renderPaneAiStudio` | A (舊 #129) | `renderPaneAiStudio` (#140) | **【v4.3.4 升級】** 紫鍵位置選單追加「繼承全域 (inherit)」選項 |
+| `renderPaneAiStudio:modNavForEach` ~ `renderPaneAiStudio:updateSuffixDocLink` | C | 全數對應保留於 3.1 核心清單 (#141~#146) | **100% 完整繼承** |
+| `renderPaneCloud` | A (舊 #136) | `renderPaneCloud` (#147) | **【v4.3.4 升級】** 匯出精靈勾選狀態持久化，匯入檔案套用本機座標隔離 |
+| *(無)* | 新增 (C) | `renderPaneCloud:saveExportScope` (#148) | **【v4.3.4 新增】** 匯出精靈勾選框狀態變更即時持久化至 exportScope |
+| `renderPaneCloud:generateExportPayload` | C (舊 #137) | `renderPaneCloud:generateExportPayload` (#149) | **【v4.3.4 升級】** 接線 chkMod1 取消時剔除 profiles 等內容設定 |
+| `resolvePurplePosition` ~ `init` | A / C | 全數對應保留於 3.1 核心清單 (#150~#161) | **100% 完整繼承** (createUIElement 擴充 Claude 雙軌藍綠鍵) |
+
+
+### 0.4 歷史技術債客觀勘誤表 (Legacy Errata Matrix)
+| 勘誤對象 (函式/變數/正則/聲明) | 舊版錯誤記載 | 新版校正結果 | 原始碼 AST 語義區塊定位與鐵證說明 | 修正技術必要性 |
+| :--- | :--- | :--- | :--- | :--- |
+| `toastSettings.anchor` | 登錄為獨立持久化屬性 | ⚠️ **[已於 v4.3.4 物理拔除]** | 原始碼全檔已徹底刪除此屬性，`sanitizeConfig` 執行顯式 `delete ts.anchor` | 消除幽靈欄位，根治無呼叫點之歷史遺留資料 |
+| `syncFromJsonDoc` 熱鍵還原 | 採用 Truthy 判斷 `if (preservedHotkeys.captureHotkey)` | 校正為嚴格型別判定 `typeof preservedHotkeys.captureHotkey !== 'undefined'` | 位於 `syncFromJsonDoc` 函式內部 `applyLocalOnlyOverrides` 正下方 (Hotfix-02) | 修正使用者刻意清空熱鍵（讓渡 AHK，字串為 `""`）在雲端同步時被誤覆蓋之缺陷 |
+| MiniMax 成果物水合門檻 | 限制 `txt.length > 30` 始啟動煞車計數 | 門檻下放至 `txt.length > 0` 並追加超時兜底 | 位於 `getMiniMaxDeliverableText` 內部 while 輪詢迴圈 (Hotfix-03) | 解決短文字成果物或極端慢速水合被誤判為超時之邊界缺陷 |
+| Claude 剪貼簿讀取異常處置 | 宣稱失敗時自動降級但無 `try-catch` | 包覆 `try-catch` 並向下平滑降級至 DOM 轉譯 | 位於 `getClaudeDeliverableText` 內部 `targetBtn.click()` 正下方 (Hotfix-01) | 消除剪貼簿讀取被瀏覽器焦點阻擋時拋出未捕獲異常之中斷風險 |
+
+
+---
+
+
+## 一、 Metadata 對照與版本演進
+
+
+### 1.1 Metadata 變更摘要表
+
+
+| 欄位 (`==UserScript==`) | v4.3.3 舊版狀態 | v4.3.4 當前定稿版本狀態 | 技術必要性 | 若缺失此欄位之失效情境 |
+| :--- | :--- | :--- | :--- | :--- |
+| `@name` | `AI 雙模式乾淨複製器` | `AI 雙模式乾淨複製器` | 標註產品識別名稱 | 無功能影響 |
+| `@namespace` | `https://github.com/` | `https://github.com/` | 命名空間區隔，避免跨套件衝突 | 跨套件可能發生覆蓋衝突 |
+| `@version` | `4.3.3` | `4.3.4` | 升級版本號：實裝 Claude 雙軌 Artifacts 抽屜擴充、資料生命週期對稱治理、動態水合煞車提速與幽靈欄位清除 | 油猴無法觸發自動更新判定 |
+| `@description` | 精準過濾 AI 思考過程與工具欄雜訊...旗艦 10 合 1... | `精準過濾 AI 思考過程與工具欄雜訊，一鍵複製 Markdown。支援 ChatGPT、Claude、DeepSeek、通義千問、Kimi、Google AI Studio、智譜 AI、Mistral AI Playground、Perplexity AI、Z.AI 及 MiniMax Agent 旗艦 11 合 1。v4.3.4 實裝 Claude 雙軌 Artifacts 抽屜擴充、資料生命週期對稱治理與動態水合煞車。` | 明確告知使用者 11 大站點擴充與核心修復內容 | 使用者無法掌握升級重點 |
+| `@author` | `Frontend Integration Engineering Team` | `Frontend Integration Engineering Team` | 標註維護工程團隊 | 無功能影響 |
+| `@match` | 10 大 AI 平台（共 19 個 URL 規則） | **11 大 AI 平台（共 20 個 URL 規則，追加 `https://claude.ai/*`）** | 放行 Claude 官方網域執行腳本 | 腳本無法在 Claude.ai 載入運行 |
+| `@grant` | `GM_setClipboard`, `GM_setValue`, `GM_getValue`, `GM_addStyle`, `GM_registerMenuCommand`, `GM_xmlhttpRequest` | `GM_setClipboard`, `GM_setValue`, `GM_getValue`, `GM_addStyle`, `GM_registerMenuCommand`, `GM_xmlhttpRequest` | 授權剪貼簿讀寫、跨網域暫存池讀寫、動態樣式注入與跨域連線 | 跨站採集暫存、複製與狀態燈全面癱瘓 |
+| `@connect` | `docs.google.com`, `googleusercontent.com` | `docs.google.com`, `googleusercontent.com` | 保留 Google 官方文件端點白名單放行 | 雲端同步與動態前後綴解析遭跨域阻斷 |
+| `@noframes` | `@noframes` | `@noframes` | 限制腳本僅於頂層視窗加載，阻斷 iframe 重複注入 | 宿主頁面嵌套廣告或沙盒 iframe 時重複掛載雙重 UI |
+| `@run-at` | `document-idle` | `document-idle` | 確保宿主頁面基礎 DOM 加載完成後觸發 | 在頁面未就緒前執行導致掛載崩潰 |
+
+
+### 1.2 功能 / 函式首次出現版本映射表
+
+
+| 功能 / 函式 / 常數名稱 | 首次出現版本 | 驗證依據（代碼特徵與歷史紀錄） | 當前版本狀態 |
+| :--- | :--- | :--- | :--- |
+| Claude 平台適配器 (`Adapters.Claude`) | `v4.3.4` | 新增 `claude.ai` 特徵檢測與對話節點過濾 | **新增** |
+| Claude 雙軌按鈕分裂架構 (`isClaude`) | `v4.3.4` | 工具列呈現藍鍵「📋 複製最後對話」與綠鍵「📄 複製右側預覽」 | **新增** |
+| Claude 抽屜文字提取與降級 (`getClaudeDeliverableText`) | `v4.3.4` | 座標過濾頂部複製按鈕，剪貼簿讀取包覆 `try-catch` 降級 DOM | **新增** |
+| 雙層覆寫隔離演算法 (`applyLocalOnlyOverrides`) | `v4.3.4` | 抽出純邏輯函式，保全本機卡片、小光球、Toast 座標與排版狀態 | **新增** |
+| 雲端同步熱鍵空字串還原修復 (`syncFromJsonDoc`) | `v4.3.4` | 改採 `typeof !== 'undefined'` 判定，保全讓渡桌面 AHK 之空字串 | **升級** |
+| 切片酬載組合演算法 (`composeSlicePayload`) | `v4.3.4` | 統一切片後綴補白邏輯，保證末端雙換行防沾黏 | **新增** |
+| 切片替換正則語法保護 (`handleSliceCopyAction`) | `v4.3.4` | `replace` 模式加入 `try-catch` 守衛，語法錯誤彈出紅色 Toast 報警阻斷 | **升級** |
+| 動態水合煞車演算法 (MiniMax / Z.AI) | `v4.3.4` | 連續 2 輪 (400ms) 內容穩定即煞車，等待時間由 1800ms 降至 150ms | **升級** |
+| 雙熱鍵同鍵衝突防呆 (`validateAndSaveHotkeys`) | `v4.3.4` | 採集與總結熱鍵輸入相同時邊框標紅、Toast 警告並拒絕儲存 | **新增** |
+| 模組化匯出精靈狀態持久化 (`exportScope`) | `v4.3.4` | 新增 `exportScope` 欄位並與儲存層連動，取消模組一確實剔除 profiles | **升級** |
+| 幽靈欄位清除 (`toastSettings.anchor`) | `v4.3.4` | 全檔徹底拔除 `toastSettings.anchor` 宣告與讀寫 | **優化** |
+
+
+---
+
+
+## 二、 全局常數、CONFIG 與變數歸屬技術語義表
+
+
+### 2.1 變數歸屬與技術分類表（嚴格四分類 & 巢狀葉節點展開）
+
+
+| 變數 / 常數完整路徑名稱 | 分類類別 | 資料型態 / 讀寫機制 | 是否包含於純內容 JSON 匯出 | 說明與技術協議 (含死代碼稽核) |
+| :--- | :--- | :--- | :--- | :--- |
+| `CONFIG_KEY` | (B) 獨立持久化變數 | 字串 (`'ai_copy_global_config_v3'`) | 否 | `GM_getValue` / `localStorage` 唯一主組態儲存鍵名 |
+| `QA_QUEUE_KEY` | (B) 獨立持久化變數 | 字串 (`'ai_copy_qa_queue_v1'`) | ❌ **嚴格隔離** | 跨站點 QA 暫存池專屬儲存鍵名，放出即焚，**嚴禁進入設定檔** |
+| `UI_CONTAINER_ID` | (D) 介面標識符 | 字串 (`'ai-universal-copy-container'`) | 否 | 主懸浮展開卡片容器之 DOM `id`，**嚴禁登錄為 Storage Key** |
+| `FLOATING_ORB_ID` | (D) 介面標識符 | 字串 (`'ai-copy-floating-orb'`) | 否 | 動態色標發光小光球容器之 DOM `id` |
+| `MODAL_OVERLAY_ID` | (D) 介面標識符 | 字串 (`'ai-copy-modal-overlay'`) | 否 | 居中雙欄 Modal 遮罩層之 DOM `id` |
+| `ALL_SITE_DEFS` | (C) 純記憶體變數 | 物件字典 (包含 11 站點映射) | 否 | 包含 aistudio, deepseek, qwen, kimi, chatgpt, claude, perplexity, zhipu, zai, mistral, minimax |
+| `MODULE_SEQUENCE` | (C) 純記憶體變數 | 字串陣列 (`['module_1', 'module_2', 'module_3']`) | 否 | 3 模組輪播順序常量陣列 |
+| `isToastPositioningMode` | (C) 純記憶體變數 | 布林值 (預設 `false`) | 否 | Toast 長亮預覽拖曳定位模式旗標 |
+| `isPointerDragging` | (C) 純記憶體變數 | 布林值 (預設 `false`) | 否 | 全域指針拖曳狀態互斥旗標，阻斷拖曳中的滾輪派發與點擊穿透 |
+| `lastWheelTimestamp` | (C) 純記憶體變數 | 數值 (預設 `0`) | 否 | 滾輪冷卻時間戳，實施 150ms 節流閥門防誤觸連跳 |
+| `mountDebounceTimer` | (C) 純記憶體變數 | 數值 / `null` (預設 `null`) | 否 | MutationObserver 200ms 防抖計時器句柄 |
+| `currentPrefixTab` / `currentSuffixTab` | (C) 純記憶體變數 | 字串 (預設 `'aistudio'`) | 否 | Modal 面板當前選取之前後綴站點頁籤 (涵蓋 11 站點) |
+| `currentModuleTab` | (C) 純記憶體變數 | 字串 (預設 `'module_1'`) | 否 | Modal 面板 Pane 6 當前編輯之模組頁籤 |
+| `Adapters` | (C) 純記憶體變數 | 物件字典 (包含 11 大平台適配器) | 否 | 封裝 11 大平台 DOM 提取、原生代理與清洗規則 |
+| `UNIVERSAL_NOISE_SELECTORS` | (C) 純記憶體變數 | 陣列 (全域通用雜訊黑名單) | 否 | 涵蓋 KaTeX、行號、按鈕、Shiki 代碼複製鈕、Antd 下拉與各站專屬雜訊 |
+| `DEFAULT_CONFIG.activeProfileId` | (A) config 字典內鍵值 | 字串 (預設 `'profile_1'`) | **是** | 記錄當前使用之 Profile 模式 ID |
+| `DEFAULT_CONFIG.uiPosition` | (A) config 字典內鍵值 | 物件 / `null` (預設 `null`) | ❌ **嚴格隔離** | 主懸浮卡片螢幕座標 (`{ left, top }`)，雲端同步絕對不覆蓋 |
+| `DEFAULT_CONFIG.orbPosition` | (A) config 字典內鍵值 | 物件 / `null` (預設 `null`) | ❌ **嚴格隔離** | 小光球螢幕座標 (`{ left, top }`)，雲端同步絕對不覆蓋 |
+| `DEFAULT_CONFIG.toastPosition` | (A) config 字典內鍵值 | 物件 / `null` (預設 `null`) | ❌ **嚴格隔離** | Toast 獨立螢幕座標 (`{ left, top }`)，雲端同步絕對不覆蓋 |
+| `DEFAULT_CONFIG.isCollapsed` | (A) config 字典內鍵值 | 布林值 (預設 `false`) | ❌ **嚴格隔離** | 是否處於小光球收納狀態，雲端同步絕對不覆蓋 |
+| `DEFAULT_CONFIG.siteTabOrder` | (A) config 字典內鍵值 | 字串陣列 (11 站點) | **是** | 11 站點順序 (`['aistudio', ... 'claude', ... 'minimax']`) |
+| `DEFAULT_CONFIG.jsonSyncUrl` | (A) config 字典內鍵值 | 字串 | **是** | Google Docs 雲端純內容同步公開連結 ⚠️ 示範預設值 |
+| `DEFAULT_CONFIG.exportScope.content` | (A) config 字典內鍵值 | 布林值 (預設 `true`) | **是** | 匯出精靈模組一（內容設定）勾選狀態持久化 |
+| `DEFAULT_CONFIG.exportScope.coords` | (A) config 字典內鍵值 | 布林值 (預設 `false`) | **是** | 匯出精靈模組二（螢幕位置）勾選狀態持久化 |
+| `DEFAULT_CONFIG.exportScope.layout` | (A) config 字典內鍵值 | 布林值 (預設 `false`) | **是** | 匯出精靈模組三（排版佈局）勾選狀態持久化 |
+| `DEFAULT_CONFIG.toastSettings.anchor` | (A) config 字典內鍵值 | ⚠️ **[已於 v4.3.4 物理拔除]** | 否 | 歷史幽靈欄位，全檔徹底刪除，`sanitizeConfig` 執行顯式清理 |
+| `DEFAULT_CONFIG.toastSettings.fontSize` | (A) config 字典內鍵值 | 數值 (預設 `18`) | **是** | Toast 提示文字字級 (px) |
+| `DEFAULT_CONFIG.toastSettings.background` | (A) config 字典內鍵值 | 字串 (淡紫漸變) | **是** | Toast 底色樣式字串或 Hex 色碼 |
+| `DEFAULT_CONFIG.qaQueueSettings.captureHotkey` | (A) config 字典內鍵值 | 字串 (預設 `'F4'`) | **是** | 採集暫存快捷鍵 (支援逗號分隔多熱鍵與輸入框全域穿透) |
+| `DEFAULT_CONFIG.qaQueueSettings.summaryHotkey` | (A) config 字典內鍵值 | 字串 (預設 `'F7'`) | **是** | 總結依序匯出快捷鍵 (支援多熱鍵與 Caret 搶先阻斷) |
+| `DEFAULT_CONFIG.qaQueueSettings.ttlHours` | (A) config 字典內鍵值 | 數值 (預設 `2`) | **是** | 暫存池逾時自滅時長 (允許 `0~72` 小時，`0` 為永不過期) |
+| `DEFAULT_CONFIG.qaQueueSettings.targetCount` | (A) config 字典內鍵值 | 數值 (預設 `6`) | **是** | 滿額自動總結站數閾值 (0 為關閉) |
+| `DEFAULT_CONFIG.qaQueueSettings.keepQueueOnAutoSummary` | (A) config 字典內鍵值 | 布林值 (預設 `true`) | **是** | 滿額自動總結後是否保留佇列 (預設啟用滾動追加模式) |
+| `DEFAULT_CONFIG.qaQueueSettings.siteActions.*` | (A) config 字典內鍵值 | 物件 (11 站映射，Z.AI 與 MiniMax 預設 `'PREVIEW'`，Claude 預設 `'SINGLE'`) | **是** | 4 態採集動作模式 (`SINGLE` / `SINGLE_CLEAN` / `PREVIEW` / `PREVIEW_CLEAN`) |
+| `DEFAULT_CONFIG.noiseSettings.pipelineOrder` | (A) config 字典內鍵值 | 字串 (`'string_first'` \| `'regex_first'`) | **是** | 雜訊清洗執行順序調度設定 |
+| `DEFAULT_CONFIG.noiseSettings.customNoiseStrings` | (A) config 字典內鍵值 | 字串 (多行免轉義純字串) | **是** | 免轉義純字串排除清單 |
+| `DEFAULT_CONFIG.noiseSettings.customNoiseRegexes` | (A) config 字典內鍵值 | 字串 (多行正則) | **是** | 單行化安全正則排除清單 |
+| `DEFAULT_CONFIG.uiSettings.showCleanSingle` | (A) config 字典內鍵值 | 布林值 (預設 `true`) | **是** | 是否顯示紫色「🧹 乾淨最後回覆」按鈕 |
+| `DEFAULT_CONFIG.uiSettings.showFullThread` | (A) config 字典內鍵值 | 布林值 (預設 `true`) | **是** | 是否顯示藍色「📚 複製全對話串」按鈕 |
+| `DEFAULT_CONFIG.uiSettings.purplePosition` | (A) config 字典內鍵值 | 字串 (`'bottom'` \| `'right'`) | **是** | 全域紫鍵排列位置 (預設 `'bottom'` 置底換行) |
+| `DEFAULT_CONFIG.aiStudioSettings.primaryEngine` | (A) config 字典內鍵值 | 字串 (`'native_menu'` \| `'pencil_edit'` \| `'dom_parser'`) | **是** | AI Studio 首選提取引擎 |
+| `DEFAULT_CONFIG.aiStudioSettings.sliceLayout` | (A) config 字典內鍵值 | 字串 (`'staircase'` \| `'grid_3_2'` \| `'single_row'`) | ❌ **嚴格隔離** | AI Studio 切片按鈕排列佈局，預設為 `'staircase'` |
+| `DEFAULT_CONFIG.aiStudioSettings.purplePosition` | (A) config 字典內鍵值 | 字串 (`'inherit'` \| `'right'` \| `'bottom'`) | ❌ **嚴格隔離** | AI Studio 獨立紫鍵排列位置覆寫 (預設 `'inherit'` 繼承全域) |
+| `DEFAULT_CONFIG.aiStudioSettings.wheelSwitchScope` | (A) config 字典內鍵值 | 字串 (`'capsule_only'` \| `'control_group'` \| `'entire_toolbar'`) | **是** | 滾輪切換模組之感應區域範疇 |
+| `DEFAULT_CONFIG.aiStudioSettings.activeModuleId` | (A) config 字典內鍵值 | 字串 (`'module_1'` \| `'module_2'` \| `'module_3'`) | ❌ **嚴格隔離** | 當前啟用之模組 ID，同步時保留本機當前武裝狀態 |
+| `DEFAULT_CONFIG.aiStudioSettings.fallbackAction` | (A) config 字典內鍵值 | 字串 (`'warn_block'` \| `'lenient_full'` \| `'custom_string'`) | **是** | 切片正則未命中處置政策 |
+| `DEFAULT_CONFIG.aiStudioSettings.fallbackCustomText` | (A) config 字典內鍵值 | 字串 (預設 `'[ERROR: 錨點切片未命中]'`) | **是** | 未命中處置選用 `custom_string` 時寫入剪貼簿之佔位文字 |
+| `DEFAULT_CONFIG.aiStudioSettings.modules.*.name` | (A) config 字典內鍵值 | 字串 | **是** | 3 大模組名稱 |
+| `DEFAULT_CONFIG.aiStudioSettings.modules.*.badgeText` | (A) config 字典內鍵值 | 字串 (限 2 中文或 4 英文) | **是** | 膠囊與小光球呈現之動態標籤文字 |
+| `DEFAULT_CONFIG.aiStudioSettings.modules.*.badgeColor` | (A) config 字典內鍵值 | 字串 (Hex 色碼) | **是** | 膠囊背景與小光球外發光色彩 |
+| `DEFAULT_CONFIG.aiStudioSettings.modules.*.buttons[0..4]` | (A) config 字典內鍵值 | 物件清單 (每模組 5 組，共 15 組) | **是** | 包含 `id`, `name`, `mode`, `enabled`, `pattern`, `fallbackPattern`, `replaceValue`, `isCodeBlockTarget`, `prefix`, `suffix`, `autoDivider` |
+| `DEFAULT_CONFIG.profiles.*.enabled` | (A) config 字典內鍵值 | 布林值 (預設模式 1/2 為 `true`，模式 3 為 `false`) | **是** | 模式啟用開關，缺失時安全回退預設值 |
+| `DEFAULT_CONFIG.profiles.*.prefixes.*` | (A) config 字典內鍵值 | 字串字典 (11 站獨立 Key，Claude 預設 `'5th'`) | **是** | 各站專屬複製前綴 |
+| `DEFAULT_CONFIG.profiles.*.suffixes.*` | (A) config 字典內鍵值 | 字串字典 (11 站獨立 Key，Claude 預設 `\n\n`) | **是** | 各站專屬複製後綴 (預設 `\n\n`) |
+
+
+### 2.2 雙層匯出與本機座標隔離比對表 (Dual-Layer Export Matrix)
+
+
+| 資料欄位路徑 Key | 管道 1：純內容 JSON 匯出 / Google Docs 覆蓋同步 | 管道 2：Tab 7 模組化配置匯出精靈 (可選遷移) | 排除/包含原因與技術協定 |
+| :--- | :--- | :---: | :--- |
+| `profiles.*` | **包含** | **包含 (模組一勾選)** | 核心文字業務設定，必須跨機同步 (含 11 站點獨立 Key) |
+| `siteTabOrder` | **包含** | **包含 (模組一勾選)** | 11 站點偏好權重，跨機共享 |
+| `qaQueueSettings.siteActions.*` | **包含** | **包含 (模組一勾選)** | 11 站 4 態採集動作模式，跨機團隊共享 |
+| `qaQueueSettings.targetCount` | **包含** | **包含 (模組一勾選)** | 滿額總結站數閾值 (預設提升至 6 站)，跨機團隊共享 |
+| `qaQueueSettings.keepQueueOnAutoSummary` | **包含** | **包含 (模組一勾選)** | 滿額滾動更新開關，跨機團隊共享 |
+| `qaQueueSettings.ttlHours` | **包含** | **包含 (模組一勾選)** | 暫存池過期時長，跨機團隊共享 |
+| `qaQueueSettings.captureHotkey` / `summaryHotkey` | ❌ **100% 嚴格隔離** | **包含 (模組一勾選)** | **【個人習慣保全】** 雲端覆蓋時以 `!== undefined` 嚴格還原，本機熱鍵 (含讓渡空字串) 不被覆蓋 |
+| `toastSettings.fontSize` / `background` | **包含** | **包含 (模組一勾選)** | Toast 提示外觀色彩與字級設定，跨機共享 |
+| `toastSettings.anchor` | ⚠️ **[已物理拔除]** | ⚠️ **[已物理拔除]** | 歷史幽靈欄位，徹底剔除，不再參與任何匯出 |
+| `exportScope.*` | **包含** | **包含 (模組一勾選)** | 匯出精靈勾選狀態持久化設定，跨機共享 |
+| `ai_copy_qa_queue_v1` (暫存池) | ❌ **100% 嚴格剔除** | ❌ **100% 嚴格剔除** | **【暫態防洩漏協定】** 佇列屬暫態作業資料，絕不進入持久化配置檔 |
+| `noiseSettings.*` | **包含** | **包含 (模組一勾選)** | 雜訊清洗規則，跨機共享 |
+| `aiStudioSettings.modules.*` | **包含** | **包含 (模組一勾選)** | 15 組切片正則、前後綴及 autoDivider |
+| `uiPosition` (卡片螢幕座標) | ❌ **100% 嚴格剔除** | **包含 (模組二勾選)** | **【防跑位協定】** 螢幕解析度不同，雲端同步與外來匯入嚴禁覆蓋本機座標 |
+| `orbPosition` (小球螢幕座標) | ❌ **100% 嚴格剔除** | **包含 (模組二勾選)** | **【防跑位協定】** 避免不同螢幕導致小光球被推擠至視窗外 |
+| `toastPosition` (Toast 螢幕座標) | ❌ **100% 嚴格剔除** | **包含 (模組二勾選)** | **【防跑位協定】** Toast 視窗定位座標屬個人螢幕習慣，嚴禁跨機覆蓋 |
+| `isCollapsed` (收折狀態旗標) | ❌ **100% 嚴格剔除** | **包含 (模組二勾選)** | 本機暫時性 UI 展開狀態，不應跨機污染 |
+| `aiStudioSettings.sliceLayout` | ❌ **100% 嚴格剔除** | **包含 (模組三勾選)** | 螢幕長寬比硬體偏好，保留本機設定 (預設為 staircase) |
+| `aiStudioSettings.purplePosition` | ❌ **100% 嚴格剔除** | **包含 (模組三勾選)** | AI Studio 特化排版偏好 (預設為 inherit 繼承全域) |
+| `aiStudioSettings.activeModuleId` | ❌ **100% 嚴格剔除** | **包含 (模組三勾選)** | 本機當前使用中的武裝狀態，同步不強制切換 |
+
+
+---
+
+
+## 三、 核心函式級變更登錄與架構追蹤
+
+
+### 3.1 全量原始碼函式登錄清單 (Core Function Directory #1 ~ #161)
+
+
+> 🛡️ **修訂範圍聲明 (Revision Scope Manifest)**：  
+> 本次 v4.3.4 修訂觸及之實體條目序號集合為 `S = {#2, #4, #5, #6, #7, #20, #46, #47, #48, #49, #83, #89, #90, #98, #99, #100, #103, #109, #110, #111, #112, #127, #138, #139, #140, #147, #148, #149, #150, #154}`。  
+> 集合 `S` 以外之所有條目與欄位，其字面量內容、分類代碼與順序 100% 保持不變。
+
+
+| # | 函式 / 閉包名稱 | 類別 | 創立/異動版本 | 輸入參數 | 輸出結果 | 職責與特殊協定 (含上下文特徵錨點) | 若移除此函式之連帶崩潰效應 |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| 1 | `(IIFE 總入口)` | **B** | `v1.0.0` 創立 | 無 | void | 腳本全域獨立範圍封裝（錨點：腳本頂層 `(function () {`） | 變數洩漏至宿主頁面產生命名衝突 |
+| 2 | `sanitizeConfig` | **A** | **`v4.3.4` 升級** | `data` (Any) | `Object` | 補齊 11 站點清單、exportScope、profiles 啟用狀態與物理清除 anchor（錨點：`DEFAULT_CONFIG` 定義正下方） | 設定檔載入時缺少 11 站點結構或殘留幽靈欄位 |
+| 3 | `Storage.get` | **D** | `v1.0.0` 創立 | 無 | `Object` | 優先調用 `GM_getValue`，降級使用 `localStorage`，經 `sanitizeConfig` 自癒（錨點：`const Storage = {` 內部） | 無法讀取組態，本機配置全面歸零 |
+| 4 | `Storage.set` | **D** | **`v4.3.4` 升級** | `data` (Object) | void | 寫入組態，catch 區塊追加 showToast 全域報警（錨點：`Storage.get` 正下方） | 使用者配置無法持久化且儲存異常無反饋 |
+| 5 | `applyLocalOnlyOverrides` | **A** | **`v4.3.4` 創立** | `targetConfig`, `sourceConfig` | void | 抽出本機專屬狀態隔離覆寫純邏輯，保全座標、小光球、Toast 與排版（錨點：`Storage.set` 正上方） | 雲端同步或本機匯入外來檔案時卡片小光球座標跑位 |
+| 6 | `getQaQueue` | **A** | **`v4.3.4` 升級** | 無 | `Object` | 讀取專屬獨立暫存池 Key，依 `ttlHours` (0為永不) 執行逾時檢查（錨點：`// 0.1 跨站點 QA 採集暫存池` 頂部） | 無法獲取跨站採集資料或逾時資料無法正常自滅 |
+| 7 | `setQaQueue` | **A** | **`v4.3.4` 升級** | `queueData` (Object) | void | 寫入專屬獨立暫存池 Key，catch 區塊追加 showToast 全域報警（錨點：`getQaQueue` 正下方） | 採集入庫資料無法持久化且儲存異常無反饋 |
+| 8 | `clearQaQueue` | **A** | `v4.3.0` 創立 | 無 | void | 物理重置暫存池為空物件，並刷新齒輪燈號熄燈（錨點：`setQaQueue` 正下方） | 匯出即焚與手動清空功能完全失效 |
+| 9 | `updateGearIndicator` | **A** | `v4.3.0` 創立 | 無 | void | 檢查暫存數量，動態為齒輪掛載琥珀金活躍類別與提示（錨點：`clearQaQueue` 正下方） | 齒輪狀態燈失去視覺反饋，無法感知暫存數量 |
+| 10 | `applyToastPosition` | **A** | `v4.3.1` 創立 | `toast` (Element) | void | 讀取 `toastPosition` 施加絕對螢幕座標，未設定回退右下角（錨點：`// 1. Toast 幾何定位` 頂部） | Toast 無法讀取記憶座標或排版錯位 |
+| 11 | `showToast` | **A** | `v4.3.2` 升級 | `message`, `isError`, `duration` | void | 渲染 Toast 節點，使用 `setProperty(..., 'important')` 行內提權確保覆寫（錨點：`applyToastPosition` 正下方） | 提示文字彈出失效或拾色器自訂色彩被 CSS 鎖死 |
+| 12 | `toggleToastPositioningMode` | **A** | `v4.3.2` 升級 | 無 | void | 拖曳長亮模式改採行內提權背景色，退出時記錄絕對真理坐標（錨點：`showToast` 正下方） | 🍞 按鈕點擊無響應或背景色無法即時顯示 |
+| 13 | `copyToClipboard` | **A** | `v1.0.0` 創立 | `text` (String) | void | 優先使用 `GM_setClipboard`，降級使用 Clipboard API 或 `execCommand`（錨點：`toggleToastPositioningMode` 正下方） | 一鍵複製功能全面失效 |
+| 14 | `getGoogleDocRawUrl` | **A** | `v3.9.3` 創立 | `url` (String) | `String` | 將 Google Docs 網址轉換為純文字導出端點 `/export?format=txt`（錨點：`// 2. 雲端 JSON 同步` 頂部） | 無法從 Google Docs 取得原始文字串流 |
+| 15 | `getSafeDocLinkUrl` | **A** | `v4.0.1` 創立 | `rawUrl` (String) | `String` | 協議白名單過濾，僅放行 `http://` 與 `https://`，阻斷 `javascript:` 偽協議（錨點：`getGoogleDocRawUrl` 正下方） | 雲端連結存在 XSS 偽協議注入風險 |
+| 16 | `isHtmlResponse` | **A** | `v3.9.3` 創立 | `text` (String) | `Boolean` | 檢測回應是否夾雜 HTML 標籤或登入頁面（錨點：`getSafeDocLinkUrl` 正下方） | 未共用文件被誤當 JSON 解析引發崩潰 |
+| 17 | `sanitizeJsonString` | **A** | `v3.9.3` 創立 | `text` (String) | `String` | 剝離 UTF-8 BOM、轉換智慧彎引號為直引號、替換 NBSP 為半形空格（錨點：`isHtmlResponse` 正下方） | Google Docs 自動格式化的 JSON 無法被正確解析 |
+| 18 | `fetchCloudData` | **A** | `v3.9.3` 創立 | `url` (String) | `Promise<String>` | 優先調用 `fetch(credentials: 'omit')`，失敗降級使用 `GM_xmlhttpRequest(anonymous: true)`（錨點：`sanitizeJsonString` 正下方） | 多帳號 Google 環境下引發跨域阻斷或 302 重定向 |
+| 19 | `fetchCloudData:gmPromise` | **C** | `v3.9.3` 創立 | 事件回調 | void | 封裝 `GM_xmlhttpRequest` 之 Promise 回調（錨點：`fetchCloudData` catch 區塊內部） | 降級連線無法非同步傳回純文字結果 |
+| 20 | `syncFromJsonDoc` | **A** | **`v4.3.4` 升級** | `onSuccessCallback` | `Promise<void>` | 同步雲端純內容，以 applyLocalOnlyOverrides 隔離本機座標，嚴格還原自訂熱鍵（錨點：`fetchCloudData` 正下方） | 雲端同步覆蓋洗掉本機座標或強行覆寫讓渡 AHK 之空熱鍵 |
+| 21 | `cleanUniversalNoise` | **A** | `v4.1.2` 擴充 | `node` (Node) | `Node` | 物理剝離 KaTeX、行號、按鈕、Shiki 代碼複製鈕與全域 UI 雜訊節點（錨點：`UNIVERSAL_NOISE_SELECTORS` 下方） | 輸出 Markdown 夾帶大量按鈕與垃圾文字 |
+| 22 | `applyNoiseStrings` | **A** | `v3.9.6` 創立 | `text`, `rawStrings` | `String` | 遍歷免轉義純字串清單，以 `replaceAll` 精準消除雜訊（錨點：`cleanUniversalNoise` 正下方） | 免轉義字串雜訊無法被過濾 |
+| 23 | `findRegexClosingSlash` | **A** | `v4.0.2` 創立 | `rule` (String) | `Number` | 自尾端向前掃描，以 `slashCount % 2 === 0` 鎖定真正閉合斜線（錨點：`applyNoiseStrings` 正下方） | 含轉義反斜線之正則被誤切為 flags 引發語法拋錯 |
+| 24 | `applyNoiseRegexes` | **A** | `v4.1.7` 檢驗 | `text`, `rawRegexes` | `String` | 接入 `findRegexClosingSlash` 解析 flags 並執行雜訊消除，維護單行邊界（錨點：`findRegexClosingSlash` 正下方） | 自訂高階正則雜訊排除規則失效 |
+| 25 | `sanitizeMarkdownArtifacts` | **A** | `v3.9.6` 重構 | `text` (String) | `String` | 依 `pipelineOrder` 調度字串與正則清洗，收斂多餘換行（錨點：`applyNoiseRegexes` 正下方） | 雜訊清洗管線無法切換執行順序 |
+| 26 | `tryAiStudioNativeMenuCopy` | **A** | `v4.0.0` 創立 | 無 | `Promise<String\|null>` | 點擊 3-Dots 穿透 CDK Overlay 觸發 `Copy as markdown`（錨點：`// 4. AI Studio 多引擎` 頂部） | AI Studio 第一級無損複製引擎失效 |
+| 27 | `tryAiStudioNativeMenuCopy:filterButtons` | **C** | `v4.0.0` 創立 | `b` (Element) | `Boolean` | 排除頂部工具列與腳本 UI，鎖定 Model 回覆輪次按鈕（錨點：`buttons.filter` 內部） | 誤觸發 AI Studio 頂部全域動作選單 |
+| 28 | `tryAiStudioNativeMenuCopy:findMenuItem` | **C** | `v4.0.0` 創立 | `item` (Element) | `Boolean` | 於 CDK Overlay 內搜尋含 `Copy as markdown` 之按鈕（錨點：`menuItems.find` 內部） | 無法在彈出層中定位複製選項 |
+| 29 | `getAiStudioLastTurnMarkdown` | **A** | `v3.9.4` 強化 | 無 | `Promise<String\|null>` | 觸發 Pencil Edit 提取 `textarea.value` 後 Cancel 關閉（錨點：`tryAiStudioNativeMenuCopy` 正下方） | AI Studio 第二級降級提取引擎失效 |
+| 30 | `getAiStudioLastTurnMarkdown:filterModelTurns` | **C** | `v3.7.0` 創立 | `turn` (Element) | `Boolean` | 過濾排除使用者提問與腳本 UI，鎖定 Model 輪次（錨點：`allTurns.filter` 內部） | 回覆輪次判定錯誤，抓取至提問內容 |
+| 31 | `getAiStudioLastTurnMarkdown:findEditBtn` | **C** | `v3.7.0` 創立 | `b` (Element) | `Boolean` | 於輪次按鈕清單中搜尋包含 edit 關鍵字之按鈕（錨點：`buttons.find` 內部） | 無法啟動鉛筆編輯提取流程 |
+| 32 | `getAiStudioLastTurnMarkdown:findCancelBtn` | **C** | `v3.7.0` 創立 | `b` (Element) | `Boolean` | 於輪次按鈕清單中搜尋 cancel/close 按鈕以關閉編輯（錨點：`allTurnButtons.find` 內部） | 編輯框殘留未關閉或誤點擊 Run 重新生成 |
+| 33 | `parseTableToMarkdown` | **A** | `v3.8.2` 重構 | `tableEl` (Element) | `String` | 解析 HTML 表格，儲存格換行轉 `<br>`，管道符轉 `\|`（錨點：`// 5. DOM 轉 Markdown` 頂部） | 表格轉譯結構崩塌，管道符錯位 |
+| 34 | `parseTableToMarkdown:mapRowData` | **C** | `v3.8.2` 創立 | `c` (Element) | `String` | 遍歷儲存格處理換行與管道符跳脫（錨點：`cells.map` 內部） | 表格內部換行破壞 Markdown 佈局 |
+| 35 | `parseCodeBlock` | **A** | `v4.1.6` 擴充 | `codeContainer` | `String` | 支援 Z.AI、CodeMirror 6 及 MiniMax `.codeblock-shell` 語言標籤與代碼展平（錨點：`parseTableToMarkdown` 正下方） | MiniMax 與 Z.AI 代碼區塊語言標籤丟失或縮排壓扁 |
+| 36 | `convertNodeToMarkdown` | **A** | `v4.1.2` 擴充 | `node` (Node) | `String` | 隔離大代碼區塊（含 `pre.shiki`, `.codeblock-shell`）與行內代碼，遞迴轉譯（錨點：`parseCodeBlock` 正下方） | Markdown 格式化引擎全面崩潰 |
+| 37 | `getChildMarkdown` | **A** | `v1.0.0` 創立 | `node` (Node) | `String` | 遍歷目標節點之 `childNodes` 累加轉譯文字（錨點：`convertNodeToMarkdown` 正下方） | 巢狀 HTML 子節點遺失轉譯 |
+| 38 | `getChildMarkdown:forEachChild` | **C** | `v1.0.0` 創立 | `child` (Node) | void | 遍歷子節點調用 `convertNodeToMarkdown`（錨點：`node.childNodes.forEach` 內部） | 子節點無法被遍歷處理 |
+| 39 | `domToMarkdown` | **A** | `v3.9.1` 擴充 | `element`, `cleanNodeFn` | `String` | 複製 DOM，經平台清洗轉譯後調用 `sanitizeMarkdownArtifacts`（錨點：`getChildMarkdown` 正下方） | 雜訊無法過濾直接污染剪貼簿 |
+| 40 | `parseZaiProseToMarkdown` | **A** | `v4.3.2` 創立 | `node` (Node) | `String` | Z.AI Live DOM 結構化 Markdown 轉譯器，支援 Table/標題/代碼塊展平（錨點：`// 5.1 Z.AI Live DOM` 頂部） | Z.AI 右側抽屜長文複製表格塌陷、換行擠壓 |
+| 41 | `walkZaiChildren` | **A** | `v4.3.2` 創立 | `node` (Node) | `String` | 遍歷 Z.AI 節點子元素遞迴調用 `parseZaiProseToMarkdown`（錨點：`parseZaiProseToMarkdown` 正下方） | Z.AI Live DOM 巢狀節點內容遺失 |
+| 42 | `Adapters.ChatGPT.isMatch` | **D** | `v3.9.0` 創立 | 無 | `Boolean` | 匹配 `chatgpt.com` 或 `openai.com`（錨點：`Adapters.ChatGPT` 物件內部） | 無法識別 ChatGPT 平台 |
+| 43 | `Adapters.ChatGPT.getAiNodes` | **D** | `v3.9.0` 創立 | 無 | `Array<Element>` | 鎖定 `[data-message-author-role="assistant"]` 提取 `.markdown`（錨點：`Adapters.ChatGPT.isMatch` 下方） | ChatGPT 回覆內容抓取失敗 |
+| 44 | `Adapters.ChatGPT.getUserNodes` | **D** | `v3.9.0` 創立 | 無 | `Array<Element>` | 鎖定 `[data-message-author-role="user"]` 提取使用者提問（錨點：`Adapters.ChatGPT.getAiNodes` 下方） | ChatGPT 全對話歷史遺漏提問 |
+| 45 | `Adapters.ChatGPT.cleanNode` | **D** | `v3.9.0` 創立 | `node` (Element) | `Element` | 替換 `.katex` 為 `$tex$`，轉換附件膠囊為文字標記（錨點：`Adapters.ChatGPT.getUserNodes` 下方） | 公式文字重複，附件膠囊轉譯異常 |
+| 46 | `Adapters.Claude.isMatch` | **D** | **`v4.3.4` 創立** | 無 | `Boolean` | 匹配 `claude.ai`（錨點：`Adapters.ChatGPT` 正下方） | 無法識別 Claude 平台 |
+| 47 | `Adapters.Claude.getAiNodes` | **D** | **`v4.3.4` 創立** | 無 | `Array<Element>` | 鎖定 `.standard-markdown, [class*="font-claude-message"]` 提取 AI 回覆（錨點：`Adapters.Claude.isMatch` 下方） | Claude 回覆內容抓取失敗 |
+| 48 | `Adapters.Claude.getUserNodes` | **D** | **`v4.3.4` 創立** | 無 | `Array<Element>` | 鎖定 `[data-testid="user-message"], [class*="user-message"]` 提取提問（錨點：`Adapters.Claude.getAiNodes` 下方） | Claude 全對話串歷史遺漏提問 |
+| 49 | `Adapters.Claude.cleanNode` | **D** | **`v4.3.4` 創立** | `node` (Element) | `Element` | 複製 DOM 並調用 `cleanUniversalNoise` 剝離按鈕與雜訊（錨點：`Adapters.Claude.getUserNodes` 下方） | Claude 回覆轉譯夾帶按鈕與雜訊 |
+| 50 | `Adapters.DeepSeek.isMatch` | **D** | `v2.0.0` 創立 | 無 | `Boolean` | 匹配 `deepseek.com`（錨點：`Adapters.Claude` 正下方） | 無法識別 DeepSeek 平台 |
+| 51 | `Adapters.DeepSeek.getAiNodes` | **D** | `v3.8.2` 重構 | 無 | `Array<Element>` | 抓取 `.ds-markdown` 並強制排除 `.ds-greeting`（錨點：`Adapters.DeepSeek.isMatch` 下方） | 首輪對話誤抓迎賓卡片 |
+| 52 | `Adapters.DeepSeek.getUserNodes` | **D** | `v2.0.0` 創立 | 無 | `Array<Element>` | 抓取 `[class*="user-message"]` 等使用者對話容器（錨點：`Adapters.DeepSeek.getAiNodes` 下方） | DeepSeek 無法導出全對話串 |
+| 53 | `Adapters.DeepSeek.cleanNode` | **D** | `v3.8.2` 重構 | `node` (Element) | `Element` | 調用 `cleanUniversalNoise` 剝離圖示與按鈕雜訊（錨點：`Adapters.DeepSeek.getUserNodes` 下方） | DeepSeek 回覆複製殘留按鈕文字 |
+| 54 | `Adapters.Qwen.isMatch` | **D** | `v1.3.0` 創立 | 無 | `Boolean` | 匹配 `qwen.ai` 或 `aliyun.com`（錨點：`Adapters.Qwen` 物件內部） | 無法識別通義千問平台 |
+| 55 | `Adapters.Qwen.getAiNodes` | **D** | `v3.8.2` 重構 | 無 | `Array<Element>` | 抓取 `.response-message-content` 並排除 `.welcome-card`（錨點：`Adapters.Qwen.isMatch` 下方） | 千問首輪對話誤抓歡迎卡片 |
+| 56 | `Adapters.Qwen.getUserNodes` | **D** | `v1.3.0` 創立 | 無 | `Array<Element>` | 抓取 `.user-message-content` 使用者節點（錨點：`Adapters.Qwen.getAiNodes` 下方） | 千問無法導出全對話歷史 |
+| 57 | `Adapters.Qwen.cleanNode` | **D** | `v3.8.2` 重構 | `node` (Element) | `Element` | 剝離 `.think`, `.reasoning` 及全域雜訊（錨點：`Adapters.Qwen.getUserNodes` 下方） | 複製內容夾雜思考過程與工具列 |
+| 58 | `Adapters.Kimi.isMatch` | **D** | `v1.0.0` 創立 | 無 | `Boolean` | 匹配 `kimi.ai`、`moonshot.cn`、`kimi.com`（錨點：`Adapters.Kimi` 物件內部） | 無法識別 Kimi 平台 |
+| 59 | `Adapters.Kimi.getAiNodes` | **D** | `v3.8.2` 重構 | 無 | `Array<Element>` | 抓取 `.segment-assistant` 並排除聯想詞與純 ToolCall（錨點：`Adapters.Kimi.isMatch` 下方） | Kimi 誤抓聯想提示詞 |
+| 60 | `Adapters.Kimi.getUserNodes` | **D** | `v1.0.0` 創立 | 無 | `Array<Element>` | 抓取 `.segment-user -> .segment-content`（錨點：`Adapters.Kimi.getAiNodes` 下方） | Kimi 無法導出全對話歷史 |
+| 61 | `Adapters.Kimi.cleanNode` | **D** | `v3.9.1` 擴充 | `node` (Element) | `Element` | 移除 ToolCall 卡片、`.thinking-container` 與全域雜訊（錨點：`Adapters.Kimi.getUserNodes` 下方） | 複製包含 Python 執行框與雜訊 |
+| 62 | `Adapters.Zhipu.isMatch` | **D** | `v4.0.0` 創立 | 無 | `Boolean` | 匹配 `chatglm.cn` 或 `bigmodel.cn`（錨點：`Adapters.Zhipu` 物件內部） | 無法識別智譜 AI 平台 |
+| 63 | `Adapters.Zhipu.getAiNodes` | **D** | `v4.0.0` 創立 | 無 | `Array<Element>` | 篩選 `.chat-item` 排除使用者節點，提取內容容器（錨點：`Adapters.Zhipu.isMatch` 下方） | 智譜回覆內容定位失敗 |
+| 64 | `Adapters.Zhipu.getUserNodes` | **D** | `v4.0.0` 創立 | 無 | `Array<Element>` | 提取智譜使用者對話節點（錨點：`Adapters.Zhipu.getAiNodes` 下方） | 智譜全對話串遺漏提問 |
+| 65 | `Adapters.Zhipu.getMarkdownAsync` | **D** | `v4.0.0` 創立 | `node` (Element) | `Promise<String>` | 派發冒泡 MouseEvent 代理點擊官方複製按鈕，失敗降級 DOM（錨點：`Adapters.Zhipu.getUserNodes` 下方） | 智譜原生代理複製失效 |
+| 66 | `Adapters.Zhipu.cleanNode` | **D** | `v4.0.0` 創立 | `node` (Element) | `Element` | 移除 `.thinking-box`, `.tool-call-wrap`, `.answer-info-right`（錨點：`Adapters.Zhipu.getMarkdownAsync` 下方） | 智譜降級轉譯夾帶思考框與工具日誌 |
+| 67 | `Adapters.AiStudio.isMatch` | **D** | `v2.1.0` 創立 | 無 | `Boolean` | 匹配 `aistudio.google.com`（錨點：`Adapters.AiStudio` 物件內部） | 無法識別 Google AI Studio 平台 |
+| 68 | `Adapters.AiStudio.getAiNodes` | **D** | `v3.1.0` 重構 | 無 | `Array<Element>` | 抓取 `ms-chat-turn` Model 回覆輪次（錨點：`Adapters.AiStudio.isMatch` 下方） | AI Studio 回覆定位失敗 |
+| 69 | `Adapters.AiStudio.getUserNodes` | **D** | `v3.7.0` 重構 | 無 | `Array<Element>` | 恆定回傳空陣列 `[]`（強制禁用全對話複製，By-Design）（錨點：`Adapters.AiStudio.getAiNodes` 下方） | 無連帶崩潰 |
+| 70 | `Adapters.AiStudio.getMarkdownAsync` | **D** | `v4.0.0` 重構 | `node` (Node) | `Promise<String>` | 調度 原生選單 ➔ 鉛筆模擬 ➔ DOM 清洗三級降級鏈（錨點：`Adapters.AiStudio.getUserNodes` 下方） | AI Studio 多引擎容錯鏈無法執行 |
+| 71 | `Adapters.AiStudio.cleanNode` | **D** | `v3.8.2` 重構 | `node` (Node) | `Node` | 移除操作按鈕列、Run 按鈕與全域雜訊（錨點：`Adapters.AiStudio.getMarkdownAsync` 下方） | AI Studio 轉譯夾帶按鈕文字 |
+| 72 | `Adapters.Mistral.isMatch` | **D** | `v4.1.2` 創立 | 無 | `Boolean` | 匹配 `console.mistral.ai`（錨點：`Adapters.AiStudio` 正下方） | 無法識別 Mistral AI Playground 平台 |
+| 73 | `Adapters.Mistral.getAiNodes` | **D** | `v4.1.2` 創立 | 無 | `Array<Element>` | 篩選 `[role="article"] .prose`、`div.prose.max-w-none` 等實質內容節點（錨點：`Adapters.Mistral.isMatch` 下方） | Mistral 回覆定位失敗 |
+| 74 | `Adapters.Mistral.getUserNodes` | **D** | `v4.1.2` 創立 | 無 | `Array<Element>` | 恆定回傳空陣列 `[]`（Playground 單輪發包本質，By-Design）（錨點：`Adapters.Mistral.getAiNodes` 下方） | 無連帶崩潰 |
+| 75 | `Adapters.Mistral.cleanNode` | **D** | `v4.1.2` 創立 | `node` (Element) | `Element` | 剝離代碼塊複製按鈕與 Assistant 前導純文字標籤（錨點：`Adapters.Mistral.getUserNodes` 下方） | 轉譯內容殘留官方按鈕雜訊 |
+| 76 | `Adapters.Perplexity.isMatch` | **D** | `v4.1.4` 創立 | 無 | `Boolean` | 匹配 `perplexity.ai`（錨點：`Adapters.Mistral` 正下方） | 無法識別 Perplexity AI 平台 |
+| 77 | `Adapters.Perplexity.getAiNodes` | **D** | `v4.1.4` 創立 | 無 | `Array<Element>` | 篩選 `div.prose[data-renderer="lm"]`, `.prose.dark:prose-invert` 等節點（錨點：`Adapters.Perplexity.isMatch` 下方） | Perplexity 回覆內容定位失敗 |
+| 78 | `Adapters.Perplexity.getUserNodes` | **D** | `v4.1.4` 創立 | 無 | `Array<Element>` | 提取 `[class*="user-bubble"]`, `div.group\/user-bubble`（錨點：`Adapters.Perplexity.getAiNodes` 下方） | Perplexity 無法導出全對話串 |
+| 79 | `Adapters.Perplexity.cleanNode` | **D** | `v4.1.4` 創立 | `node` (Element) | `Element` | 剝離 `[data-testid*="citation"]`, `.citation` 與通用雜訊（錨點：`Adapters.Perplexity.getUserNodes` 下方） | Perplexity 複製夾帶大量來源引用角標 |
+| 80 | `Adapters.Zai.isMatch` | **D** | `v4.1.4` 創立 | 無 | `Boolean` | 匹配 `chat.z.ai`（錨點：`Adapters.Perplexity` 正下方） | 無法識別 Z.AI 平台 |
+| 81 | `Adapters.Zai.getAiNodes` | **D** | `v4.1.4` 創立 | 無 | `Array<Element>` | 篩選 `.chat-assistant .markdown-prose`, `#response-content-container`（錨點：`Adapters.Zai.isMatch` 下方） | Z.AI 回覆定位失敗 |
+| 82 | `Adapters.Zai.getUserNodes` | **D** | `v4.1.4` 創立 | 無 | `Array<Element>` | 提取 `div.user-message .chat-user.markdown-prose`（錨點：`Adapters.Zai.getAiNodes` 下方） | Z.AI 無法導出全對話串 |
+| 83 | `Adapters.Zai.getMarkdownAsync` | **D** | **`v4.3.4` 升級** | `node` (Element) | `Promise<String>` | 原生代理優先複製，按鈕尋標精確侷限於該輪回覆內部（錨點：`Adapters.Zai.getUserNodes` 下方） | Z.AI 複製時誤觸發其他輪次或頂部無效按鈕 |
+| 84 | `Adapters.Zai.cleanNode` | **D** | `v4.1.4` 創立 | `node` (Element) | `Element` | 剝離 `.copy-code-button`, `button.invisible` 與通用雜訊（錨點：`Adapters.Zai.getMarkdownAsync` 下方） | Z.AI 複製內容殘留複製按鈕雜訊 |
+| 85 | `Adapters.MiniMax.isMatch` | **D** | `v4.1.6` 創立 | 無 | `Boolean` | 匹配 `agent.minimax.io` 或 `minimax.io`（錨點：`Adapters.Zai` 正下方） | 無法識別 MiniMax Agent 平台 |
+| 86 | `Adapters.MiniMax.getAiNodes` | **D** | `v4.1.6` 創立 | 無 | `Array<Element>` | 篩選 `[data-role="assistant"] .mavis-chat-markdown-flow` 等 AI 回覆節點（錨點：`Adapters.MiniMax.isMatch` 下方） | MiniMax 回覆內容提取失敗 |
+| 87 | `Adapters.MiniMax.getUserNodes` | **D** | `v4.1.6` 創立 | 無 | `Array<Element>` | 篩選 `.message-container-user-text` 提問節點（錨點：`Adapters.MiniMax.getAiNodes` 下方） | MiniMax 全歷史對話提取遺漏提問 |
+| 88 | `Adapters.MiniMax.cleanNode` | **D** | `v4.1.6` 創立 | `node` (Element) | `Element` | 剝離 `button, svg, .ant-dropdown, [class*="action-bar"]`（錨點：`Adapters.MiniMax.getUserNodes` 下方） | MiniMax 複製殘留工具列與操作按鈕雜訊 |
+| 89 | `getCurrentAdapter` | **A** | **`v4.3.4` 升級** | 無 | `Adapter \| null` | 輪詢 11 大平台 Adapters 回傳當前適配器（錨點：`// 7. 切片雙引擎` 上方） | 全域功能無法辨識 Claude 運行站點 |
+| 90 | `isClaudeArtifactActive` | **A** | **`v4.3.4` 創立** | 無 | `Boolean` | 探針檢驗右側 Artifacts 容器寬高與位置判定是否啟動（錨點：`getCurrentAdapter` 正下方） | Claude 無法動態感知右側 Artifacts 抽屜狀態 |
+| 91 | `isZaiPreviewActive` | **A** | `v4.3.2` 升級 | 無 | `Boolean` | 探針檢驗右側 markdown-prose 抽屜、DOCX 或 CodeMirror 6 容器是否存在且長度 > 50（錨點：`isClaudeArtifactActive` 正下方） | Z.AI 無法動態感知右側成果物抽屜狀態 |
+| 92 | `isMiniMaxPreviewActive` | **A** | `v4.1.7` 創立 | 無 | `Boolean` | 探針檢驗 `previewer-content` 或 `markdown-view` 尺寸是否大於 200px（錨點：`isZaiPreviewActive` 正下方） | MiniMax 無法動態感知成果物抽屜狀態 |
+| 93 | `parseDocxToMarkdown` | **A** | `v4.1.6` 創立 | `viewerEl` (Element) | `String` | 遞迴轉譯 DOCX 結構化表格、標題、清單與段落（錨點：`isMiniMaxPreviewActive` 正下方） | DOCX 轉譯格式崩塌或表格錯位 |
+| 94 | `parseDocxToMarkdown:walkDocxNode` | **C** | `v4.1.6` 創立 | `node` (Node) | `String` | 單一 DOCX DOM 節點型態轉譯分流處理（錨點：`parseDocxToMarkdown` 內部） | DOCX 標籤轉譯無法遞迴執行 |
+| 95 | `parseDocxToMarkdown:walkDocxChildren` | **C** | `v4.1.6` 創立 | `node` (Node) | `String` | 遍歷子節點調用 walkDocxNode 累加文字（錨點：`parseDocxToMarkdown` 內部） | DOCX 巢狀節點內容無法遍歷累加 |
+| 96 | `getZaiPreviewText` | **A** | `v4.3.2` 升級 | 無 | `String` | 優先調用 parseZaiProseToMarkdown 結構化轉譯右側抽屜文字，次選 DOCX/CM（錨點：`parseDocxToMarkdown` 正下方） | Z.AI 右側預覽文字提取表格錯位或內容空白 |
+| 97 | `closeZaiPreviewDrawer` | **A** | `v4.3.2` 創立 | 無 | `Boolean` | 檢索右上方關閉按鈕或特定 SVG Path 特徵主動點擊關閉舊抽屜（錨點：`getZaiPreviewText` 正下方） | Z.AI 多檔案切換無法清場舊分頁引發狀態競爭 |
+| 98 | `getClaudeDeliverableText` | **A** | **`v4.3.4` 創立** | 無 | `Promise<String\|null>` | 檢索頂部複製按鈕讀取剪貼簿，受 try-catch 保護平滑降級 DOM（錨點：`closeZaiPreviewDrawer` 正下方） | Claude 成果物無法無損提取或剪貼簿阻擋時拋錯崩潰 |
+| 99 | `handleClaudePreviewAction` | **A** | **`v4.3.4` 創立** | 無 | `Promise<void>` | 調用 getClaudeDeliverableText，無成果物時友善提示降級複製對話（錨點：`getClaudeDeliverableText` 正下方） | Claude 綠鍵無抽屜時無法降級或紅字報錯 |
+| 100 | `getZaiDeliverableText` | **A** | **`v4.3.4` 升級** | 無 | `Promise<String\|null>` | 輪次容器鎖定，實裝連續 2 輪 (400ms) 動態水合煞車，縮減等待至 150ms（錨點：`handleClaudePreviewAction` 正下方） | Z.AI 長文等待呆滯或加載未沈澱引發內容殘缺 |
+| 101 | `handleZaiPreviewAction` | **A** | `v4.3.3` 升級 | 無 | `Promise<void>` | 調用 getZaiDeliverableText 提取，右側無檔案時友善提示並降級複製乾淨對話（錨點：`getZaiDeliverableText` 正下方） | 綠鍵在無抽屜時彈出錯誤紅字阻斷操作流暢性 |
+| 102 | `injectMiniMaxFiberBridge` | **A** | `v4.1.8` 創立 | 無 | void | 注入 `minimax-fiber-bridge` 腳本，穿透 React Fiber 記憶體提取 Raw MD（錨點：`handleZaiPreviewAction` 正下方） | MiniMax 無法直取 100% 原始 Raw MD |
+| 103 | `getMiniMaxDeliverableText` | **A** | **`v4.3.4` 升級** | 無 | `Promise<{contentText, fromFiber}\|null>` | 實裝動態水合煞車 (Hotfix-03: txt.length > 0) 與逾時兜底，縮減等待至 150ms（錨點：`injectMiniMaxFiberBridge` 正下方） | MiniMax 1800ms 呆滯死等或短文字成果物逾時誤判 |
+| 104 | `handleMiniMaxDeliverableCopyAction` | **A** | `v4.3.2` 升級 | 無 | `Promise<void>` | 調用 getMiniMaxDeliverableText，純淨複製直出，拔除 Profile 前後綴（錨點：`getMiniMaxDeliverableText` 正下方） | MiniMax 綠鍵與 Z.AI 綠鍵語義不對稱，產生標籤污染 |
+| 105 | `getAssistantMarkdownText` | **A** | `v4.0.0` 創立 | `adapter` (Object) | `Promise<String>` | 提取指定 Adapter 最後回覆之純淨 Markdown 文本（錨點：`handleMiniMaxDeliverableCopyAction` 正下方） | 回覆提取邏輯無法被切片與常規複製共用 |
+| 106 | `executeSingleMatchSlice` | **A** | `v4.3.3` 升級 | `fullText`, `singlePattern`, `isCodeBlockTarget` | `String \| null` | 解耦 `i` 旗標與 `g` 旗標，代碼塊目標強制補齊 `g` 旗標（錨點：`getAssistantMarkdownText` 正下方） | 帶 `i` 旗標之代碼塊規則無法觸發最長代碼塊篩選分支 |
+| 107 | `executeMatchSlice` | **A** | `v4.1.3` 升級 | `fullText`, `rawPattern`, `isCodeBlockTarget` | `String \| null` | 支援 `\n` 多行換行階梯探測，遇 `#`、`//` 註解跳過（錨點：`executeSingleMatchSlice` 正下方） | 多行瀑布流無法逐行探測，備援正則失效 |
+| 108 | `sanitizeAffixText` | **A** | `v4.2.0` 升級 | `text` (String) | `String` | 順序校準：收斂尾部不可見字元 ➔ 末端殘留破折號校正 ➔ 補齊雙換行（錨點：`executeMatchSlice` 正下方） | 破折號校正被尾部不可見字元阻擋或換行吞噬 |
+| 109 | `resolveAffixContent` | **A** | **`v4.3.4` 升級** | `rawAffixStr`, `affixType` | `Promise<{content, isDegraded}>` | 雲端 URL 解析失敗時標記 isDegraded 狀態，回傳安全空值（錨點：`sanitizeAffixText` 正下方） | 雲端前綴載入失敗無法感知或拋錯中斷複製 |
+| 110 | `composeSlicePayload` | **A** | **`v4.3.4` 創立** | `prefix`, `body`, `rawSuffix` | `String` | 切片酬載組合演算法，統一後綴補白邏輯，保證末端雙換行防沾黏（錨點：`resolveAffixContent` 正下方） | 切片複製全量或替換時輸出文字與下文緊貼沾黏 |
+| 111 | `handleSliceCopyAction` | **A** | **`v4.3.4` 升級** | `btnDef` (Object) | `Promise<void>` | replace 模式追加 try-catch 語法錯誤阻斷，全面調用 composeSlicePayload（錨點：`composeSlicePayload` 正下方） | 語法無效正則靜默忽略或輸出複製未清洗全文 |
+| 112 | `extractSiteTextByAction` | **A** | **`v4.3.4` 升級** | `adapter`, `action` | `Promise<String\|null>` | 4 態正交提取管線，支援 Claude 與 Z.AI 無成果物時平滑階梯降級（錨點：`handleSliceCopyAction` 正下方） | Claude/Z.AI 純文字時 F4 採集拋錯中斷盲打流程 |
+| 113 | `handleCopyAction` | **A** | `v4.1.4` 擴充 | `mode` | `Promise<void>` | 藍鍵拼接 Profile 前後綴（支援 11 站）；紫鍵輸出純淨 Markdown（錨點：`extractSiteTextByAction` 正下方） | 複製功能失效或前後綴拼接異常 |
+| 114 | `handleCopyAction:sortMessages` | **C** | `v1.0.0` 創立 | `a`, `b` | `Number` | 依 DOM 物理順序排序對話節點（錨點：`allMessages.sort` 內部） | 全對話串順序錯亂 |
+| 115 | `handleCaptureAction` | **A** | `v4.3.2` 升級 | 無 | `Promise<void>` | 採集入庫並評估滿額自動總結；總結尾端注入雙換行保底（錨點：`// 7.2 跨站點採集入庫` 頂部） | 滿額總結複製後與剪貼簿後文沾黏 |
+| 116 | `handleSummaryAction` | **A** | `v4.3.2` 升級 | 無 | void | 手動 F7 總結匯出：總結尾端注入雙換行保底並清空暫存池（錨點：`handleCaptureAction` 正下方） | 手動總結複製後與剪貼簿後文沾黏 |
+| 117 | `switchModule` | **A** | `v4.1.0` 創立 | `direction` ('next'\|'prev') | void | 切換 `activeModuleId` 並重繪按鈕列，提示 1.8 秒（錨點：`// 8. 模組雙向輪播` 頂部） | 模組輪播膠囊點擊無響應 |
+| 118 | `injectStyles` | **A** | `v4.3.2` 升級 | 無 | void | 注入 UI 樣式，移除 Toast 背景色之 `!important` 消除樣式鎖死（錨點：`// 9. UI 樣式注入` 頂部） | Toast 樣式表鎖死行內樣式，拾色器自訂色彩失效 |
+| 119 | `clampContainerToViewport` | **A** | `v3.8.1` 創立 | `container` (Element) | void | 強制修正上下左右 10px 安全邊界（錨點：`// 10. 座標管理` 頂部） | 懸浮按鈕、小光球或 Toast 移出可視區 |
+| 120 | `applySavedPosition` | **A** | `v4.1.2` 強化 | `container`, `adapter`, `isOrb` | void | 賦值 `uiPosition` 或 `orbPosition`，支援 Mistral 避讓預設座標（錨點：`clampContainerToViewport` 正下方） | 懸浮列與原生按鈕物理重疊阻擋點擊 |
+| 121 | `resetUiPosition` | **A** | `v4.3.1` 升級 | 無 | void | 清空 `uiPosition`、`orbPosition` 與 `toastPosition`，完全歸位（錨點：`applySavedPosition` 正下方） | 油猴選單座標歸位無法復原 Toast 提示位置 |
+| 122 | `setupDraggableUI` | **A** | `v4.3.1` 升級 | `container`, `dragHandle`, `isOrb`, `onClickCallback`, `isToast` | void | 支援握把拖曳、5px 穿透補償與 Toast 解除 transform 自由平移（錨點：`resetUiPosition` 正下方） | 拖曳放開誤觸點擊或 Toast 拖曳座標被 transform 鎖死 |
+| 123 | `setupDraggableUI:onMouseMove` | **C** | `v4.2.0` 升級 | `moveEvent` (MouseEvent) | void | 超過 5px 掛載 .ai-copy-is-dragging 類別並實時防超界（錨點：`setupDraggableUI` 內部） | 拖曳卡片時無法跟隨滑鼠移動或無邊框回饋 |
+| 124 | `setupDraggableUI:onMouseUp` | **C** | `v4.3.1` 升級 | 無 | void | 移除 dragging 類別、儲存卡片/小球/Toast 座標、重置拖曳旗標（錨點：`setupDraggableUI` 內部） | 微光虛線輪廓殘留或 Toast 座標無法持久化 |
+| 125 | `setupDraggableUI:preventClickOnce` | **C** | `v3.8.1` 創立 | `clickEvent` (MouseEvent) | void | 拖曳結束瞬間 capture 攔截一次點擊事件（錨點：`onMouseUp` 內部） | 拖曳放開誤觸複製或設定按鈕 |
+| 126 | `setupDraggableUI:onMouseDown` | **C** | `v4.3.1` 升級 | `e` (MouseEvent) | void | 監聽左鍵按下事件，Toast 拖曳前置清除 transform 杜絕卡死（錨點：`dragHandle.addEventListener('mousedown'` 內部） | Toast 拖曳初動時座標跳動或游標吸附鎖死 |
+| 127 | `openManager` | **A** | **`v4.3.4` 升級** | 無 | void | 生成雙欄 Modal 容器，標題升級對齊 v4.3.4，100% Safe DOM（錨點：`// 11. 自包含居中 7 分頁 Modal` 頂部） | 點擊齒輪無法開啟設定面板或標題未同步 |
+| 128 | `openManager:renderActivePane` | **C** | `v3.9.4` 創立 | 無 | void | 依 `activePaneId` 刷新高亮並清空重繪對應分頁（錨點：`openManager` 內部） | 切換分頁時內容未連動更新 |
+| 129 | `openManager:sideTabBtnsForEach` | **C** | `v3.9.4` 創立 | `t` (Object) | void | 遍歷生成側邊欄 7 大按鈕並綁定切換事件（錨點：`menuTabs.forEach` 內部） | 側邊欄導覽按鈕無法生成 |
+| 130 | `createProfileSelectorRow` | **A** | `v3.9.4` 創立 | `onProfileChangeCallback` | `HTMLElement` | 生成模式切換下拉選單與「✏️ 重命名」按鈕（錨點：`openManager` 正下方） | 前後綴面板無法切換模式 |
+| 131 | `createProfileSelectorRow:populateOptions` | **C** | `v3.9.4` 創立 | 無 | void | 清空下拉選單並安全填入當前 Profiles 選項（錨點：`createProfileSelectorRow` 內部） | 模式重命名後下拉選單未更新 |
+| 132 | `renderPanePrefix` | **A** | **`v4.3.4` 升級** | `container` (HTMLElement) | void | 支援 11 站點雙行自適應頁籤與多行前綴輸入框（錨點：`createProfileSelectorRow` 正下方） | 前綴設定面板漏掉 Claude 或頁籤溢出擠壓 |
+| 133 | `renderPanePrefix:refreshActiveSiteData` | **C** | `v3.9.4` 創立 | 無 | void | 填入選取站點之前綴並高亮對應頁籤（錨點：`renderPanePrefix` 內部） | 切換站點頁籤時文字框未更新 |
+| 134 | `renderPaneSuffix` | **A** | **`v4.3.4` 升級** | `container` (HTMLElement) | void | 支援 11 站點雙行自適應頁籤與多行後綴輸入框 (預設 `\n\n`)（錨點：`renderPanePrefix` 正下方） | 後綴設定面板漏掉 Claude 或頁籤溢出擠壓 |
+| 135 | `renderPaneSuffix:refreshActiveSiteData` | **C** | `v3.9.4` 創立 | 無 | void | 填入選取站點之後綴並高亮對應頁籤（錨點：`renderPaneSuffix` 內部） | 切換站點頁籤時文字框未更新 |
+| 136 | `renderPaneReorder` | **A** | **`v4.3.4` 升級** | `container` (HTMLElement) | void | 整合 11 站點排序權重與 4 態採集動作下拉選單（錨點：`renderPaneSuffix` 正下方） | 站點排序面板無法設定 Claude 採集模式 |
+| 137 | `renderPaneRules` | **A** | `v3.9.6` 重構 | `container` (HTMLElement) | void | 渲染清洗順序調度下拉、免轉義文字框與正則文字框（錨點：`renderPaneReorder` 正下方） | 排除規則面板無法顯示 |
+| 138 | `renderPaneUI` | **A** | **`v4.3.4` 升級** | `container` (HTMLElement) | void | 整合 Toast 提示外觀、ttlHours (0~72h) 輸入框與雙熱鍵同鍵防呆驗證（錨點：`renderPaneRules` 正下方） | 無法設定過期時長或雙熱鍵衝突無法被防呆阻斷 |
+| 139 | `renderPaneUI:validateAndSaveHotkeys` | **C** | **`v4.3.4` 創立** | 無 | void | 檢驗採集與總結熱鍵是否相同，衝突時外框標紅、Toast 警告並拒絕儲存（錨點：`renderPaneUI` 內部） | 熱鍵設定相同導致 F4/F7 衝突競爭 |
+| 140 | `renderPaneAiStudio` | **A** | **`v4.3.4` 升級** | `container` (HTMLElement) | void | AI Studio 紫鍵位置選單追加「繼承全域 (inherit)」選項（錨點：`renderPaneUI` 正下方） | AI Studio 紫鍵無法繼承全域排版偏好 |
+| 141 | `renderPaneAiStudio:modNavForEach` | **C** | `v4.1.0` 創立 | `mKey` (String) | void | 遍歷生成 3 模組切換導覽卡片與取色器（錨點：`renderPaneAiStudio` 內部） | 模組切換卡片無法生成 |
+| 142 | `renderPaneAiStudio:buttonsForEach` | **C** | `v4.1.3` 擴充 | `btnDef` (Object) | void | 渲染按鈕卡片，掛載 `[🎯 正則規則]` 與 `[🏷️ 專屬前後綴]` 雙子面板（錨點：`renderPaneAiStudio` 內部） | 按鈕設定清單無法渲染雙子頁籤 |
+| 143 | `renderPaneAiStudio:updateAffixTabHighlight` | **C** | `v4.1.3` 創立 | 無 | void | 檢測前後綴文字動態切換 `(已設定)` 與藍框高亮標記（錨點：`buttonsForEach` 內部） | 前後綴裝備狀態無法即時給予視覺提示 |
+| 144 | `renderPaneAiStudio:refreshToggleGhostStyle` | **C** | `v4.1.2` 創立 | 無 | void | 動態切換 `[🛟 +備用]` 幽靈按鈕之文字與高亮樣式（錨點：`buttonsForEach` 內部） | 備援正則設定後按鈕無法高亮提示 |
+| 145 | `renderPaneAiStudio:updatePrefixDocLink` | **C** | `v4.3.3` 創立 | 無 | void | 檢驗前綴字串是否為 URL，動態切換前綴直達按鈕之 href 與顯示狀態（錨點：`prefixTextarea` 正下方） | 前綴雲端直達按鈕無法隨輸入動態顯隱 |
+| 146 | `renderPaneAiStudio:updateSuffixDocLink` | **C** | `v4.3.3` 創立 | 無 | void | 檢驗後綴字串是否為 URL，動態切換後綴直達按鈕之 href 與顯示狀態（錨點：`suffixTextarea` 正下方） | 後綴雲端直達按鈕無法隨輸入動態顯隱 |
+| 147 | `renderPaneCloud` | **A** | **`v4.3.4` 升級** | `container` (HTMLElement) | void | 匯出精靈接線 exportScope，匯入檔案套用 applyLocalOnlyOverrides（錨點：`renderPaneAiStudio` 正下方） | 匯出精靈勾選狀態無法持久化或外來 JSON 覆蓋本機座標 |
+| 148 | `renderPaneCloud:saveExportScope` | **C** | **`v4.3.4` 創立** | 無 | void | 監聽 3 模組勾選狀態，即時寫入 `globalConfig.exportScope` 並持久化（錨點：`renderPaneCloud` 內部） | 匯出精靈勾選框狀態刷新後遺失 |
+| 149 | `renderPaneCloud:generateExportPayload` | **C** | **`v4.3.4` 升級** | 無 | `Object` | 依勾選狀態過濾導出欄位，模組一未勾選時嚴格剔除 profiles 等內容設定（錨點：`renderPaneCloud` 內部） | 取消勾選模組一仍導出 profiles 造成假性匯出隔離 |
+| 150 | `resolvePurplePosition` | **A** | **`v4.3.4` 升級** | `adapter` (Object) | `String` | AI Studio 紫鍵為 inherit 時平滑回退全域設定（錨點：`renderPaneCloud` 正下方） | 站點紫鍵繼承邏輯失效 |
+| 151 | `createOrbElement` | **A** | `v4.1.0` 創立 | `adapter` (Object) | `HTMLElement` | 渲染當前模組 2 字標籤與背景色，綁定展開與拖曳（錨點：`resolvePurplePosition` 正下方） | 小光球無法渲染，收折功能卡死 |
+| 152 | `attachWheelSwitch` | **A** | `v4.1.0` 創立 | `targetEl` (HTMLElement) | void | 接入左鍵互斥門禁與 150ms 節流冷卻門禁（錨點：`createOrbElement` 正下方） | 滾輪切換失效或產生暴衝跳級 |
+| 153 | `attachWheelSwitch:onWheel` | **C** | `v4.1.0` 創立 | `e` (WheelEvent) | void | 攔截 wheel 事件，校驗冷卻門禁並依 `deltaY` 調用 `switchModule`（錨點：`attachWheelSwitch` 內部） | 滾輪事件無法被安全捕獲 |
+| 154 | `createUIElement` | **A** | **`v4.3.4` 升級** | `adapter` (Object) | `HTMLElement` | 雙軌按鈕分裂架構納入 Claude，呈現藍鍵與翡翠綠綠鍵（錨點：`attachWheelSwitch` 正下方） | Claude 頁面未呈現雙軌複製按鈕 |
+| 155 | `mountUI` | **A** | `v4.3.0` 升級 | `forceRemount` (Boolean) | void | 掛載小光球或主卡片，並呼叫 updateGearIndicator 同步燈號（錨點：`createUIElement` 正下方） | 雙態切換後齒輪燈號無法即時同步 |
+| 156 | `isSingleHotkeyMatch` | **A** | `v4.3.1` 創立 | `event`, `rawStr` | `Boolean` | 單一熱鍵字串比對子引擎：支援單鍵、文字與 AHK 前綴 `^`/`!`/`+`（錨點：`mountUI` 正下方） | 複合熱鍵解析邏輯拋錯失效 |
+| 157 | `isHotkeyMatch` | **A** | `v4.3.1` 升級 | `event`, `hotkeyStr` | `Boolean` | 多熱鍵別名陣列比對引擎：支援逗號分隔，留空自動放棄攔截（錨點：`isSingleHotkeyMatch` 正下方） | 逗號分隔多熱鍵無法匹配或留空時無法讓渡 AHK |
+| 158 | `setupHotkeys` | **A** | `v4.3.2` 升級 | 無 | void | 綁定熱鍵監聽：Caret 搶先阻斷、採集/總結穿透盲打，焦點元素可選鏈保護（錨點：`isHotkeyMatch` 正下方） | 焦點為 null 時按鍵監聽拋出 TypeError 崩潰 |
+| 159 | `setupMenuCommands` | **A** | `v4.3.0` 升級 | 無 | void | 註冊「重置位置」、「開啟管理器」與「🗑️ 物理清空 QA 採集暫存池」（錨點：`setupHotkeys` 正下方） | 油猴選單無手動清空暫存池捷徑 |
+| 160 | `init` | **A** | `v4.3.1` 升級 | 無 | void | 樣式注入、UI 掛載、熱鍵、選單與 resize 增補 Toast 邊界校驗（錨點：`setupMenuCommands` 正下方） | 視窗縮放時 Toast 定位節點超出螢幕可視區 |
+| 161 | `(全域 DOMContentLoaded 註冊)` | **A** | `v1.0.0` 創立 | 無 | void | 頂層檢驗 `document.readyState === 'loading'` 並派發調用 `init`（錨點：全檔最末端執行判斷） | 頁面未完全就緒前初始化引發 DOM 掛載失敗 |
+
+
+---
+
+
+### 3.2 函式數量驗證痕跡公開化 (Bottom-Up Settlement)
+
+
+> 📊 **函式計數驗證痕跡與結算聲明 (Bottom-Up Settlement)**
+> 
+> * **Tier-1 核心函式掃描最末序號**：**#161** (絕對物理事實)
+> * 分類小計：
+>   * 頂層函式 (A): **78** 個（自 `sanitizeConfig` 至最末端 DOMContentLoaded 判斷，縮排為 1 級之獨立函式，新增 `applyLocalOnlyOverrides`, `isClaudeArtifactActive`, `getClaudeDeliverableText`, `handleClaudePreviewAction`, `composeSlicePayload` 共 5 項）
+>   * 模組執行入口區塊 (B): **1** 個（`(IIFE 總入口)` #1）
+>   * 內部閉包 (C): **33** 個（新增 `validateAndSaveHotkeys`, `saveExportScope` 共 2 項）
+>   * 命名空間方法 (D): **49** 個（包含 `Storage` 2 個方法 + 11 大站點 Adapters 之 47 個方法：ChatGPT 4 + Claude 4 + DeepSeek 4 + Qwen 4 + Kimi 4 + Zhipu 5 + AiStudio 5 + Mistral 4 + Perplexity 4 + Zai 5 + MiniMax 4 = 47，總計 49 項）
+> * **類別容器分組 (D 類)**：[Storage (2個): get, set + Adapters.ChatGPT (4個): isMatch, getAiNodes, getUserNodes, cleanNode + Adapters.Claude (4個): isMatch, getAiNodes, getUserNodes, cleanNode + Adapters.DeepSeek (4個): isMatch, getAiNodes, getUserNodes, cleanNode + Adapters.Qwen (4個): isMatch, getAiNodes, getUserNodes, cleanNode + Adapters.Kimi (4個): isMatch, getAiNodes, getUserNodes, cleanNode + Adapters.Zhipu (5個): isMatch, getAiNodes, getUserNodes, getMarkdownAsync, cleanNode + Adapters.AiStudio (5個): isMatch, getAiNodes, getUserNodes, getMarkdownAsync, cleanNode + Adapters.Mistral (4個): isMatch, getAiNodes, getUserNodes, cleanNode + Adapters.Perplexity (4個): isMatch, getAiNodes, getUserNodes, cleanNode + Adapters.Zai (5個): isMatch, getAiNodes, getUserNodes, getMarkdownAsync, cleanNode + Adapters.MiniMax (4個): isMatch, getAiNodes, getUserNodes, cleanNode = 49個]
+> * **Tier-1 嚴格數學等式**：`78 (A) + 1 (B) + 33 (C) + 49 (D) = 161`（與表格末列序號 #161 100% 精準吻合）
+> * **Tier-2 模組領域解析器**：共 **0** 項（本腳本平台解析器已直接封裝為 Adapters 命名空間方法計入 D 類，無動態分派字典外掛回呼）
+> * **Tier-3 附錄主要 Inline 回呼**：共 **46** 項（依附錄標準收錄，隔離純輔助操作；自實讓步 helper 內部封裝之底層回呼已依條款除魅排除；實體計數精準對齊）
+> * **實體結算總結**：核心表 (Tier-1: 161) + 領域解析器 (Tier-2: 0) + 附錄回呼 (Tier-3: 46) 已登錄 AST 實體合計 **207** 項，非源碼 100% 全量枚舉，母體邊界無爭議。
+> * `[含 Errata 校正項：已計入肆-E 補全/除魅之函式，拔除幽靈屬性 toastSettings.anchor，修正 syncFromJsonDoc 熱鍵嚴格型別校驗]`
+
+
+---
+
+
+## 四、 設計妥協與歷史避坑指南 (Anti-Regression)
+
+
+### 4.1~4.50 歷史妥協案 1 至 50（100% 完整無損繼承）
+1. **妥協案 1（廢除黑箱正則常數，開放雙軌順序調度）**：徹底廢除寫死常數，於 `noiseSettings` 開放純文字與正則清單，支援 `pipelineOrder` 順序自選。
+2. **妥協案 2（Live DOM 逐行解析防換行壓扁）**：優先查詢 `.code-line`, `.view-line`, `.cm-line`，手動 `.join('\n')` 保留代碼縮排並剝離行號。
+3. **妥協案 3（Modal 雲端同步分頁清空防重複渲染）**：`renderPaneCloud` 頂部強制 `removeChild` 確保介面重繪冪等性。
+4. **妥協案 4（Google AI Studio 100% 禁用 `innerHTML`）**：嚴格遵循 Trusted Types CSP，全域使用 Safe DOM。
+5. **妥協案 5（拖曳與點擊 5px 動靜微移分離）**：位移 > 5px 啟動拖曳並在釋放時 capture 攔截點擊；<= 5px 正常觸發按鈕點擊。
+6. **妥協案 6（紫色按鈕前後綴雙重繞過）**：乾淨複製強制將 `prefix` 與 `suffix` 設為空字串，保障 100% 純淨輸出。
+7. **妥協案 7（AI Studio 三級多引擎降級容錯鏈）**：實施 原生選單 ➔ 鉛筆模擬 ➔ DOM 清洗容錯鏈，提供首選引擎切換。
+8. **妥協案 8（智譜 AI 冒泡 MouseEvent 代理穿透）**：派發帶有冒泡的 `MouseEvent` 穿透 Vue 3 響應式事件。
+9. **妥協案 9（記憶體正則錨點向下截取與平滑全量降級）**：錨點正則未命中時平滑降級複製全量文本，防止空白複製。
+10. **妥協案 10（AI Studio 切片按鈕三態佈局自選）**：提供 `staircase`、`grid_3_2` 與 `single_row` 3 種佈局，調和可視邊界。
+11. **妥協案 11（正則表達式尾斜線反向掃描防護）**：由尾端向前反向掃描，鎖定真正閉合斜線，杜絕轉義斜線誤殺。
+12. **妥協案 12（雲端同步超連結協議白名單過濾）**：`getSafeDocLinkUrl` 僅放行 `http://` 與 `https://`，阻斷 `javascript:` XSS 偽協議。
+13. **妥協案 13（AI Studio 站點特化紫鍵獨立排版解耦）**：`aiStudioSettings.purplePosition` 覆寫 AI Studio 排版，其餘站點回退全域設定。
+14. **妥協案 14（正則反向掃描連續偶數反斜線計數判定）**：`findRegexClosingSlash` 累計連續反斜線以 `slashCount % 2 === 0` 判定閉合斜線合法性。
+15. **妥協案 15（左鍵按住與滾輪切換強制互斥防禦）**：強制檢驗 `(e.buttons & 1) || isPointerDragging`，阻斷拖曳中的滾輪誤觸。
+16. **妥協案 16（150ms 滾輪冷卻時間鎖 Throttle Gate）**：兩次有效滾輪事件間隔必須 >= 150ms，消除無阻尼滾輪暴衝連跳。
+17. **妥協案 17（小光球動態色標方案 5 雙態收納與獨立座標隔離）**：動態讀取當前模組色彩與標籤，獨立 `orbPosition` 杜絕座標跳躍。
+18. **妥協案 18（代碼塊最長優先非貪婪防碎塊機制）**：`matchAll` 遍歷比較長度取 `candidate.length > maxLen`，杜絕小型範例配置誤殺。
+19. **妥協案 19（P0 級教訓：預設雜訊正則邊界防全域誤殺與 `matchAll` `g` 旗標補正）**：嚴格限定高峰期正則語意邊界，且代碼塊最長優先時強制補正全域 `g` 旗標防 `TypeError`。
+20. **妥協案 20（Mistral AI Playground 單輪優先與全歷史停用）**：Playground 採用非對稱單輪架構，停用全歷史拼接以防 DOM 碎塊錯亂。
+21. **妥協案 21（雙軌階梯瀑布流備援正則及 matchAll 雙層 g 旗標貫穿補正）**：封裝階梯瀑布調度，並動態校驗與貫穿補正全域 `g` 旗標防拋錯。
+22. **妥協案 22（專屬拖曳握把 (⠿)、按鈕 5px 穿透補償與 Mistral 原生避讓）**：掛載 `⠿` 握把，擴展拖曳至容器本體以支援 5px 穿透，主卡片提權 `z-index: 2147483640` 並避讓原生按鈕。
+23. **妥協案 23（按鈕級獨立前後綴與全域 Profiles 解耦隔離）**：切片按鈕僅讀取自身配置的 `btnDef.prefix` 與 `btnDef.suffix`，徹底隔離全域 Profiles 前後綴以防代碼污染。
+24. **妥協案 24（按鈕卡片內嵌膠囊雙子頁籤 UI 與微狀態保留）**：卡片右上角掛載雙子頁籤，以 CSS `display: none/flex` 切換，嚴禁銷毀 DOM 以防長文字草稿丟失。
+25. **妥協案 25（備援正則換行多條瀑布流分割探測）**：`fallbackPattern` 支援以 `\n` 分割多行正則依序探測，遇 `#`、`//` 自動跳過並在首次命中時即刻煞車。
+26. **妥協案 26（新站點前後綴獨立解耦）**：Perplexity、Z.AI 與 MiniMax 賦予獨立 siteId，保留自訂拆分彈性。
+27. **妥協案 27（站點分頁雙行自適應彈性佈局）**：採用 `flex-wrap: wrap` 與 `min-width: 68px`，容器自適應折行，徹底消除擠壓模糊與誤觸。
+28. **妥協案 28（拖曳監聽開始前強制解綁重置）**：`setupDraggableUI` 之 `onMouseDown` 開端無條件解綁 `mousemove`/`mouseup`，杜絕跨視窗丟失事件後游標吸附。
+29. **妥協案 29（雜訊清洗正則單行化收斂與帶毒檢測自癒加固）**：徹底拔除 `s` (dotAll) 跨行貪婪旗標，全線採用 `[^\n]*\n?/gi` 單行模式，杜絕換行符抹平。
+30. **妥協案 30（雜訊清洗管線防禦降級與自殺標籤剔除）**：自純字串清單中刪除 `K2.6\n`；自正則清單中剔除寬鬆之 ChatGPT 免責聲明正則，將「100% 杜絕生產內容被誤殺」置於最高優先級。
+31. **妥協案 31（Z.AI 雙軌分裂架構與宿主隔離）**：在 `createUIElement` 中將單一藍鍵拆分為【📋 複製最後對話】與【📄 複製右側預覽】，意圖物理隔離。
+32. **妥協案 32（AI Studio 面板清空重繪與記憶體節約）**：在 `renderPaneAiStudio` 開端強制執行 `while (container.firstChild) container.removeChild(...)`，徹底消滅按鈕卡片無限向下生長堆疊。
+33. **妥協案 33（Z.AI 原生代理優先 (M12.668 簽名) 穿透虛擬滾動）**：尋標官方原生複製按鈕觸發剪貼簿寫入讀回，降級 DOM 轉譯，保障破萬字長文完整度。
+34. **妥協案 34（雙站點雙軌按鈕分裂架構與意圖物理隔離）**：將 `isZai || isMiniMax` 納入雙軌按鈕分裂架構，呈現藍鍵與綠鍵，並以探針動態樣式提供視覺狀態感知。
+35. **妥協案 35（MiniMax 主世界 React Fiber 記憶體穿透與特權剪貼簿合流）**：主世界腳本穿透 `__reactFiber$` 提取 Raw MD，剪貼簿全面採用 `GM_setClipboard` 杜絕焦點丟失。
+36. **妥協案 36（切片前後綴單一儲存格多態解析）**：共用同一儲存格，以單行 URL 正則區隔純文字與網址，保持微秒級直取與離線容錯。
+37. **妥協案 37（MiniMax 抽屜多檔清場與讓步等待）**：主動點擊關閉按鈕並強制 200ms 讓步銷毀舊分頁，徹底消除多檔案切換狀態競爭。
+38. **妥協案 38（雲端 Markdown 前綴自癒清洗器與雙換行防沾黏）**：多行正則還原 Google Docs `---` 全形破折號，並於末端強制雙換行防沾黏。
+39. **妥協案 39（容器層 pointer-events 穿透與實體層攔截 - 空気壁解消契約）**：容器宣告 `none`，按鈕/握把宣告 `auto`，消滅階梯雙欄左欄下方之幾何空氣牆。
+40. **妥協案 40（按鈕級寬容等冪分割線探針）**：正則檢測末行分割線語意，缺則補 `\n\n---\n\n`，已有則等冪放行不重複追加。
+41. **妥協案 41（跨站點 QA 暫存池獨立 Storage Key 隔離與放出即焚）**：開闢專屬獨立 Key `'ai_copy_qa_queue_v1'`，2 小時 TTL 自滅防線，徹底隔離主設定檔防資料洩漏。
+42. **妥協案 42（極簡無框齒輪動態狀態燈號與右鍵強制清空）**：沿用現有齒輪按鈕掛載 `.ai-copy-gear-active`，點亮琥珀金呼吸燈，右鍵綁定強制清空捷徑。
+43. **妥協案 43（F7 總結匯出 Capture 階段優先攔截並阻斷 Caret Browsing 彈窗）**：於 `keydown` Capture 捕獲階段最前端攔截熱鍵，徹底封殺 Chromium 原生游標瀏覽彈窗。
+44. **妥協案 44（AHK 語法修飾鍵雙向相容與等冪隔離線防沾黏）**：支援 `^`/`!`/`+` 前綴解析相容 AHK；總結匯出採用 `\n\n===\n\n` 標準隔離線。
+45. **妥協案 45（多熱鍵別名陣列解析與非文字功能鍵全域穿透）**：支援半形逗號分割陣列化匹配；採集與總結功能鍵全域穿透輸入框盲打，留空 100% 讓渡桌面 AHK。
+46. **妥協案 46（Toast 自由拖曳定位、絕對物理坐標鎖定與平日空氣牆穿透）**：掛載 🍞 微型按鈕切換雙態，以視窗絕對真理坐標記憶根治累加漂移，平時維持空氣牆穿透。
+47. **妥協案 47（滿額 N 站自動總結雙軌分流：滾動追加 vs 放出即焚）**：達到 `targetCount` 自動總結，`keepQueue` 控制是否清空；手動 F7 維持恒定物理清空保底。
+48. **妥協案 48（MiniMax 非同步 Fiber 穿透安全讓步延遲）**：成果物抽屜直取 Raw MD 成功後等待 React 狀態沈澱，消除併發渲染狀態競爭。
+49. **妥協案 49（Z.AI 抽屜 Live DOM 結構化轉譯、4 態正交矩陣與 CSS 級聯防呆）**：實裝 `parseZaiProseToMarkdown` 直讀 Live DOM 轉譯 Table 與標題；站點動作升級 4 態正交矩陣；拔除 CSS `background` 之 `!important` 確保行內提權覆寫。
+50. **妥協案 50（Z.AI 雙軌成果物智能階梯降級、正則旗標完全解耦與死代碼物理退役）**：輪次容器鎖定預覽按鈕，無成果物時平滑階梯降級複製對話；解耦代碼塊 `g` 旗標補齊條件；修正寬容降級雙換行保底；刪除 14.5KB 頂層死代碼。
+
+
+---
+
+
+### 4.51 妥協案 51：Claude.ai 雙軌 Artifacts 抽屜擴充、資料生命週期對稱治理與動態水合煞車 (`v4.3.4` 立案)
+* **問題背景**：
+  1. Claude.ai 官方介面採用左側對話流與右側獨立 Artifacts 抽屜架構。舊版未適配 Claude，使用者無法一鍵提取右側長程式碼，且對話內的程式碼塊經常被分割截斷。
+  2. 舊版 `syncFromJsonDoc` 雲端同步時，直接以 `globalConfig.qaQueueSettings = preservedQaSettings` 整包覆原，導致雲端更新的 11 站 `siteActions` 與 `targetCount: 6` 全面失效；且原先熱鍵還原使用 Truthy 判斷，導致使用者故意清空熱鍵讓渡 AHK（字串為 `""`）時被雲端預設值強行覆寫。
+  3. MiniMax 與 Z.AI 在成果物加載時採用固定硬延遲（MiniMax 曾長達 1800ms），在現代高速網路下造成長達 2 秒的呆滯死等，嚴重破壞盲打節奏；但若完全不等待，React 18 / Svelte 5 虛擬 DOM 尚未完成水合，會提取到空字串。
+  4. 模組化匯出精靈中，取消勾選模組一後導出的 JSON 仍殘留 `profiles` 等內容設定，且勾選框狀態在分頁切換或重整後全部歸零，未能持久化。
+  5. 設定檔中長期殘留無呼叫點的幽靈欄位 `toastSettings.anchor`，徒增資料字典審查雜訊。
+* **考慮過的替代方案**：
+  - 強制使用者手動點擊 Claude 官方複製按鈕（破壞了 11 旗艦站一鍵統整的盲打體驗）；
+  - 雲端同步完全放開，允許覆蓋本機自訂熱鍵（侵害使用者個人硬體操作習慣）；
+  - MiniMax 抽屜開啟後立即提取、不加任何讓步等待（極高機率提取到上一輪舊檔案或空文字）。
+* **最終妥協內容**：
+  1. 將 Claude.ai 納入雙軌按鈕分裂架構（左藍右綠、翡翠綠永駐）：藍鍵複製最後對話，綠鍵鎖定頂部座標特徵提取右側 Artifacts；無抽屜時彈出友善提示平滑階梯降級複製乾淨對話 Markdown；
+  2. 抽出獨立純邏輯函式 `applyLocalOnlyOverrides`，並重構 `syncFromJsonDoc`：以 `typeof preservedHotkeys.xxx !== 'undefined'` 嚴格型別校驗還原個人熱鍵（空字串完好保留），其餘 11 站採集規則、滿額門檻與開關全量接納雲端新規格；
+  3. 實裝**連續 2 輪 (400ms) 內容穩定性動態水合煞車**：MiniMax 門檻下放至 `txt.length > 0` 並具備超時非空兜底，水合完成後僅需 150ms 微任務延遲，提速逾 85%；
+  4. 實裝 `composeSlicePayload` 統一切片後綴補白，replace 模式追加正則語法錯誤阻斷報警；
+  5. 模組化匯出精靈接線 `exportScope` 實現勾選狀態持久化，未勾選模組一確實自導出物件物理剔除 profiles；
+  6. 實裝雙熱鍵同鍵衝突防呆校驗 (`validateAndSaveHotkeys`)；
+  7. 全檔徹底拔除 `toastSettings.anchor` 幽靈欄位。
+* **踩坑後果**：若移除了 Claude 頂部按鈕座標半徑限制（`rect.top < 80 && rect.left > window.innerWidth * 0.5`），腳本將極易誤點對話串內歷史程式碼塊的複製按鈕，導致成果物被歷史碎片覆蓋。
+* **正確擴充指南**：未來新增具備獨立 Artifacts 抽屜的 AI 平台時，應遵循 Claude / Z.AI / MiniMax 建立之「雙軌分裂 ➔ 區域尋標 ➔ 剪貼簿受保護讀回 ➔ DOM 降級 ➔ 友善提示對話降級」標準五級管線。
+
+
+---
+
+
+## 五、 拖曳座標儲存、小光球收折、油猴選單歸位與視窗邊界限制機制
+
+
+### 5.1 專屬拖曳握把 (⠿)、垂直微型微欄、🍞 拖曳定位與動態微光輪廓
+1. **專屬拖曳握把 (`⠿`)**：寬度 18px，字級 14px，顏色 `#9ca3af`，宣告 `cursor: grab;`，`:active` 為 `cursor: grabbing;`。
+2. **垂直微型微欄堆疊**：將收折按鈕（🗕，高度 18px）與 Toast 定位按鈕（🍞，高度 18px）以 `flex-direction: column; gap: 2px;` 緊湊垂直排列，穩固座落於齒輪右側，完全不增加水平寬度，徹底消除階梯雙欄佈局外凸變形。
+3. **Toast 自由拖曳定位模式 (🍞)**：
+   - 點擊 🍞 按鈕進入長亮預覽定位模式（`toggleToastPositioningMode`），Toast 掛載 `.ai-copy-toast-active` 與 `.ai-copy-is-dragging`，解除空氣牆（`pointer-events: auto`），滑鼠懸浮呈現 grab 手勢。
+   - `setupDraggableUI(toast, toast, false, null, true)` 傳入 `isToast = true` 旗標，於 `mousedown` 開端主動清除 `transform`，以視窗絕對真理坐標移動，並嚴格受四周 10px 安全邊距限制。
+   - 再次點擊 🍞 按鈕即刻物理鎖定坐標至 `toastPosition`，恢復正常過渡與平日空氣牆穿透。
+4. **按鈕 5px 拖曳穿透補償**：位移 > 5px 即被識別為拖曳行為 (`isPointerDragging = true`)，釋放時 capture 攔截 `click`；位移 <= 5px 正常觸發按鈕點擊。
+5. **動態微光虛線輪廓 (`.ai-copy-is-dragging`)**：拖曳中動態注入深藍微光與淺藍虛線框，釋放瞬間無條件移除，平時無框隱形。
+
+
+### 5.2 平台特化預設座標避讓與邊界限制
+* **Mistral 專屬避讓**：未設定本機座標時，Mistral 預設採用 `bottom: 90px; right: 28px`，徹底越過右下角 `?` 原生說明浮鈕。
+* **AI Studio 專屬避讓**：預設採用 `bottom: 80px; right: 24px`，避開 Prompt 操作按鈕。
+* **通用邊界限制**：調用 `clampContainerToViewport` 強制將主卡片、小光球與 Toast 限制在視窗可視範圍內，四周保留 10px 安全邊距。
+
+
+### 5.3 油猴選單座標歸位與暫存池物理清空
+* 註冊指令 1：`GM_registerMenuCommand('⚙️ 📍 僅重置浮動按鈕與小光球位置', resetUiPosition)`（同步歸位 `toastPosition`）。
+* 註冊指令 2：`GM_registerMenuCommand('⚙️ 🛠️ 開啟參數設定管理器', openManager)`。
+* 註冊指令 3：`GM_registerMenuCommand('🗑️ 物理清空 QA 採集暫存池', ...)`（一鍵釋放跨站暫存資料）。
+
+
+---
+
+
+## 六、 安全邊界、雲端同步與外部依賴規格
+
+
+### 6.1 外部網路請求規格化 (@connect & GM_xmlhttpRequest)
+
+
+| 連線目標 / 端點 | 協議與方法 | 驗證與認證機制 | 跨來源 (CORS) 處理與錯誤防護 |
+| :--- | :--- | :--- | :--- |
+| **Google Docs 導出端點** (`https://docs.google.com/document/d/${id}/export?format=txt`) | `GET` (純文字) | 匿名讀取（公開檢視權限） | 優先調用 `fetch(credentials: 'omit')`；失敗自動降級使用 `GM_xmlhttpRequest(anonymous: true)` |
+| **Google 使用者內容端點** (`*.googleusercontent.com`) | `GET` (純文字) | 匿名讀取 | 配合 Google Docs 轉址靜態快取提取，由 `@connect` 白名單放行 |
+
+
+### 6.2 雲端純內容同步與本機專屬狀態絕對隔離協定 (`applyLocalOnlyOverrides`)
+* 在 `syncFromJsonDoc` 覆蓋前，調用 `applyLocalOnlyOverrides(targetConfig, sourceConfig)` 演算法，強制提取並保全本機之 `uiPosition`、`orbPosition`、`toastPosition`、`isCollapsed`、`sliceLayout`、`purplePosition` 與 `activeModuleId`。
+* 個人熱鍵隔離：以 `preservedHotkeys` 暫存，同步後以 `typeof !== 'undefined'` 寫回 `captureHotkey` 與 `summaryHotkey`。
+* 團隊規則接納：11 站點的 `siteActions`、滿額門檻 `targetCount: 6` 與滾動開關 `keepQueueOnAutoSummary: true` 完全接納遠端團隊標準，達成「個人硬體習慣獨立保全，業務採集規格無損共享」的雙層治理架構。
+
+
+---
+
+
+## 七、 運行期緊急脫困手冊 (Run-Time Quick Recovery Playbook)
+
+
+### 7.1 100% Console 獨立可執行救援指令（0 調用私有函式）
+
+
+| 資料破壞情境 | 故障徵兆 | 救援步驟 (自包含獨立修復指令，直接貼入 DevTools Console 執行) |
+| :--- | :--- | :--- |
+| **1. 異常座標或圖層遮蔽導致卡片/Toast 跑位** | 懸浮列或 Toast 跑出視窗外或無法拖曳 | 點擊油猴選單「僅重置位置」；或於 Console 執行：<br>`(() => { const k = 'ai_copy_global_config_v3'; const d = JSON.parse(localStorage.getItem(k) || '{}'); delete d.uiPosition; delete d.orbPosition; delete d.toastPosition; d.isCollapsed = false; localStorage.setItem(k, JSON.stringify(d)); location.reload(); })();` |
+| **2. QA 採集暫存池異常或狀態燈卡死** | 齒輪一直亮琥珀金但按 F7 無法匯出，或想強制清空暫存 | 點擊齒輪右鍵；或於 Console 執行獨立清空指令：<br>`(() => { const qk = 'ai_copy_qa_queue_v1'; localStorage.setItem(qk, JSON.stringify({ lastUpdated: Date.now(), items: {} })); location.reload(); })();` |
+| **3. 升級缺少 4.3.4 Claude 動作或熱鍵毀損** | 控制台拋錯或採集動作非合法值 | 執行無損補全自癒指令：<br>`(() => { const k = 'ai_copy_global_config_v3'; const d = JSON.parse(localStorage.getItem(k) || '{}'); if (!d.siteTabOrder || !d.siteTabOrder.includes('claude')) d.siteTabOrder = ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'claude', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax']; if (d.qaQueueSettings) { d.qaQueueSettings.targetCount = 6; d.qaQueueSettings.keepQueueOnAutoSummary = true; if (!d.qaQueueSettings.siteActions) d.qaQueueSettings.siteActions = {}; d.qaQueueSettings.siteActions.claude = 'SINGLE'; d.qaQueueSettings.siteActions.zai = 'PREVIEW'; d.qaQueueSettings.siteActions.minimax = 'PREVIEW'; } localStorage.setItem(k, JSON.stringify(d)); location.reload(); })();` |
+| **4. 儲存配額滿或隱私模式阻擋** | 彈出「❌ 設定儲存失敗」紅色 Toast | 檢查瀏覽器隱私模式限制，或於 Console 清理歷史多餘暫存：<br>`(() => { try { localStorage.removeItem('ai_copy_qa_queue_v1'); alert('暫存池已釋放'); location.reload(); } catch(e) { alert('本機 Storage 完全被瀏覽器封鎖'); } })();` |
+| **5. SPA 跳轉後按鈕未掛載** | 單頁切換對話後懸浮工具列消失 | 觸發瀏覽器導航降級：點擊原生對話切換按鈕，或調用 `history.go(0)` 重新掛載。 |
+
+
+---
+
+
+## 八、 UX 決策技術化與隱性效能設計揭露
+
+
+### 8.1 隱性效能與互動參數矩陣
+
+
+| 設計模式 | 實作機制與技術參數 | 採用原因與防範副作用 |
+| :--- | :--- | :--- |
+| **Claude 雙軌頂部尋標** | `rect.top < 80 && rect.left > window.innerWidth * 0.5 && rect.width > 20` | 精確鎖定右側 Artifacts 頂部工具列官方複製按鈕，徹底防止誤觸左側對話流中的歷史程式碼複製鈕 |
+| **動態水合煞車演算法** | `currentText === lastObservedText && length > 0` 連續 2 輪 (400ms) | 廢除 MiniMax 與 Z.AI 1800ms 固定死等延遲，提速逾 85%，同時杜絕 React 18 併發渲染空字串競爭 |
+| **雙熱鍵同鍵防呆** | `capVal.toUpperCase() === sumVal.toUpperCase()` 即時攔截 | 消除使用者將 F4 與 F7 設為同一熱鍵時引發的採集與總結同時觸發、佇列即採即焚的邏輯死鎖 |
+| **切片酬載組合防沾黏** | `composeSlicePayload(prefix, body, rawSuffix)` 統一後綴規範 | 徹底杜絕替換正則、寬容降級或未命中全量輸出時，與剪貼簿下文首行無空行緊貼沾黏的排版缺陷 |
+| **儲存全域報警防護** | `Storage.set` 與 `setQaQueue` 內部 `catch` 彈出 4000ms 紅色 Toast | 解決隱私模式或 QuotaExceeded 導致配置無法儲存卻無任何使用者反饋的「靜默失聯」缺陷 |
+| **AI Studio 紫鍵繼承** | `purplePosition: 'inherit'` 平滑回退全域設定 | 消除舊版 AI Studio 強制寫死 `right` 導致全域設定置底換行時兩者排版不一致之困惑 |
+| **匯出精靈狀態持久化** | `exportScope: { content, coords, layout }` 結構寫入 Storage | 消除每次開啟 Tab 7 備份精靈勾選狀態均被重置為預設值的互動繁瑣感 |
+| **幽靈欄位徹底拔除** | 全檔檢索刪除 `toastSettings.anchor` 宣告與調用 | 釋放運行期記憶體佔用，消滅技術債，使 AST 結構與實際業務邏輯 100% 精準對齊 |
+| **雙軌綠鍵翡翠綠永駐** | CSS 強制 `#10b981 !important` 拔除動態灰階 | 消除未開預覽時按鈕過度置灰降低可見度的問題，點擊未就緒時由 Toast 進行友善防呆提示 |
+| **DOM 監聽 200ms 防抖節流** | `mountDebounceTimer` 延遲 200ms 執行 `mountUI` | 消除流式生成過程中引發的重複重繪與微抖動 |
+
+
+### 8.2 定時排程矩陣與讓步等待綜合宣告
+
+
+#### 定時排程矩陣 (🔒 逐條記錄軌)
+| 排程函式 / 語句 | 所在位置 | 延遲參數 (三態) | 技術目的與線程安全說明 |
+| :--- | :--- | :--- | :--- |
+| `setInterval(mountUI, 500)` | `init` 函式內 | 500ms (靜態字面量) | 定期輪詢 DOM 狀態，補償 SPA 頁面路由切換未觸發 MutationObserver 之缺漏 |
+| `mountDebounceTimer = setTimeout(..., 200)` | `init` 函式內 | 200ms (靜態字面量) | MutationObserver 防抖節流排程，消除高頻重繪微抖動 |
+| `setTimeout(..., duration)` | `showToast` 函式內 | `duration` (引數傳入，預設 2200ms) | 控制 Toast 提示節點之自動淡出與位移關閉 |
+| `setTimeout(..., 80)` | `toggleToastPositioningMode` | 80ms (靜態字面量) | 退出拖曳定位模式後，延遲出具鎖定成功提示 Toast |
+| `setTimeout(..., 3000)` | `getMiniMaxDeliverableText` 內 | 3000ms (靜態字面量) | Fiber 橋接通訊請求之安全超時保護定時器，防止 Promise 永久懸掛 |
+
+
+#### 讓步等待綜合宣告區 (🍃 合併宣告軌)
+- **功能範疇語意化描述**：AI Studio 鉛筆模擬編輯輪詢、原生選單展開等待、智譜/Z.AI 原生代理複製剪貼簿讀取延遲、Claude 剪貼簿讀取延遲、MiniMax 抽屜多檔切換舊分頁銷毀讓步、MiniMax 抽屜加載輪詢動態煞車、MiniMax/Z.AI 提取後微任務沈澱延遲、Z.AI 舊抽屜銷毀清場讓步，以及 Z.AI 自動開門輪詢加載延遲。
+- **延遲組成三態揭露**：
+  - 靜態字面量集合：`{20, 30, 120, 150, 200, 250} ms` (區間包絡 `20~250ms`，原 1800ms 硬延遲已全量退役，由 150ms 微任務延遲取代)。
+  - 運算表達式與條件式：AI Studio 原生選單與模擬編輯提取上限 15 次輪詢；Claude 成果物加載微延遲 200ms；MiniMax 與 Z.AI 成果物抽屜加載水合煞車輪詢上限 10000ms。
+- **上下文特徵錨點**：於 `tryAiStudioNativeMenuCopy`、`getAiStudioLastTurnMarkdown`、`Adapters.Zhipu.getMarkdownAsync`、`Adapters.Zai.getMarkdownAsync`、`getClaudeDeliverableText`、`getZaiDeliverableText`、`getMiniMaxDeliverableText` 函式族內部搜尋 `await new Promise(r => setTimeout(r,` 可定位全部讓步等待點。
+
+
+---
+
+
+## 九、 已知限制與防禦性設計聲明 (Known Limitations & Defensive Architecture)
+
+
+1. **Claude 雙軌 Artifacts 階梯平滑降級 【By Design / 預期行為】**
+   - *說明*：若右側未開啟 Artifacts 抽屜（或為純文字回覆），手動點擊綠鍵（📄 複製右側預覽）時系統彈出友善提示 `⚠️ 右側無 Artifacts 成果物，已為您複製最後對話內容！` 並自動降級複製乾淨對話 Markdown；按 F4 採集熱鍵且動作為 `PREVIEW` 時，自動階梯平滑降級為提取當前對話正文並正常裝配 `5th\n\n` 標籤，不拋錯中斷盲打，屬預期防禦設計。
+2. **Claude 綠鍵手動複製恒定輸出純淨 Artifact 【By Design / 預期行為】**
+   - *說明*：手動點擊 Claude 綠鍵（📄 複製右側預覽）時，系統恒定輸出 100% 純淨 Markdown 成果物，不附加 Profile 前綴（如 `5th`）；若需在成果物上裝配前綴標籤，使用者應透過 F4 採集熱鍵並指定動作為 `PREVIEW`，達成業務分流，與 Z.AI / MiniMax 綠鍵業務語意嚴格對稱。
+3. **雙熱鍵同鍵即時阻斷防呆 【By Design / 預期行為】**
+   - *說明*：採集熱鍵與總結熱鍵不能設定為完全相同的快捷鍵字串。若輸入相同鍵值，系統將外框標紅並拒絕寫入儲存，杜絕一鍵觸發採集即焚的邏輯死鎖，屬預期防禦設計。
+4. **Z.AI 智能階梯降級機制 【By Design / 預期行為】**
+   - *說明*：若最新回覆輪次內未出現「預覽」按鈕且右側預覽抽屜未開，F4 採集熱鍵自動階梯平滑降級為提取該輪對話正文並正常裝配 `6th\n\n` 標籤，綠鍵點擊時彈出友善提示降級複製對話，不拋紅字報錯，屬預期行為。
+5. **Toast 拖曳定位模式互斥保護 【By Design / 預期行為】**
+   - *說明*：點擊 🍞 進入長亮拖曳定位模式時，該 Toast 節點將暫時攔截點擊事件以支援滑鼠拖曳；退出定位模式後立即恢復 `pointer-events: none` 穿透，屬預期行為。
+6. **滾動更新模式下的同站覆蓋追加 【By Design / 預期行為】**
+   - *說明*：啟用滾動更新開關（`keepQueueOnAutoSummary: true`，v4.3.4 預設啟用）時，滿額自動複製後暫存佇列不予清空；同站點重複採集仍以最新回覆覆蓋舊回覆，後續採集自動追加總結，屬防呆預期行為。
+7. **熱鍵欄位留空 100% 讓渡予桌面 AHK 【By Design / 預期行為】**
+   - *說明*：若使用者於設定面板將採集或總結熱鍵欄位完全清空，腳本自動放棄該熱鍵之監聽與 `preventDefault` 攔截，100% 讓渡予作業系統原生或桌面 AHK 腳本；雲端同步時以嚴格型別校驗保全空字串，不被預設值覆蓋，屬預期行為。
+8. **手動 F7 總結保底清空權限 【By Design / 預期行為】**
+   - *說明*：無論是否啟用滾動更新開關，使用者手動按下 F7 總結熱鍵時，恒定執行總結並無條件物理清空暫存池，保證審查任務完結時的主動終止權。
+9. **外部 SDK 參數原樣透傳禁令 (No models/ Prefix) 【By Design / 預期行為】**
+   - *說明*：模型標籤與名稱一律原樣透傳，**嚴禁**自行添加 `models/` 前綴，避免引起 API 404 NOT_FOUND 阻斷。
+10. **全域 DOM 操作全面禁止 `innerHTML` 【By Design / 預期行為】**
+   - *說明*：全量使用 Safe DOM（`createElement`, `textContent`），符合 Google AI Studio Trusted Types CSP 規範。
+
+
+---
+
+
+## 十、 工程交付與發布規格 (Release Specification)
+
+
+### 10.1 終端使用者發布摘要 (End-User Release Notes v4.3.4)
+* **核心更新亮點**：
+  1. **Claude 雙軌 Artifacts 成果物抽屜擴充**：正式將 Claude.ai 納入旗艦 11 合 1 陣容！實裝專屬「雙軌按鈕分裂架構」，左側藍鍵複製最後對話，右側綠鍵直取右側 Artifacts 純淨原始 Markdown；抽屜未開時自動彈出友善提示平滑降級複製對話正文，盲打體驗 100% 對齊。
+  2. **資料生命週期對稱治理 (`applyLocalOnlyOverrides`)**：徹底解決雲端覆蓋與外來檔案匯入時卡片座標跑位的歷史隱患！抽出純邏輯隔離函式，本機卡片座標、小光球位置、Toast 座標與自訂熱鍵 100% 嚴格保留，同時順暢接納遠端團隊發布的 11 站採集規則與滿額門檻。
+  3. **動態水合煞車提速 85%**：MiniMax 與 Z.AI 成果物加載導入連續 2 輪穩定性探針，徹底拔除原先長達 1800ms 的硬延遲死等，水合沈澱完成後於 150ms 內極速完成複製！
+  4. **切片後綴物理雙換行保底與正則語法保護**：實裝 `composeSlicePayload` 演算法，無論是截取命中、正則未命中全量寬容降級或字串替換，輸出末端強制追加雙換行，徹底消滅貼入下文時的緊貼沾黏缺陷；替換正則語法錯誤時主動彈出紅色 Toast 報警阻斷操作。
+  5. **雙熱鍵同鍵防呆與 TTL 彈性設置**：採集熱鍵與總結熱鍵設為同一鍵值時即時阻斷並邊框標紅，杜絕即採即焚死鎖；暫存池過期時長支援 `0~72` 小時自訂，設為 0 時永不過期。
+  6. **模組化匯出精靈狀態持久化與幽靈欄位清除**：Tab 7 匯出精靈勾選狀態自動記憶；取消勾選模組一確實剔除 profiles 業務設定；全檔徹底刪除無呼叫點的幽靈欄位 `toastSettings.anchor`。
+* **標準升級、覆蓋與備份操作指南**：
+  - 本次升級 100% 向後相容，覆蓋升級時本機卡片坐標、小光球位置、Toast 坐標與自訂前後綴完全保留。
+  - 若需備份還原：在「🌐 雲端匯出」面板下載 JSON 檔案，以目標檔案覆蓋還原即可 100% 復原！
+
+
+---
+
+
+## 十一、 反向驗證清單（全量逐項展開標註 指標 1 至 41）
+
+
+🔴 **強制標註驗證結果**：
+
+
+* [x] **指標 1：函式條目數精確性** — [✅] 已在第 3.1 與 3.2 章記錄，核心表格掃描最末序號 `#161`，結算等式 `78 (A) + 1 (B) + 33 (C) + 49 (D) = 161` 100% 精準對齊（含 Errata 校正項）。
+* [x] **指標 2：介面標識符與持久化 Key 嚴格隔離** — [✅] 已在第 2.1 章記錄，`CONFIG_KEY`、`QA_QUEUE_KEY` 正確歸入 (B) 類，DOM 容器 ID 歸入 (D) 類，無混淆；無任何控制項變數被虛構或誤登。
+* [x] **指標 3：版本歷史歸屬精確性** — [✅] 已在第 1.2 章記錄，所有新增功能（含 Claude 適配器、雙軌抽屜、`applyLocalOnlyOverrides`、動態水合煞車、`composeSlicePayload`）明確標註首次出現版本為 v4.3.4。
+* [x] **指標 4：災難救援語法一致性** — [✅] 已在第 7.1 章記錄，救援指令使用原生 JS 語法，全量自包含且統一。
+* [x] **指標 5：Schema 中間態對齊** — [✅] 已在第 2.1 章記錄，本腳本無非同步延遲初始化欄位，設定結構同步完備。
+* [x] **指標 6：已知限制與 By-Design 聲明存在性** — [✅] 已在第 9 章記錄，包含 Claude 階梯降級、綠鍵純淨輸出、雙熱鍵衝突即時阻斷、Z.AI 階梯降級、Toast 定位互斥、滾動追加同站覆蓋、熱鍵留空讓渡、手動清空主動權、Trusted Types 及 SDK 參數原樣透傳禁令。
+* [x] **指標 7：外部依賴與 Import / @grant 規格化** — [✅] 已在第 1.1 章記錄，所有 `@grant` 與函式庫授權均列入對照表並說明技術必要性。
+* [x] **指標 8：外部網域與請求端點規格化** — [✅] 已在第 1.1 與 6.1 章記錄，收斂 `@connect` 白名單移除通配符，請求端點已規格化。
+* [x] **指標 9：組態字典預設值展開說明** — [✅] 已在第 2.1 章記錄，`DEFAULT_CONFIG` 所有巢狀葉節點（含 siteActions 4 態白名單、exportScope 預設值與 Claude/Z.AI/MiniMax 預設動作）已全部展開說明。
+* [x] **指標 10：exportConfig / 組態持久化差異比對** — [✅] 已在第 2.2 章記錄，純內容匯出排除 `uiPosition`、`orbPosition`、`toastPosition`、`isCollapsed`、本機熱鍵字串及暫存池 Key 之差異已逐一比對說明。
+* [x] **指標 11：強制納入標準函式登錄** — [✅] 已在第 3.1 章記錄，初始化、UI構建、Claude 雙軌提取、開門清場輪詢、暫存池讀寫、狀態燈刷新、多態萃取、前後綴解析等核心函式已全數登錄。
+* [x] **指標 12：定時器與排程延遲毫秒數精確記錄** — [✅] 已在第 3.1 與 8.2 章記錄，500ms 心跳定時器、200ms 防抖計時器、80ms Toast 退出提示定時器與 3000ms 超時保護已精確記錄；業務迴圈輔助讓步等待已依【拾壹、11.2】第 6 點於《讓步等待綜合宣告區》完成三要件合併揭露。
+* [x] **指標 13：事件監聽、信號綁定與回呼註冊記錄** — [✅] 已在第 3.1 章核心表與附錄內聯表完整記錄（含 Capture 階段 keydown 輸入框穿透與 🍞 點擊事件）。
+* [x] **指標 14：介面樣式、樣式常數、CLI 規格記錄** — [✅] 已在第 2.1、9 與 8.1 章記錄，Toast 提權外觀、🍞 長亮外發光、微型微欄規格、狀態燈與翡翠綠高對比樣式已完整保留。
+* [x] **指標 15：持久化儲存 Key 正確分類** — [✅] 已在第 2.1 章記錄，`CONFIG_KEY` 與 `QA_QUEUE_KEY` 正確歸入 (B) 類。
+* [x] **指標 16：硬編碼 URL / Token 標註 ⚠️** — [✅] 已在第 2.1 章記錄，Google Docs 示範連結已標註 `⚠️ 示範用途 / 不安全預設`。
+* [x] **指標 17：自創術語加註原始碼對照說明** — [✅] 已在第 3.1 章記錄，所有自創機制（如動態水合煞車、雙軌按鈕分裂架構、4 態正交採集矩陣、Toast 行內提權、雲端直達）均對應具體源碼位置。
+* [x] **指標 18：舊版交接檔章節與實質內容 100% 無損繼承** — [✅] 已在第 0.1 章與第 4 章記錄，舊版全部內容與歷史妥協 1~50 100% 無損繼承。
+* [x] **指標 19：舊版表格結構與操作步驟完整保留** — [✅] 已在第 0.2 章記錄，舊版表格結構完好保留並擴充。
+* [x] **指標 20：死代碼與遺留變數標註 ⚠️ 棄用** — [✅] 已在第 0.4 與 2.1 章記錄，`toastSettings.anchor` 標註 `⚠️ [已於 v4.3.4 物理拔除]`，歷史退役常數維持除魅。
+* [x] **指標 21：AST 箭頭函式 / 閉包 / Lambda 依語言特性精確分類** — [✅] 已在第 3.1 章記錄，具名閉包歸入 (C) 類，匿名內聯箭頭函式歸入附錄。
+* [x] **指標 22：SPA 災難救援相容性（JS 專用）／桌面五防線宣告完整性（🖥️ 特化）** — [✅] 已在第 7.1 章第 5 條記錄 SPA 路由切換降級路徑；本腳本為 JS 軌道，桌面五防線特化標記為 N/A 豁免。
+* [x] **指標 23：自底向上結算制執行** — [✅] 已在第 3.2 章記錄，表格最末序號 `#161` 作為單一真理源，自底向上結算等式無矛盾。
+* [x] **指標 24：主入口去歧義執行** — [✅] 已在第 3.1 章記錄，最外層 IIFE 單獨計為 (B) 類 1 項，無重複計數。
+* [ ] **指標 25：架構豁免標籤合規** — [N/A] 驗證：本腳本為 Userscript 跨站點 SPA 擴充套件，具備雲端同步與多站點動態掛載能力，全量展開真實架構路徑，免除 Profile-A/B 離線/唯讀架構豁免檢核表檢查。
+* [x] **指標 26：Markdown 長表格斷點安全關閉與主動分段協議執行** — [✅] 第一階段於第十章輸出完畢後主動掛起，輸出法定中繼信號；第二階段嚴格接續第十一章，序號連續無斷層，結構自洽。
+* [ ] **指標 27：0ms 排程與線程安全揭露** — [N/A] 驗證：本腳本採用 Chromium 單線程事件循環架構，未採用 0ms 宏任務排程，免除此項檢查。
+* [x] **指標 28：OOP 狀態屬性 (C類) 與 Widget 實例引用 (D類) 嚴格隔離** — [✅] 已在第 2.1 章記錄，記憶體狀態旗標歸 C 類，DOM 容器 ID 歸 D 類。
+* [x] **指標 29：工程交付與打包發布規範合規（含 🖥️ 腳本直跑交付特化）** — [✅] 已在第 10 章記錄終端使用者發布摘要與升級指南（本專案為 Userscript 直跑，不涉及 PyInstaller 二進位打包）。
+* [x] **指標 30：降級聲明守衛穿透對齊** — [✅] 已在第 9 章記錄，Claude 階梯平滑降級、Z.AI 階梯降級、Fiber 降級、雲端前綴降級已如實描述為守衛排除，無大話。
+* [x] **指標 31：編號實體清單修訂防覆蓋與雙軌結算** — [✅] 已在第 3.1 與 3.2 章落實，清單增修條目宣告集合 `S`，依序號連續編號並完成獨立重結算。
+* [x] **指標 32：附錄回呼母體邊界與輔助操作解耦** — [✅] 附錄回呼清單共收錄 46 項主要回呼，純非同步 API 已解耦，讓步 helper 內部回呼已除魅排除。
+* [x] **指標 33：巢狀定時器逐層穿透審計** — [✅] 巢狀排程已逐層穿透記錄靜態字面量與間隔，業務讓步等待符合規範。
+* [x] **指標 34：樣式防萎縮與防裁切全閉環核驗＋跨進程標題通訊反向清洗鏈** — [✅] 已在第 8 與第 9 章記錄樣式注入實體（無跨進程視窗標題傳遞狀態旗標之設計，該清洗鏈標記為無涉）。
+* [x] **指標 35：架構接管變數匯出狀態除魅** — [✅] 已在第 2.1 與 2.2 章記錄，本機座標欄位、本機自訂熱鍵與暫存池 Key 誠實標註為嚴格剔除。
+* [x] **指標 36：集合 `S` 指針一致性與前置鎖定** — [✅] 清單增修之功能特徵嚴格綁定對應條目實體名稱與職責。
+* [ ] **指標 37：By-Design 驗收豁免全閉環映射** — [N/A] 當前交接上下文未檢索到 QATP 任務書文本（僅陳述上下文邊界，不對專案歷史作存在性判斷）；已依源碼守衛實體自查合規（見指標 6、30），鏡像檢查豁免。
+* [x] **指標 38：AST 三層級分類與超集結算合規** — [✅] 已在第 3.2 章落實，嚴格劃分 Tier-1 (161項)、Tier-2 (0項)、Tier-3 (46項) 並完成超集結算。
+* [x] **指標 39：反 PRD 迴音與源碼反向萃取** — [✅] 所有選擇器、常數、熱鍵正則均自 Golden Master 源碼 AST 反向萃取，無 PRD 盲目複製。
+* [x] **指標 40：配置遷移路徑與 Schema 往返閉環** — [✅] 已在第 2.1 與 2.2 章揭露配置遷移路徑與雙層匯出閉環。
+* [x] **指標 41：全域識別欄位字面量鏡像** — [✅] 核心表格中所有函式名稱、輸入參數形參名與順序、回傳結構 Key、變數名、Storage Key 均與原始碼 AST 100% 逐字鏡像吻合，無任何人工縮寫失真。
+
+
+---
+
+
+## 十二、 產出前結構性自檢報告 (Self-Check Report)
+
+
+1. **階段確認自檢**：
+   - 使用者已明確觸發階段二（交接檔定稿）。
+   - 對話歷史中的原始碼為通過 v4.3.4 驗收並完成 3 項定向 Hotfix 之定稿版本 (`v4.3.4 Golden Master`)。
+   - 本次回覆 100% Token 預算用於交接檔，無任何代碼全文混雜。
+2. **六大結構指標自檢結果**：
+   - **自檢項 1：舊版章節對照** ➔ 舊版零至十二章節 100% 繼承並擴充。
+   - **自檢項 2：函式清單對照** ➔ 登錄 161 核心條目，序號 `#1` 至 `#161` 連續無斷層，Bottom-Up 結算精確對齊（新增 5 項 A 類、4 項 D 類、2 項 C 類）。
+   - **自檢項 3：Schema / 表格對照** ➔ 展開 11 大站點資料字典，雙層匯出比對表完整呈現，幽靈欄位 `toastSettings.anchor` 徹底拔除。
+   - **自檢項 4：妥協案擴充** ➔ 增量立案妥協案 51（Claude.ai 雙軌 Artifacts 抽屜擴充、資料生命週期對稱治理、動態水合煞車、熱鍵空字串還原防呆與幽靈欄位清除）。
+   - **自檢項 5：反向驗證展開** ➔ 指標 1 至 41 逐項獨立標註，合規採 `* [x] ... [✅]`，豁免採 `* [ ] ... [N/A]`。
+   - **自檢項 6：技術細節完整性** ➔ 所有正則表達式、選擇器、GM 鍵名、DOM ID、延遲毫秒數均以程式碼格式精確原樣呈現。
+
+
+---
+
+
+## 附錄：主要 Inline 箭頭回呼與監聽器統計清單 (Anonymous Callbacks Registry)
+
+
+本專案原始碼中未宣告變數名稱承接之原生 Inline 箭頭回呼共計 **46** 處，全量分類清單如下：
+
+
+### 1. 平台節點過濾與轉譯處理回呼 (共 28 處)
+1. `rawAssistantNodes.filter(node => ...)`（ChatGPT AI 節點文字過濾）
+2. `rawAssistantNodes.map(node => ...)`（ChatGPT markdown 容器提取）
+3. `rawUserNodes.filter(node => ...)`（ChatGPT 使用者節點過濾）
+4. `clone.querySelectorAll('.katex').forEach(katexEl => ...)`（ChatGPT 公式轉譯）
+5. `clone.querySelectorAll('[data-testid*="attachment"]...').forEach(attEl => ...)`（ChatGPT 附件膠囊轉譯）
+6. `candidates.filter(node => ...)`（Claude AI 回覆節點過濾）
+7. `nodes.filter(n => ...)`（Claude 使用者提問節點過濾）
+8. `allTurns.filter(turn => ...)`（AI Studio Model 輪次過濾）
+9. `candidates.filter(node => ...)`（DeepSeek 節點過濾）
+10. `nodes.filter(n => ...)`（DeepSeek 使用者節點過濾）
+11. `rawNodes.filter(node => ...)`（千問 AI 節點過濾）
+12. `rawNodes.filter(node => ...)`（千問 使用者節點過濾）
+13. `unwantedSelectors.forEach(sel => ...)`（千問 雜訊移除）
+14. `rawSegments.forEach(s => ...)`（Kimi AI 片段篩選）
+15. `rawNodes.map(s => ...)`（Kimi 使用者節點 map）
+16. `rawNodes.filter(n => ...)`（Kimi 使用者節點過濾）
+17. `unwantedSelectors.forEach(sel => ...)`（Kimi 雜訊移除）
+18. `items.filter(it => ...)`（智譜 AI 條目過濾）
+19. `aiItems.forEach(it => ...)`（智譜 AI 節點提取）
+20. `items.filter(it => ...)`（智譜 使用者條目過濾）
+21. `userItems.filter(n => ...)`（智譜 使用者節點過濾）
+22. `unwanted.forEach(sel => ...)`（智譜 雜訊移除）
+23. `proseCandidates.filter(el => ...)`（Mistral AI prose 節點文字過濾）
+24. `clone.querySelectorAll('div, span, p').forEach(el => ...)`（Mistral Assistant 標籤剝離）
+25. `candidates.filter(el => ...)`（Perplexity AI 節點文字過濾）
+26. `candidates.filter(el => ...)`（Z.AI 回覆節點過濾）
+27. `allButtons.filter(b => ...)`（Z.AI M12.668 複製按鈕過濾）
+28. `rawNodes.filter(node => ...)`（MiniMax AI 節點文字過濾）
+
+
+### 2. 非同步等待與定時器回呼 (共 4 處)
+29. `new Promise(r => setTimeout(r, 20))`（AI Studio 鉛筆編輯等待 Promise）
+30. `new Promise(r => setTimeout(r, 30))`（AI Studio 選單輪詢等待 Promise）
+31. `new Promise(r => setTimeout(r, 120))`（AI Studio 原生選單點擊等待 Promise）
+32. `new Promise(r => setTimeout(r, 150))`（智譜 原生複製等待 Promise）
+
+
+### 3. 表格與代碼解析回呼 (共 4 處)
+33. `headerCells.forEach(cell => ...)`（表格標頭 cell 遍歷）
+34. `headers.map(() => '---')`（表格分隔線生成）
+35. `cells.map(c => ...)`（表格單元格資料清洗）
+36. `cmLines.map(ln => ...)`（CodeMirror 6 代碼逐行提取）
+
+
+### 4. 雜訊清洗與管線遍歷 (共 3 處)
+37. `candidates.forEach(el => ...)`（AI Studio Model 節點搜尋）
+38. `unwantedSelectors.forEach(sel => ...)`（AI Studio 雜訊移除）
+39. `UNIVERSAL_NOISE_SELECTORS.forEach(sel => ...)`（全域雜訊選擇器遍歷）
+
+
+### 5. UI 排版、熱鍵與按鈕掛載分流回呼 (共 7 處)
+40. `lines.forEach(line => ...)`（純字串雜訊逐行遍歷）
+41. `lines.forEach(line => ...)`（正則雜訊逐行遍歷）
+42. `matches.forEach(m => ...)`（`executeSingleMatchSlice` 最長代碼塊遍歷篩選）
+43. `sliceButtonNodes.forEach(b => rightCol.appendChild(b))`（階梯佈局右欄切片掛載）
+44. `sliceButtonNodes.forEach((b, idx) => ...)`（3+2 雙排網格佈局分流掛載）
+45. `btnGear.oncontextmenu = (e) => ...`（齒輪按鈕右鍵強制清空暫存池事件監聽回呼）
+46. `window.addEventListener('resize', () => ... toast邊界校驗)`（視窗縮放時校驗長亮 Toast 邊界之回呼）
