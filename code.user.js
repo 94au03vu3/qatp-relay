@@ -979,10 +979,11 @@
                 applyLocalOnlyOverrides(globalConfig, preservedLocal);
 
 
-                if (preservedHotkeys.captureHotkey && globalConfig.qaQueueSettings) {
+                // 【Hotfix-02】：由 truthy 檢查改為 !== undefined 嚴格型別校驗
+                if (typeof preservedHotkeys.captureHotkey !== 'undefined' && globalConfig.qaQueueSettings) {
                     globalConfig.qaQueueSettings.captureHotkey = preservedHotkeys.captureHotkey;
                 }
-                if (preservedHotkeys.summaryHotkey && globalConfig.qaQueueSettings) {
+                if (typeof preservedHotkeys.summaryHotkey !== 'undefined' && globalConfig.qaQueueSettings) {
                     globalConfig.qaQueueSettings.summaryHotkey = preservedHotkeys.summaryHotkey;
                 }
 
@@ -2202,11 +2203,23 @@
         await new Promise(r => setTimeout(r, 200));
 
 
+        // 【Hotfix-01】：以 try-catch 包覆讀取並於異常時平滑降級至 DOM 轉譯
         if (navigator.clipboard && navigator.clipboard.readText) {
-            const clipText = await navigator.clipboard.readText();
-            if (clipText && clipText.trim().length > 0) {
-                return clipText.trim();
+            try {
+                const clipText = await navigator.clipboard.readText();
+                if (clipText && clipText.trim().length > 0) {
+                    return clipText.trim();
+                }
+            } catch (clipErr) {
+                console.warn('⚠️ [AI Copy] Claude 剪貼簿讀取受阻，降級至 DOM 轉譯:', clipErr);
             }
+        }
+
+
+        // 若剪貼簿讀取失敗或拒絕，自動降級嘗試 DOM 轉譯提取
+        const artifactRegion = document.querySelector('[data-testid*="artifact"], [class*="artifact"], [role="region"]');
+        if (artifactRegion) {
+            return domToMarkdown(artifactRegion, Adapters.Claude.cleanNode);
         }
         return null;
     }
@@ -2425,11 +2438,12 @@
         let stableRounds = 0;
 
 
+        // 【Hotfix-03】：下放文字長度門檻至 > 0，並增加逾時非空兜底
         while (Date.now() - startTime < 10000) {
             const drawer = document.querySelector('div[data-testid="markdown-view"], div[data-testid="previewer-content"]');
             if (drawer) {
                 const txt = (drawer.innerText || drawer.textContent || '').trim();
-                if (txt.length > 30) {
+                if (txt.length > 0) {
                     if (txt === lastObservedText) {
                         stableRounds++;
                         if (stableRounds >= 2) {
@@ -2443,6 +2457,12 @@
                 }
             }
             await new Promise(r => setTimeout(r, 200));
+        }
+
+
+        // 兜底保底：若因極端延遲未達煞車，只要內容非空仍判定就緒
+        if (!isReady && lastObservedText.length > 0) {
+            isReady = true;
         }
 
 
