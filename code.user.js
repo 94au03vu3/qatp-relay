@@ -1,894 +1,1915 @@
 // ==UserScript==
-// @name         AI 雙模式乾淨複製器
-// @namespace    https://github.com/
-// @version      4.3.4
-// @description  精準過濾 AI 思考過程與工具欄雜訊，一鍵複製 Markdown。支援 ChatGPT、Claude、DeepSeek、通義千問、Kimi、Google AI Studio、智譜 AI、Mistral AI Playground、Perplexity AI、Z.AI 及 MiniMax Agent 旗艦 11 合 1。v4.3.4 實裝 Claude 雙軌 Artifacts 抽屜擴充、資料生命週期對稱治理與動態水合煞車。
-// @author       Frontend Integration Engineering Team
-// @match        https://chatgpt.com/*
-// @match        https://chat.openai.com/*
-// @match        https://claude.ai/*
-// @match        https://chat.deepseek.com/*
-// @match        https://chat.qwen.ai/*
-// @match        https://tongyi.aliyun.com/*
-// @match        https://kimi.ai/*
-// @match        https://*.kimi.ai/*
-// @match        https://kimi.moonshot.cn/*
-// @match        https://*.moonshot.cn/*
-// @match        https://www.kimi.com/chat/*
-// @match        https://aistudio.google.com/*
-// @match        https://chatglm.cn/*
-// @match        https://*.bigmodel.cn/*
-// @match        https://console.mistral.ai/*
-// @match        https://www.perplexity.ai/*
-// @match        https://perplexity.ai/*
-// @match        https://chat.z.ai/*
-// @match        https://agent.minimax.io/*
-// @match        https://*.minimax.io/*
-// @grant        GM_setClipboard
+// @name         股市爆料同學會-輔助工具
+// @namespace    http://tampermonkey.net/
+// @version      3.9.0
+// @description  架構躍進版：智慧零點擊Profile路由、Google試算表雲端同步、雙欄拓寬佈局、失焦複製防禦與批次防踩踏
+// @author       AI Helper & Architect
+// @match        *://www.cmoney.tw/forum/watchlist*
+// @match        *://www.cmoney.tw/forum/stock/*
+// @match        *://www.cmoney.tw/forum/market*
+// @icon         https://pic.imgdd.cc/item/698340fcd9c88c98816d3f74.png
+// @homepage     https://greasyfork.org/zh-TW/scripts/570486
+// @updateURL    https://update.greasyfork.org/scripts/570486/%E8%82%A1%E5%B8%82%E7%88%86%E6%96%99%E5%90%8C%E5%AD%B8%E6%9C%83-%E8%BC%94%E5%8A%A9%E5%B7%A5%E5%85%B7.meta.js
+// @downloadURL  https://update.greasyfork.org/scripts/570486/%E8%82%A1%E5%B8%82%E7%88%86%E6%96%99%E5%90%8C%E5%AD%B8%E6%9C%83-%E8%BC%94%E5%8A%A9%E5%B7%A5%E5%85%B7.user.js
+// @license      MIT
+// @grant        GM_addStyle
 // @grant        GM_setValue
 // @grant        GM_getValue
-// @grant        GM_addStyle
+// @grant        GM_setClipboard
 // @grant        GM_registerMenuCommand
 // @grant        GM_xmlhttpRequest
-// @icon         https://pic.imgdd.cc/i/034KFA32qXGmXFBp3GGyNP.png
+// @grant        unsafeWindow
 // @connect      docs.google.com
 // @connect      googleusercontent.com
-// @noframes
-// @run-at       document-idle
-// @license      MIT
+// @connect      google.com
+// @run-at       document-start
 // ==/UserScript==
 
 
-(function () {
+// --- 0. 資料攔截層 (XHR & Fetch 雙軌攔截器) ---
+window.__cm_kline_data_cache = null; 
+(function setupNetworkInterceptor() {
+    const targetWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+    
+    // [1] XHR 攔截 (相容舊版與部分框架)
+    const origOpen = targetWindow.XMLHttpRequest.prototype.open;
+    const origSend = targetWindow.XMLHttpRequest.prototype.send;
+    
+    targetWindow.XMLHttpRequest.prototype.open = function(method, url) {
+        this._reqUrl = url;
+        const targetUrl = String(url || "");
+        if (targetUrl.includes('GetDtnoData.ashx') || targetUrl.includes('/dtno/JsonCsv')) {
+            window.__cm_kline_data_cache = null;
+        }
+        return origOpen.apply(this, arguments);
+    };
+    
+    targetWindow.XMLHttpRequest.prototype.send = function() {
+        this.addEventListener('load', function() {
+            const targetUrl = String(this._reqUrl || "");
+            if ((targetUrl.includes('GetDtnoData.ashx') || targetUrl.includes('/dtno/JsonCsv')) && this.status === 200) {
+                try {
+                    let res = null;
+                    if (this.responseType === 'json') {
+                        res = this.response;
+                    } else if (this.responseType === '' || this.responseType === 'text') {
+                        const text = this.responseText;
+                        if (text && typeof text === 'string') { res = JSON.parse(text); }
+                    }
+                    processInterceptedData(res);
+                } catch (e) {
+                    console.warn('CM Scraper XHR Parse Error:', e);
+                }
+            }
+        });
+        return origSend.apply(this, arguments);
+    };
+
+
+    // [2] Fetch 攔截 (防禦框架現代化轉移)
+    const origFetch = targetWindow.fetch;
+    if (origFetch) {
+        targetWindow.fetch = async function() {
+            let requestUrl = "";
+            if (typeof arguments[0] === "string" || arguments[0] instanceof URL) {
+                requestUrl = String(arguments[0]);
+            } else if (arguments[0] && typeof arguments[0].url === "string") {
+                requestUrl = arguments[0].url;
+            }
+            
+            if (requestUrl.includes('GetDtnoData.ashx') || requestUrl.includes('/dtno/JsonCsv')) {
+                window.__cm_kline_data_cache = null;
+            }
+            
+            const response = await origFetch.apply(this, arguments);
+            const clone = response.clone();
+            
+            if (requestUrl.includes('GetDtnoData.ashx') || requestUrl.includes('/dtno/JsonCsv')) {
+                clone.text().then(text => {
+                    try {
+                        const res = JSON.parse(text);
+                        processInterceptedData(res);
+                    } catch(e) {}
+                });
+            }
+            return response;
+        };
+    }
+
+
+    // [3] 資料降級轉換引擎 (自動適配新舊版 API 給底層 Parser)
+    function processInterceptedData(res) {
+        if (!res) return;
+        
+        // 舊版格式 (純陣列)
+        if (Array.isArray(res.Data) && Array.isArray(res.Title)) {
+            window.__cm_kline_data_cache = res;
+        } 
+        // 新版格式 (JsonCsv)
+        else if (res.columns && res.rows && Array.isArray(res.rows)) {
+            const titleKeys = Object.keys(res.columns);
+            const dateIdx = titleKeys.findIndex(k => k.includes("日期"));
+            window.__cm_kline_data_cache = {
+                Title: titleKeys,
+                Data: res.rows.map(row => {
+                    let newRow = [...row];
+                    if (dateIdx !== -1 && newRow[dateIdx] != null) {
+                        let dStr = String(newRow[dateIdx]);
+                        // 將 20260611 自動補上斜線變為 2026/06/11
+                        if (dStr.length === 8 && !dStr.includes('/') && !dStr.includes('-')) {
+                            newRow[dateIdx] = dStr.substring(0,4) + '/' + dStr.substring(4,6) + '/' + dStr.substring(6,8);
+                        } else if (dStr.length === 7 && !dStr.includes('/') && !dStr.includes('-')) {
+                            newRow[dateIdx] = dStr.substring(0,3) + '/' + dStr.substring(3,5) + '/' + dStr.substring(5,7);
+                        }
+                    }
+                    return newRow;
+                })
+            };
+        }
+    }
+})();
+
+
+// --- 主程式封裝 ---
+function initMainApp() {
     'use strict';
 
 
-    // ==========================================
-    // 0. 全局常數與預設資料結構 (Global Config v4.3.4 定稿)
-    // ==========================================
-    const CONFIG_KEY = 'ai_copy_global_config_v3';
-    const QA_QUEUE_KEY = 'ai_copy_qa_queue_v1';
-    const UI_CONTAINER_ID = 'ai-universal-copy-container';
-    const FLOATING_ORB_ID = 'ai-copy-floating-orb';
-    const MODAL_OVERLAY_ID = 'ai-copy-modal-overlay';
+    function safeInt(val, fallback) {
+        const parsed = parseInt(val, 10);
+        return isNaN(parsed) ? fallback : parsed;
+    }
 
 
-    const ALL_SITE_DEFS = {
-        aistudio:   { id: 'aistudio',   label: 'Gemini' },
-        deepseek:   { id: 'deepseek',   label: 'DeepSeek' },
-        qwen:       { id: 'qwen',       label: '千問' },
-        kimi:       { id: 'kimi',       label: 'Kimi' },
-        chatgpt:    { id: 'chatgpt',    label: 'ChatGPT' },
-        claude:     { id: 'claude',     label: 'Claude' },
-        perplexity: { id: 'perplexity', label: 'Perplexity' },
-        zhipu:      { id: 'zhipu',      label: '智譜' },
-        zai:        { id: 'zai',        label: 'Z.AI' },
-        mistral:    { id: 'mistral',    label: 'Mistral' },
-        minimax:    { id: 'minimax',    label: 'MiniMax' }
+    function escapeHtml(str) {
+        if (str == null) return "";
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+
+    const DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1UzJHDONTLNPJiH2nQ_Wau50hLQSf2jV6Fe_RexTWU_I/edit?usp=sharing";
+
+
+    const CONFIG = {
+        eps: safeInt(GM_getValue("limit_eps", 12), 12),
+        revenue: safeInt(GM_getValue("limit_rev", 12), 12),
+        income: safeInt(GM_getValue("limit_income", 8), 8),
+        balance: safeInt(GM_getValue("limit_balance", 8), 8),
+        cashflow: safeInt(GM_getValue("limit_cashflow", 12), 12),
+        div_stock: safeInt(GM_getValue("limit_div_stock", 7), 7),
+        div_etf: safeInt(GM_getValue("limit_div_etf", 24), 24),
+        pepb: safeInt(GM_getValue("limit_pepb", 60), 60),
+        constituents: safeInt(GM_getValue("limit_const", 10), 10),
+        discount: safeInt(GM_getValue("limit_discount", 10), 10),
+        drawdown: safeInt(GM_getValue("limit_drawdown", 10), 10),
+        shareholding: safeInt(GM_getValue("limit_share", 20), 20),
+        stockfindetail: safeInt(GM_getValue("limit_fin", 12), 12),
+        div_comp: safeInt(GM_getValue("limit_divcomp", 12), 12),
+        kline_days: safeInt(GM_getValue("limit_kline", 60), 60),
+        market_kline_days: safeInt(GM_getValue("limit_market_kline", 60), 60),
+        kline_type: GM_getValue("cm_kline_type", "week"),
+        kline_sort: GM_getValue("cm_kline_sort", "desc"),
+        white_list: GM_getValue("white_list", "2330,2317"),
+        black_list: GM_getValue("black_list", "0050,006208"),
+        font_offset: safeInt(GM_getValue("font_offset", 0), 0),
+        drawer_top: safeInt(GM_getValue("drawer_top", 200), 200),
+        drawer_side: GM_getValue("cm_drawer_side", "right"),
+        panel_pos: GM_getValue("panel_pos", {top: 150, left: 200}),
+        is_panel_open: GM_getValue("is_panel_open", false),
+        left_open: GM_getValue("cm_left_open", false),
+        right_open: GM_getValue("cm_right_open", false),
+        current_cat_id: safeInt(GM_getValue("cm_current_cat_id", 0), 0),
+        current_profile_id: safeInt(GM_getValue("cm_current_profile_id", 4), 4),
+        hotkey_single: GM_getValue("cm_hk_single", "F7"),
+        hotkey_batch: GM_getValue("cm_hk_batch", "F8"),
+        hotkey_recopy: GM_getValue("cm_hk_recopy", "F9"),
+        sync_sheet_url: GM_getValue("cm_sync_sheet_url", DEFAULT_SHEET_URL),
+        default_stock_prof: safeInt(GM_getValue("cm_default_stock_prof", 4), 4),
+        default_etf_prof: safeInt(GM_getValue("cm_default_etf_prof", 10), 10)
     };
 
 
-    const DEFAULT_CONFIG = {
-        activeProfileId: 'profile_1',
-        uiPosition: null,   // 主卡片螢幕座標 { left, top }
-        orbPosition: null,  // 小光球螢幕座標 { left, top }
-        toastPosition: null,// Toast 獨立本機座標 { left, top }
-        isCollapsed: false, // 是否處於小光球收納狀態
-        siteTabOrder: ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'claude', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'],
-        jsonSyncUrl: 'https://docs.google.com/document/d/1csaLbqi49GJhWLutrhkMdTwy4eOuXgmK29zS6arHCTI/edit?usp=sharing',
-        exportScope: {
-            content: true,
-            coords: false,
-            layout: false
+    const DEFAULT_ACC_STATE = {
+        'acc-basic': true, 'acc-finance': true, 'acc-chip': true, 'acc-etf': true, 'acc-tech': true,
+        'acc-cfg-fin': true, 'acc-cfg-etf': true, 'acc-cfg-chip': true
+    };
+    const ACC_STATE = GM_getValue("cm_acc_state", DEFAULT_ACC_STATE);
+
+
+    // 出廠真理源定錨：v3.9.0 配置
+    const DEFAULT_CATEGORIES = [
+        {
+            catId: 0,
+            catName: "存股",
+            profiles: [
+                {
+                    id: 4,
+                    name: "全方位財報掃描",
+                    modules: ["profile", "realtime", "kline", "market_kline", "eps", "revenue", "income-statement", "balance-sheet", "stockfindetail", "revenue-source", "cash-flow", "financial-ratio", "pe", "pb", "dividend", "shareholding", "institutional-target"],
+                    kline_cfg: { stock_type: "week", stock_limit: 60, market_type: "week", market_limit: 60 }
+                },
+                {
+                    id: 0,
+                    name: "營收成長健檢",
+                    modules: ["profile", "realtime", "kline", "market_kline", "eps", "revenue", "income-statement", "stockfindetail", "revenue-source", "dividend", "pe", "institutional-target"],
+                    kline_cfg: { stock_type: "week", stock_limit: 24, market_type: "week", market_limit: 24 }
+                },
+                {
+                    id: 1,
+                    name: "存股領息防護網",
+                    modules: ["profile", "realtime", "kline", "market_kline", "dividend", "eps", "balance-sheet", "cash-flow", "financial-ratio", "pb", "revenue-source"],
+                    kline_cfg: { stock_type: "week", stock_limit: 52, market_type: "week", market_limit: 52 }
+                },
+                {
+                    id: 2,
+                    name: "高股息/REITs專用",
+                    modules: ["profile", "realtime", "kline", "market_kline", "dividend", "pb", "balance-sheet", "cash-flow", "financial-ratio", "revenue-source"],
+                    kline_cfg: { stock_type: "month", stock_limit: 36, market_type: "week", market_limit: 52 }
+                },
+                {
+                    id: 3,
+                    name: "睡夢狙擊/底部尋寶",
+                    modules: ["realtime", "kline", "market_kline", "pb", "pe", "balance-sheet", "stockfindetail", "cash-flow", "revenue-source", "shareholding", "institutional-target"],
+                    kline_cfg: { stock_type: "month", stock_limit: 60, market_type: "week", market_limit: 60 }
+                }
+            ]
         },
-        toastSettings: {
-            fontSize: 18,
-            background: 'linear-gradient(135deg, rgba(88, 28, 135, 0.95), rgba(124, 58, 237, 0.92))'
+        {
+            catId: 1,
+            catName: "衛星",
+            profiles: [
+                { "id": 5, "name": "波段群組 1 (動能突破)", "modules": ["realtime", "kline", "market_kline", "revenue", "eps", "stockfindetail", "shareholding", "pe", "revenue-source"], "kline_cfg": { "stock_type": "day", "stock_limit": 60, "market_type": "day", "market_limit": 60 } },
+                { "id": 6, "name": "波段群組 2 (籌碼狙擊)", "modules": ["realtime", "kline", "market_kline", "shareholding", "revenue", "eps"], "kline_cfg": { "stock_type": "day", "stock_limit": 40, "market_type": "day", "market_limit": 40 } },
+                { "id": 7, "name": "波段群組 3", "modules": ["realtime", "kline", "market_kline", "revenue", "eps", "stockfindetail", "shareholding", "revenue-source"], "kline_cfg": { "stock_type": "day", "stock_limit": 60, "market_type": "day", "market_limit": 60 } },
+                { "id": 8, "name": "波段群組 4", "modules": ["realtime", "kline", "market_kline", "revenue", "eps", "stockfindetail", "shareholding", "revenue-source"], "kline_cfg": { "stock_type": "day", "stock_limit": 60, "market_type": "day", "market_limit": 60 } },
+                { "id": 9, "name": "波段群組 5", "modules": ["realtime", "kline", "market_kline", "revenue", "eps", "stockfindetail", "shareholding", "revenue-source"], "kline_cfg": { "stock_type": "day", "stock_limit": 60, "market_type": "day", "market_limit": 60 } }
+            ]
         },
-        qaQueueSettings: {
-            captureHotkey: 'F4',
-            summaryHotkey: 'F7',
-            ttlHours: 2,
-            targetCount: 6,               // 滿額站點數閾值 (0 為停用)
-            keepQueueOnAutoSummary: true, // 滿額自動總結後是否保留佇列 (滾動更新模式)
-            siteActions: {
-                aistudio: 'SINGLE',
-                deepseek: 'SINGLE',
-                qwen: 'SINGLE',
-                kimi: 'SINGLE',
-                chatgpt: 'SINGLE',
-                claude: 'SINGLE',
-                perplexity: 'SINGLE',
-                zhipu: 'SINGLE',
-                zai: 'PREVIEW',
-                mistral: 'SINGLE',
-                minimax: 'PREVIEW'
+        {
+            catId: 2,
+            catName: "ETF專區",
+            profiles: [
+                { "id": 10, "name": "市值型 ETF 分析", "modules": ["profile", "realtime", "kline", "market_kline", "constituent", "discount", "trading-fee", "risk", "drawdown", "dividend"], "kline_cfg": { "stock_type": "week", "stock_limit": 52, "market_type": "week", "market_limit": 52 } },
+                { "id": 11, "name": "高股息 ETF 分析", "modules": ["profile", "realtime", "kline", "market_kline", "constituent", "discount", "div_comp", "trading-fee", "risk", "drawdown", "dividend"], "kline_cfg": { "stock_type": "week", "stock_limit": 52, "market_type": "week", "market_limit": 52 } },
+                { "id": 12, "name": "債券型 ETF 分析", "modules": ["profile", "realtime", "kline", "market_kline", "constituent", "discount", "div_comp", "trading-fee", "risk", "drawdown", "dividend"], "kline_cfg": { "stock_type": "week", "stock_limit": 52, "market_type": "week", "market_limit": 52 } },
+                { "id": 13, "name": "主動式 / 產業 ETF", "modules": ["profile", "realtime", "kline", "market_kline", "constituent", "discount", "trading-fee", "risk", "drawdown", "dividend"], "kline_cfg": { "stock_type": "week", "stock_limit": 52, "market_type": "week", "market_limit": 52 } },
+                { "id": 14, "name": "自訂 ETF 組合", "modules": ["profile", "realtime", "kline", "market_kline", "constituent", "discount", "div_comp", "trading-fee", "risk", "drawdown", "dividend"], "kline_cfg": { "stock_type": "week", "stock_limit": 52, "market_type": "week", "market_limit": 52 } }
+            ]
+        }
+    ];
+
+
+    let CATEGORIES = GM_getValue("cm_scrape_categories", DEFAULT_CATEGORIES);
+    if (!Array.isArray(CATEGORIES) || CATEGORIES.length === 0 || !CATEGORIES.every(c => Array.isArray(c.profiles))) {
+        CATEGORIES = DEFAULT_CATEGORIES;
+    }
+
+
+    // 原子化儲存 CATEGORIES 守衛函式 (FIX-03)
+    function saveCategories(mutatorFn) {
+        let currentCats = GM_getValue("cm_scrape_categories", DEFAULT_CATEGORIES);
+        if (!Array.isArray(currentCats) || currentCats.length === 0 || !currentCats.every(c => Array.isArray(c.profiles))) {
+            currentCats = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
+        }
+        if (typeof mutatorFn === 'function') {
+            mutatorFn(currentCats);
+        }
+        CATEGORIES = currentCats;
+        GM_setValue("cm_scrape_categories", currentCats);
+    }
+
+
+    let isExpanded = GM_getValue("isExpanded", true);
+    let lastUrl = location.href;
+    let batchMonitorTimer = null;
+    let singleScrapePoller = null; 
+    let lastSniffedStockId = "";
+    let userManuallySelectedProfile = false;
+
+
+    GM_registerMenuCommand("🔄 重置面板位置 (尋回 UI)", function() {
+        const defaultPos = { top: 150, left: 200 };
+        GM_setValue("panel_pos", defaultPos);
+        GM_setValue("drawer_top", 200);
+
+
+        const panel = document.getElementById('cm-main-panel');
+        if (panel) {
+            panel.style.top = defaultPos.top + 'px';
+            panel.style.left = defaultPos.left + 'px';
+        }
+        const btn = document.getElementById('cm-drawer-btn');
+        if (btn) btn.style.top = '200px';
+        showToast("✅ 面板位置已重置為預設座標");
+    });
+
+
+    function getDynamicUIParams() {
+        const off = CONFIG.font_offset;
+        return {
+            f11: 11 + 2 + off,
+            f12: 12 + 2 + off,
+            f13: 13 + 2 + off,
+            f14: 14 + 2 + off,
+            f18: 18 + 2 + off,
+            f24: 24 + 2 + off,
+            centerW: 460 + (off * 16),
+            drawerW: 260 + (off * 12),
+            cbSize: 14 + off
+        };
+    }
+
+
+    function injectStyles() {
+        const ui = getDynamicUIParams();
+        const drawerPosCss = CONFIG.drawer_side === 'left' ? 'left: 0; border-radius: 0 12px 12px 0;' : 'right: 0; border-radius: 12px 0 0 12px;';
+
+
+        GM_addStyle(`
+            :root { --cm-fs: ${ui.f14}px; --cm-hfs: ${ui.f18}px; }
+            .selectBar__options, .selectBar__menu { z-index: 999999 !important; }
+            body.cm-liberator-active #StockRevPanel { max-width: none !important; width: 100% !important; }
+            body.cm-liberator-active main > div > div:nth-child(2) { max-width: 96vw !important; width: auto !important; flex: 1 0 auto !important; }
+            body.cm-liberator-active .dividend__wrapper--table, body.cm-liberator-active .reinvestment__table, body.cm-liberator-active .legalPerson__table, body.cm-liberator-active .revenueSource__table, body.cm-liberator-active #StockRevPanel section > div > section, body.cm-liberator-active .stockPanel__view section, body.cm-liberator-active .stockPanel__view section > div > section { overflow-x: visible !important; overflow-y: visible !important; max-width: none !important; display: block !important; position: relative !important; width: auto !important; }
+            body.cm-liberator-active thead { position: sticky !important; top: 0 !important; z-index: 110 !important; transform: none !important; background-color: #1a1a1a !important; }
+            body.cm-liberator-active thead th, body.cm-liberator-active thead tr { background-color: #262626 !important; color: #fff !important; transform: none !important; border-bottom: 2px solid #444 !important; }
+            body.cm-liberator-active table { width: max-content !important; min-width: 100% !important; border-collapse: separate !important; }
+
+            #cm-drawer-btn { position: fixed; ${drawerPosCss} top: ${CONFIG.drawer_top}px; width: 45px; height: 55px; background: #fcc111; color: #000; display: ${CONFIG.is_panel_open ? 'none' : 'flex'}; align-items: center; justify-content: center; cursor: move; z-index: 999999; user-select: none; font-size: ${ui.f24}px; box-shadow: -2px 0 10px rgba(0,0,0,0.5); }
+
+            #cm-main-panel { position: fixed; top: ${CONFIG.panel_pos.top}px; left: ${CONFIG.panel_pos.left}px; background: #262626; color: #fcc111; border: 2px solid #fcc111; z-index: 999998; border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.7); display: ${CONFIG.is_panel_open ? 'flex' : 'none'}; flex-direction: column; overflow: hidden; }
+            #cm-panel-head { background: #333; padding: 10px 15px; cursor: move; display: flex; justify-content: space-between; align-items: center; font-size: var(--cm-hfs); font-weight: bold; border-bottom: 1px solid #444; flex-shrink: 0 !important; }
+
+            .cc-drawer-row { display: flex; align-items: flex-start; justify-content: center; background: #262626; }
+            .cc-center-stage { 
+                flex-shrink: 0; 
+                width: ${ui.centerW}px; 
+                display: flex; 
+                flex-direction: column; 
+                padding: 12px; 
+                max-height: 85vh !important; 
+                overflow-y: auto !important; 
+                overflow-x: hidden !important; 
+                box-sizing: border-box !important; 
             }
-        },
-        noiseSettings: {
-            pipelineOrder: 'string_first',
-            customNoiseStrings:
-                '# 每行一條免轉義純字串，精確消除 (支援 # 註解)\n' +
-                '\n' +
-                '\n' +
-                '\n' +
-                '\n',
-            customNoiseRegexes:
-                '# 每行一條正則表達式 (/pattern/flags)\n' +
-                '/[^\\n]*尖峰時段使用量較高[，,][^\\n]*(?:升級即可使用|思考|快速|請稍後再試)[^\\n]*\\n?/gi\n' +
-                '/[^\\n]*(?:當前使用人數較多|当前使用人数较多|高峰時段使用量較高|高峰期使用量較高)[，,][^\\n]*\\n?/gi\n' +
-                '/(?:試算表|表格)\\s*(?:複製|复制|下载|下載)/gi\n'
-        },
-        uiSettings: {
-            showCleanSingle: true,
-            showFullThread: true,
-            purplePosition: 'bottom'
-        },
-        aiStudioSettings: {
-            primaryEngine: 'native_menu',
-            sliceLayout: 'staircase',
-            purplePosition: 'inherit',
-            wheelSwitchScope: 'capsule_only', // 'capsule_only' | 'control_group' | 'entire_toolbar'
-            activeModuleId: 'module_1',
-            fallbackAction: 'warn_block',     // 'warn_block' | 'lenient_full' | 'custom_string'
-            fallbackCustomText: '[ERROR: 錨點切片未命中]',
-            modules: {
-                module_1: {
-                    id: 'module_1',
-                    name: '專案發包組',
-                    badgeText: '發包',
-                    badgeColor: '#1E88E5',
-                    buttons: [
-                        {
-                            id: 'm1_btn_1',
-                            name: '✂️ 截取 QATP',
-                            mode: 'match',
-                            enabled: true,
-                            pattern: '/(?:##?\\s*【?貳[、\\s]+QA\\s*測試驗證任務書[\\s\\S]*)$/i',
-                            fallbackPattern: '/(?:##?\\s*.*(?:QA|測試驗證任務書)[\\s\\S]*)$/i',
-                            replaceValue: '',
-                            isCodeBlockTarget: false,
-                            prefix: 'https://docs.google.com/document/d/1TDprIAm5WMbVc0k6Nv-DmS89RVOnx1BRYM13EcqjNSQ/edit?usp=sharing',
-                            suffix: '',
-                            autoDivider: true
-                        },
-                        {
-                            id: 'm1_btn_2',
-                            name: '📑 截取純 PRD',
-                            mode: 'match',
-                            enabled: true,
-                            pattern: '/(#\\s*📑[\\s\\S]*?)(?:\\n=== 複製結束線|\\n=== TARGET_CODE_START ===|$)/i',
-                            fallbackPattern: '/((?:#\\s*【?PRD|##?\\s*模組一)[\\s\\S]*?)(?:\\n=== 複製結束線|\\n=== TARGET_CODE_START ===|$)/i',
-                            replaceValue: '',
-                            isCodeBlockTarget: false,
-                            prefix: '',
-                            suffix: '',
-                            autoDivider: false
-                        },
-                        {
-                            id: 'm1_btn_3',
-                            name: '📝 截取迭代需求',
-                            mode: 'match',
-                            enabled: true,
-                            pattern: '/<<< BACKLOG_START >>>[^\\S\\r\\n]*\\r?\\n?([\\s\\S]*?)\\r?\\n?[^\\S\\r\\n]*<<< BACKLOG_END >>>/i',
-                            fallbackPattern: '/(?:^|\\n)[ \\t]*(?:>+[ \\t]*)?(#{1,4}\\s*.*?(?:PM\\s*迭代|未來需求|Backlog\\s*Notes)[\\s\\S]*?)(?=\\r?\\n[ \\t]*(?:---[ \\t]*\\r?\\n|#{1,2}\\s+[^#\\n]|===|<<<)|$)/i',
-                            replaceValue: '',
-                            isCodeBlockTarget: false,
-                            prefix: '',
-                            suffix: '\n\n',
-                            autoDivider: false
-                        },
-                        {
-                            id: 'm1_btn_4',
-                            name: '📦 截取開工全包',
-                            mode: 'match',
-                            enabled: true,
-                            pattern: '/(=== 複製起始線[\\s\\S]*?=== 複製結束線 ===)/i',
-                            fallbackPattern: '/(=== 複製起始線[\\s\\S]*?=== 複製結束線)/i',
-                            replaceValue: '',
-                            isCodeBlockTarget: false,
-                            prefix: '',
-                            suffix: '',
-                            autoDivider: false
-                        },
-                        {
-                            id: 'm1_btn_5',
-                            name: '💻 截取生產代碼',
-                            mode: 'match',
-                            enabled: true,
-                            pattern: '/```(?:javascript|js|typescript|ts|python|py|ini|autohotkey|ahk2)?[^\\S\\r\\n]*[^\\r\\n]*\\r?\\n([\\s\\S]*)\\r?\\n```/i',
-                            fallbackPattern: '/```([\\s\\S]*)```/i',
-                            replaceValue: '',
-                            isCodeBlockTarget: true,
-                            prefix: '',
-                            suffix: '',
-                            autoDivider: false
-                        }
-                    ]
-                },
-                module_2: {
-                    id: 'module_2',
-                    name: '代碼測試組',
-                    badgeText: '代碼',
-                    badgeColor: '#43A047',
-                    buttons: [
-                        { id: 'm2_btn_1', name: '📜 截取交接檔', mode: 'match', enabled: true, pattern: '/((?:#\\s*📜|#\\s*【|#\\s*《)[^#\\n]*交接[\\s\\S]*)$/i', fallbackPattern: '', replaceValue: '', isCodeBlockTarget: false, prefix: '', suffix: '', autoDivider: false },
-                        { id: 'm2_btn_2', name: '🧪 截取測試例句', mode: 'match', enabled: true, pattern: '/(?:##?\\s*【?[第二三].*測試[\\s\\S]*?)(?:\\n##?|=== 字典全檔|$)/i', fallbackPattern: '', replaceValue: '', isCodeBlockTarget: false, prefix: '', suffix: '', autoDivider: false },
-                        { id: 'm2_btn_3', name: '🔍 截取審查報告', mode: 'match', enabled: true, pattern: '/(?:##?\\s*【?[第一].*報告[\\s\\S]*?)(?:\\n##?|=== 以下為|$)/i', fallbackPattern: '', replaceValue: '', isCodeBlockTarget: false, prefix: '', suffix: '', autoDivider: false },
-                        { id: 'm2_btn_4', name: '🧹 挖除思考過程', mode: 'replace', enabled: true, pattern: '/<think>[\\s\\S]*?<\\/think>\\r?\\n?/gi', fallbackPattern: '', replaceValue: '', isCodeBlockTarget: false, prefix: '', suffix: '', autoDivider: false },
-                        { id: 'm2_btn_5', name: '💻 截取純 JS/TS', mode: 'match', enabled: true, pattern: '/(?:\\/\\/\\s*==UserScript==[\\s\\S]*?\\n\\s*\\(\\)\\s*;\\s*)/i', fallbackPattern: '', replaceValue: '', isCodeBlockTarget: false, prefix: '', suffix: '', autoDivider: false }
-                    ]
-                },
-                module_3: {
-                    id: 'module_3',
-                    name: '日常備用組',
-                    badgeText: '日常',
-                    badgeColor: '#FB8C00',
-                    buttons: [
-                        {
-                            id: 'm3_btn_1',
-                            name: '📌 建議買進價格',
-                            mode: 'match',
-                            enabled: true,
-                            pattern: '/(?:^|\\n)\\s*📌\\s*(?:\\*\\*)?標的確認[\\s\\S]*$/',
-                            fallbackPattern: '',
-                            replaceValue: '',
-                            isCodeBlockTarget: false,
-                            prefix: '',
-                            suffix: '',
-                            autoDivider: false
-                        },
-                        {
-                            id: 'm3_btn_2',
-                            name: '🎯 建議買進價格',
-                            mode: 'match',
-                            enabled: true,
-                            pattern: '/((?:#{1,4}|[*+-])?\\s*🎯\\s*\\*{0,2}第[一1]階[\\s\\S]*)$/',
-                            fallbackPattern: '',
-                            replaceValue: '',
-                            isCodeBlockTarget: false,
-                            prefix: '',
-                            suffix: '',
-                            autoDivider: false
-                        },
-                        { id: 'm3_btn_3', name: '📌 自訂按鈕 3', mode: 'match', enabled: false, pattern: '', fallbackPattern: '', replaceValue: '', isCodeBlockTarget: false, prefix: '', suffix: '', autoDivider: false },
-                        { id: 'm3_btn_4', name: '📌 自訂按鈕 4', mode: 'match', enabled: false, pattern: '', fallbackPattern: '', replaceValue: '', isCodeBlockTarget: false, prefix: '', suffix: '', autoDivider: false },
-                        { id: 'm3_btn_5', name: '📌 自訂按鈕 5', mode: 'match', enabled: false, pattern: '', fallbackPattern: '', replaceValue: '', isCodeBlockTarget: false, prefix: '', suffix: '', autoDivider: false }
-                    ]
-                }
+            .cc-center-stage::-webkit-scrollbar { width: 6px; }
+            .cc-center-stage::-webkit-scrollbar-track { background: #262626; }
+            .cc-center-stage::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+            .cc-center-stage::-webkit-scrollbar-thumb:hover { background: #777; }
+
+            .cc-drawer { width: 0px; opacity: 0; overflow: hidden; transition: width 0.3s ease, opacity 0.2s ease, margin 0.3s ease; background: #1f1f1f; }
+            .cc-drawer.open { width: ${ui.drawerW}px; opacity: 1; border-left: 1px solid #444; border-right: 1px solid #444; }
+            .cc-drawer-content { width: ${ui.drawerW}px; box-sizing: border-box; padding: 12px; max-height: 80vh; overflow-y: auto; overflow-x: hidden; }
+
+            .cm-conf-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; color: #aaa; font-size: ${ui.f13}px; }
+            .cm-conf-input { width: 45px; background: #444; color: #fff; border: 1px solid #666; text-align: center; border-radius: 4px; font-size: ${ui.f13}px; padding: 2px; }
+            .cm-conf-select { flex:1; background: #444; color: #fff; border: 1px solid #666; border-radius: 4px; font-size: ${ui.f13}px; padding: 2px; max-width: 130px; text-align:right;}
+            .cm-list-area { width: 100%; min-height: 40px; background: #333; color: #ccc; border: 1px solid #555; font-size: ${ui.f12}px; margin-top: 3px; resize: vertical; padding: 5px; border-radius: 4px; box-sizing: border-box; font-family: monospace; }
+
+            .cm-json-title { font-size: ${ui.f14}px; font-weight:bold; color:#fcc111; margin-top:12px; border-bottom:1px solid #444; padding-bottom:3px; }
+
+            .cm-profile-area { background: #333; padding: 10px; border-radius: 8px; border: 1px solid #555; margin-bottom: 10px; flex-shrink: 0 !important; }
+
+            .cm-profile-header { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+            .cm-header-row { display: flex; gap: 6px; align-items: center; height: 30px; }
+            .cm-header-row select { flex: 1; background: #444; color: #fff; border: 1px solid #666; border-radius: 4px; font-size: ${ui.f13}px; padding: 0 6px; box-sizing: border-box; height: 100%; min-width: 0; }
+            .cm-btn-rename { background: #444; color: #fcc111; border: 1px solid #666; border-radius: 4px; font-size: ${ui.f12}px; cursor: pointer; height: 100%; padding: 0 8px; box-sizing: border-box; transition: 0.2s; display: flex; align-items: center; justify-content: center; font-weight: bold; white-space: nowrap; flex-shrink: 0; }
+            .cm-btn-rename:hover { background: #555; color: #fff; }
+
+            /* 雙欄 Grid 佈局 */
+            .cm-checkbox-area-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+            .cm-grid-full { grid-column: span 2; }
+            .cm-grid-left { grid-column: 1; }
+            .cm-grid-right { grid-column: 2; }
+
+            .cm-checkbox-grid { display: grid; grid-template-columns: 1fr; gap: 6px; }
+            .cm-cb-label { font-size: ${ui.f13}px; color: #ddd; display: flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; }
+            .cm-cb-input { accent-color: #fcc111; width: ${ui.cbSize}px; height: ${ui.cbSize}px; cursor: pointer; }
+
+            .cm-btn { width: 100%; padding: 8px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: ${ui.f14}px; margin-bottom: 8px; transition: filter 0.2s; flex-shrink: 0 !important; }
+            .cm-btn:hover { filter: brightness(1.1); }
+            .cm-btn:disabled { filter: grayscale(0.8); cursor: not-allowed; }
+            .cm-btn-save { background: #28a745; color: #fff; font-size: ${ui.f13}px; }
+            .cm-btn-batch { background: #007bff; color: #fff; font-size: ${ui.f14}px; }
+            .cm-btn-single { background: #fcc111; color: #000; }
+
+            .cm-json-btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 5px; }
+            .cm-json-btn { padding: 4px 0; background: #555; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: ${ui.f12}px; font-weight: bold; }
+            .cm-json-btn:hover { background: #777; }
+
+            .cm-toggle-btn { background: transparent; border: 1px solid #fcc111; color: #fcc111; border-radius: 4px; cursor: pointer; padding: 2px 8px; font-size: ${ui.f12}px; font-weight: bold; transition: 0.2s; }
+            .cm-toggle-btn:hover { background: #fcc111; color: #000; }
+
+            .cm-toast { position: fixed; bottom: 50px; left: 50%; transform: translateX(-50%); background: rgba(0, 180, 0, 0.9); color: white; padding: 12px 24px; border-radius: 50px; z-index: 1000000; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.5); transition: opacity 0.5s; font-size: ${ui.f14}px;}
+            #cm-status-bar { font-size: ${ui.f13}px; color: #fcc111; text-align: center; font-weight: bold; margin-top: 5px; flex-shrink: 0 !important; }
+
+            #cm-single-wrapper { flex-shrink: 0 !important; }
+
+            #cm-worker-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.8); z-index: 9999999; display: flex; align-items: center; justify-content: center; flex-direction: column; color: #fff; font-size: ${ui.f14}px;}
+            .cm-spinner { border: 8px solid #333; border-top: 8px solid #fcc111; border-radius: 50%; width: 60px; height: 60px; animation: cm-spin 1s linear infinite; margin-bottom: 20px; }
+            @keyframes cm-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+            /* 呼吸燈動畫 */
+            @keyframes cm-flash-pulse {
+                0% { transform: scale(1); box-shadow: 0 0 0 rgba(23, 162, 184, 0); }
+                50% { transform: scale(1.03); box-shadow: 0 0 12px rgba(23, 162, 184, 0.8); }
+                100% { transform: scale(1); box-shadow: 0 0 0 rgba(23, 162, 184, 0); }
             }
-        },
-        profiles: {
-            profile_1: {
-                id: 'profile_1',
-                name: '模式 1 (標準 QA)',
-                enabled: true,
-                enablePrefix: true,
-                enableSuffix: true,
-                prefixes: {
-                    aistudio: '1st',
-                    deepseek: '2nd',
-                    qwen: '3rd',
-                    kimi: '4th',
-                    chatgpt: '5th',
-                    claude: '5th',
-                    perplexity: '5th',
-                    zhipu: '6th',
-                    zai: '6th',
-                    mistral: '7th',
-                    minimax: '8th'
-                },
-                suffixes: {
-                    aistudio: '\n\n',
-                    deepseek: '\n\n',
-                    qwen: '\n\n',
-                    kimi: '\n\n',
-                    chatgpt: '\n\n',
-                    claude: '\n\n',
-                    perplexity: '\n\n',
-                    zhipu: '\n\n',
-                    zai: '\n\n',
-                    mistral: '\n\n',
-                    minimax: '\n\n'
-                }
-            },
-            profile_2: {
-                id: 'profile_2',
-                name: '模式 2 (特化標籤)',
-                enabled: true,
-                enablePrefix: true,
-                enableSuffix: true,
-                prefixes: {
-                    aistudio: 'gemini 3.7回覆',
-                    deepseek: '',
-                    qwen: '',
-                    kimi: '',
-                    chatgpt: '',
-                    claude: '',
-                    perplexity: '',
-                    zhipu: '',
-                    zai: '',
-                    mistral: '',
-                    minimax: ''
-                },
-                suffixes: {
-                    aistudio: '\n\n',
-                    deepseek: '\n\n',
-                    qwen: '\n\n',
-                    kimi: '\n\n',
-                    chatgpt: '\n\n',
-                    claude: '\n\n',
-                    perplexity: '\n\n',
-                    zhipu: '\n\n',
-                    zai: '\n\n',
-                    mistral: '\n\n',
-                    minimax: '\n\n'
-                }
-            },
-            profile_3: {
-                id: 'profile_3',
-                name: '模式 3 (自訂預備)',
-                enabled: false,
-                enablePrefix: true,
-                enableSuffix: true,
-                prefixes: {
-                    aistudio: '',
-                    deepseek: '',
-                    qwen: '',
-                    kimi: '',
-                    chatgpt: '',
-                    claude: '',
-                    perplexity: '',
-                    zhipu: '',
-                    zai: '',
-                    mistral: '',
-                    minimax: ''
-                },
-                suffixes: {
-                    aistudio: '\n\n',
-                    deepseek: '\n\n',
-                    qwen: '\n\n',
-                    kimi: '\n\n',
-                    chatgpt: '\n\n',
-                    claude: '\n\n',
-                    perplexity: '\n\n',
-                    zhipu: '\n\n',
-                    zai: '\n\n',
-                    mistral: '\n\n',
-                    minimax: '\n\n'
+            .cm-btn-pulse {
+                animation: cm-flash-pulse 1.2s infinite ease-in-out !important;
+                border: 2px solid #fff !important;
+            }
+
+            /* HTML5 Accordion UI Specs */
+            details { background: #333; margin-bottom: 5px; border-radius: 6px; border: 1px solid #555; }
+            summary { padding: 8px; cursor: pointer; font-weight: bold; color: #fcc111; user-select: none; outline: none; list-style: none; }
+            summary::-webkit-details-marker { display: none; }
+            summary::before { content: '▶ '; font-size: 12px; display: inline-block; transition: 0.3s; }
+            details[open] summary::before { transform: rotate(90deg); }
+            details > div { padding: 8px; border-top: 1px solid #555; background: #262626; border-radius: 0 0 6px 6px; }
+        `);
+    }
+
+
+    function showToast(msg, type = "success") {
+        const t = document.createElement('div'); t.className = 'cm-toast';
+        if (msg.includes('⚠️') || type === 'error') t.style.background = 'rgba(220, 53, 69, 0.9)';
+        t.innerText = msg;
+        document.body.appendChild(t);
+        setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 2500); }, 2500);
+    }
+
+
+    function getMetaHeader(doc, reportName) {
+        let name = doc.querySelector('.stockData__name')?.innerText.trim();
+        if (!name) name = window.location.pathname.includes('/market') ? "加權指數" : "未知名稱";
+        const id = doc.querySelector('.stockData__id')?.innerText.trim() || (window.location.pathname.includes('/market') ? "TAIEX" : "");
+        const time = doc.querySelector('.stockData__update span')?.innerText.trim() || "未知";
+        return `【${name} (${id}) | ${reportName} | ${time}】`;
+    }
+
+
+    function getAutoLimit(moduleKey, forceCode = null, ignoreOverride = false) {
+        if (!ignoreOverride) {
+            const overrideInput = document.getElementById('cm-override-limit');
+            if (overrideInput && overrideInput.value) {
+                const overrideValue = parseInt(overrideInput.value, 10);
+                if (!isNaN(overrideValue) && overrideValue > 0) {
+                    return overrideValue;
                 }
             }
         }
-    };
 
 
-    // 【雙層覆寫隔離演算法 (applyLocalOnlyOverrides)】
-    function applyLocalOnlyOverrides(targetConfig, sourceConfig) {
-        if (!targetConfig || !sourceConfig) return;
-        targetConfig.uiPosition = sourceConfig.uiPosition ?? null;
-        targetConfig.orbPosition = sourceConfig.orbPosition ?? null;
-        targetConfig.toastPosition = sourceConfig.toastPosition ?? null;
-        targetConfig.isCollapsed = Boolean(sourceConfig.isCollapsed);
-        if (sourceConfig.aiStudioSettings && targetConfig.aiStudioSettings) {
-            targetConfig.aiStudioSettings.sliceLayout = sourceConfig.aiStudioSettings.sliceLayout;
-            targetConfig.aiStudioSettings.purplePosition = sourceConfig.aiStudioSettings.purplePosition;
-            targetConfig.aiStudioSettings.activeModuleId = sourceConfig.aiStudioSettings.activeModuleId;
+        if (moduleKey === "market_kline") {
+            const mkEl = document.getElementById('cfg-prof-market-kdays');
+            return mkEl ? safeInt(mkEl.value, CONFIG.market_kline_days) : CONFIG.market_kline_days;
+        }
+
+
+        if (moduleKey === "kline") {
+            const skEl = document.getElementById('cfg-prof-stock-kdays');
+            return skEl ? safeInt(skEl.value, CONFIG.kline_days) : CONFIG.kline_days;
+        }
+
+
+        const code = forceCode || (window.location.pathname.match(/\/stock\/(\w+)/) || [])[1] || "";
+        if (moduleKey === "eps") return CONFIG.eps;
+        if (moduleKey === "revenue") return CONFIG.revenue;
+        if (moduleKey === "income-statement") return CONFIG.income;
+        if (moduleKey === "balance-sheet") return CONFIG.balance;
+        if (moduleKey === "cash-flow") return CONFIG.cashflow;
+        if (moduleKey === "pe" || moduleKey === "pb") return CONFIG.pepb;
+        if (moduleKey === "discount") return CONFIG.discount;
+        if (moduleKey === "drawdown") return CONFIG.drawdown;
+        if (moduleKey === "constituent") return CONFIG.constituents;
+        if (moduleKey === "shareholding") return CONFIG.shareholding;
+        if (moduleKey === "stockfindetail") return CONFIG.stockfindetail;
+        if (moduleKey === "div_comp") return CONFIG.div_comp;
+        if (moduleKey === "dividend") {
+            const wList = CONFIG.white_list.split(',').map(s=>s.trim()).filter(Boolean);
+            const bList = CONFIG.black_list.split(',').map(s=>s.trim()).filter(Boolean);
+            const isETF = code.startsWith('00') || wList.includes(code);
+            const isAnnual = bList.includes(code);
+            return (isETF && !isAnnual) ? CONFIG.div_etf : CONFIG.div_stock;
+        }
+        return 12;
+    }
+
+
+    function getCurrentPageModule() {
+        const path = window.location.pathname;
+        const s = new URLSearchParams(window.location.search).get('s');
+        if (path.includes('watchlist')) return "watchlist";
+        if (path.includes('/market') && s === 'technical-analysis') return "market_kline"; 
+        if (s === 'constituent') return "constituent";
+        if (s === 'discount-premium') return "discount";
+        if (s === 'trading-fee') return "trading-fee";
+        if (s === 'risk') return "risk";
+        if (s === 'drawdown') return "drawdown";
+        if (s === 'dividend') return "dividend";
+        if (s === 'eps') return "eps";
+        if (s === 'revenue') return "revenue";
+        if (s === 'profile') return "profile";
+        if (s === 'income-statement') return "income-statement";
+        if (s === 'balance-sheet') return "balance-sheet";
+        if (s === 'shareholding-distribution') return "shareholding";
+        if (s === 'stockfindetail') return "stockfindetail";
+        if (s === 'dividend-composition') return "div_comp";
+        if (s === 'revenue-source') return "revenue-source";
+        if (s === 'cash-flow') return "cash-flow";
+        if (s === 'financial-ratio') return "financial-ratio";
+        if (s === 'technical-analysis') return "kline";
+        if (s === 'institutional-target') return "institutional-target";
+        if (s && s.startsWith('pe')) return "pe";
+        if (s && s.startsWith('pb')) return "pb";
+        if (/\/stock\/\w+\/?$/.test(path) && !s) return "realtime";
+        return null;
+    }
+
+
+    function finishScrape(resArray, successMsg) {
+        const statusBar = document.getElementById('cm-status-bar');
+        const recopyBtn = document.getElementById('cm-btn-recopy');
+        const currentStockMatch = window.location.pathname.match(/\/stock\/([A-Za-z0-9]+)(?:[\/\?#]|$)/);
+        const currentStockId = currentStockMatch ? currentStockMatch[1].toUpperCase() : "";
+
+
+        if (resArray && resArray.length > 1) {
+            const finalString = resArray.join('\n');
+            GM_setValue("cm_last_scraped_data", finalString);
+            if (currentStockId) {
+                GM_setValue("cm_last_scraped_stock_id", currentStockId);
+            }
+
+
+            try { window.focus(); } catch (e) {}
+            GM_setClipboard(finalString);
+            if (navigator.clipboard?.writeText) {
+                navigator.clipboard.writeText(finalString).catch(() => {});
+            }
+            
+            const isErrorSpoof = finalString.includes("【抓取失敗】");
+            let msg = isErrorSpoof ? "⚠️ 抓取中斷：詳情請見剪貼簿內容" : (successMsg || `✅ 數據已複製`);
+            
+            if (!document.hasFocus()) {
+                msg = "✅ 批次已完成！視窗未聚焦，請按 F9 或點擊按鈕複製";
+                if (recopyBtn) recopyBtn.classList.add('cm-btn-pulse');
+            } else {
+                if (recopyBtn) recopyBtn.classList.remove('cm-btn-pulse');
+            }
+
+
+            showToast(msg);
+            if (statusBar) statusBar.innerText = isErrorSpoof ? "⚠️ 抓取中斷" : msg;
+        } else {
+            showToast("⚠️ 抓取失敗或無數據", "error");
+            if (statusBar) statusBar.innerText = "⚠️ 抓取失敗";
         }
     }
 
 
-    // 【遷移合約與結構深層補齊】
-    function sanitizeConfig(data) {
-        if (!data || typeof data !== 'object') return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
-        if (!data.profiles || typeof data.profiles !== 'object') data.profiles = JSON.parse(JSON.stringify(DEFAULT_CONFIG.profiles));
-        if (!data.activeProfileId || !data.profiles[data.activeProfileId]) data.activeProfileId = 'profile_1';
-
-
-        // 1. 補齊 11 站點排序矩陣
-        const defaultSites = ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'claude', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
-        if (!Array.isArray(data.siteTabOrder)) {
-            data.siteTabOrder = [...defaultSites];
+    function clickShowMoreAndExecute(callback, delayMs, requireExpand = true) {
+        const actualDelay = delayMs || 1000;
+        if (!requireExpand) {
+            setTimeout(callback, actualDelay);
+            return;
+        }
+        const targetBtn = Array.from(document.querySelectorAll('.showMore__text, .showMore__button, .table__unfold')).find(el => el.innerText && el.innerText.includes("查看更多") && el.offsetParent !== null);
+        if (targetBtn) {
+            showToast(`⏳ 正在強制展開表格...`);
+            targetBtn.click();
+            setTimeout(callback, actualDelay);
         } else {
-            defaultSites.forEach(s => {
-                if (!data.siteTabOrder.includes(s)) data.siteTabOrder.push(s);
+            setTimeout(callback, actualDelay);
+        }
+    }
+
+
+    // --- 核心 K 線解析引擎 ---
+    function parseKlineDataEngine(doc, limit, isMarket = false) {
+        const cache = window.__cm_kline_data_cache;
+        if (!cache || !cache.Data || cache.Data.length === 0) {
+            showToast("⚠️ 請先在網頁上等待 K 線資料載入");
+            return ["【抓取失敗】", "(無K線資料)", "請手動點擊網頁 K 線圖區域，載入完成後再重新抓取"];
+        }
+
+
+        const kTypeEl = isMarket ? document.getElementById('cfg-prof-market-ktype') : document.getElementById('cfg-prof-stock-ktype');
+        const kType = kTypeEl ? kTypeEl.value : (CONFIG.kline_type || "week");
+        const kSortEl = document.getElementById('cfg-kline-sort');
+        const kSort = kSortEl ? kSortEl.value : CONFIG.kline_sort;
+
+
+        const title = cache.Title;
+        const data = cache.Data;
+
+
+        const getIdx = (name) => title.findIndex(t => t.includes(name));
+        const idxDate = getIdx("日期");
+        const idxOpen = getIdx("開盤");
+        const idxHigh = getIdx("最高");
+        const idxLow = getIdx("最低");
+        const idxClose = getIdx("收盤");
+        
+        let idxVol = isMarket ? getIdx("成交金額") : getIdx("成交量");
+        if (idxVol === -1) idxVol = isMarket ? getIdx("成交量") : getIdx("成交金額");
+
+
+        const idxBias20 = getIdx("乖離率(20");
+        const idxBias60 = getIdx("乖離率(60");
+
+
+        if (idxDate === -1 || idxClose === -1) return ["【抓取失敗】", "(K線資料格式解析失敗，欄位不符)", ""];
+
+
+        let fullDataChronological = [...data];
+        if (fullDataChronological.length > 1) {
+            let firstDate = fullDataChronological[0][idxDate] || "";
+            let lastDate = fullDataChronological[fullDataChronological.length - 1][idxDate] || "";
+            if (firstDate && lastDate) {
+                let d1 = parseInt(firstDate.replace(/[\/\-]/g, ''), 10);
+                let d2 = parseInt(lastDate.replace(/[\/\-]/g, ''), 10);
+                if (d1 > d2) {
+                    fullDataChronological.reverse();
+                }
+            }
+        }
+
+
+        let aggregatedData = [];
+
+
+        if (kType === "day") {
+            aggregatedData = fullDataChronological.map(row => {
+                const tClose = parseFloat(row[idxClose]);
+                const tOpenRaw = parseFloat(row[idxOpen]);
+                const tHighRaw = parseFloat(row[idxHigh]);
+                const tLowRaw = parseFloat(row[idxLow]);
+                const tVolRaw = parseFloat(row[idxVol]);
+                
+                return {
+                    date: row[idxDate],
+                    open: isNaN(tOpenRaw) ? tClose : tOpenRaw,
+                    high: isNaN(tHighRaw) ? tClose : tHighRaw,
+                    low: isNaN(tLowRaw) ? tClose : tLowRaw,
+                    close: tClose,
+                    vol: isNaN(tVolRaw) ? 0 : tVolRaw,
+                    b20: row[idxBias20] || "-",
+                    b60: row[idxBias60] || "-"
+                };
             });
-        }
-
-
-        // 2. 補齊雲端同步設定、Toast 座標與收納狀態
-        if (typeof data.jsonSyncUrl !== 'string') data.jsonSyncUrl = DEFAULT_CONFIG.jsonSyncUrl;
-        if (typeof data.isCollapsed !== 'boolean') data.isCollapsed = false;
-        if (typeof data.uiPosition !== 'object') data.uiPosition = null;
-        if (typeof data.orbPosition !== 'object') data.orbPosition = null;
-        if (typeof data.toastPosition !== 'object') data.toastPosition = null;
-
-
-        // 補齊 exportScope
-        if (!data.exportScope || typeof data.exportScope !== 'object') {
-            data.exportScope = JSON.parse(JSON.stringify(DEFAULT_CONFIG.exportScope));
         } else {
-            if (typeof data.exportScope.content !== 'boolean') data.exportScope.content = true;
-            if (typeof data.exportScope.coords !== 'boolean') data.exportScope.coords = false;
-            if (typeof data.exportScope.layout !== 'boolean') data.exportScope.layout = false;
-        }
+            let currentPeriodKey = null;
+            let periodData = null;
 
 
-        // 補齊 toastSettings (幽靈欄位 anchor 徹底拔除)
-        if (!data.toastSettings || typeof data.toastSettings !== 'object') {
-            data.toastSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.toastSettings));
-        } else {
-            const ts = data.toastSettings;
-            delete ts.anchor;
-            if (typeof ts.fontSize !== 'number' || ts.fontSize <= 0) ts.fontSize = 18;
-            if (typeof ts.background !== 'string' || !ts.background.trim()) {
-                ts.background = DEFAULT_CONFIG.toastSettings.background;
-            }
-        }
-
-
-        // 補齊 qaQueueSettings 暫存池、滿額自動總結與熱鍵設定 (4 態白名單)
-        if (!data.qaQueueSettings || typeof data.qaQueueSettings !== 'object') {
-            data.qaQueueSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.qaQueueSettings));
-        } else {
-            const qs = data.qaQueueSettings;
-            if (typeof qs.captureHotkey !== 'string') qs.captureHotkey = 'F4';
-            if (typeof qs.summaryHotkey !== 'string') qs.summaryHotkey = 'F7';
-            if (typeof qs.ttlHours !== 'number' || qs.ttlHours < 0) qs.ttlHours = 2;
-            if (typeof qs.targetCount !== 'number' || qs.targetCount < 0) qs.targetCount = 6;
-            if (typeof qs.keepQueueOnAutoSummary !== 'boolean') qs.keepQueueOnAutoSummary = true;
-
-
-            const validActions = ['SINGLE', 'SINGLE_CLEAN', 'PREVIEW', 'PREVIEW_CLEAN'];
-            if (!qs.siteActions || typeof qs.siteActions !== 'object') {
-                qs.siteActions = JSON.parse(JSON.stringify(DEFAULT_CONFIG.qaQueueSettings.siteActions));
-            } else {
-                defaultSites.forEach(s => {
-                    if (!validActions.includes(qs.siteActions[s])) {
-                        qs.siteActions[s] = (s === 'minimax' || s === 'zai') ? 'PREVIEW' : 'SINGLE';
-                    }
-                });
-            }
-        }
-
-
-        // 3. 補齊雙軌雜訊清洗引擎
-        if (!data.noiseSettings || typeof data.noiseSettings !== 'object') {
-            data.noiseSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.noiseSettings));
-        } else {
-            if (!['string_first', 'regex_first'].includes(data.noiseSettings.pipelineOrder)) {
-                data.noiseSettings.pipelineOrder = DEFAULT_CONFIG.noiseSettings.pipelineOrder;
-            }
-
-
-            const badRegexPattern = /\/\S*?\.\*\?\[(?:\\n|\n)\]\?\/\S*s\S*|\/\.\*\?\[(?:\\n|\n)\]\?\/gis/;
-            if (typeof data.noiseSettings.customNoiseRegexes !== 'string' || !data.noiseSettings.customNoiseRegexes.trim() || badRegexPattern.test(data.noiseSettings.customNoiseRegexes)) {
-                data.noiseSettings.customNoiseRegexes = DEFAULT_CONFIG.noiseSettings.customNoiseRegexes;
-            } else if (!data.noiseSettings.customNoiseRegexes.includes('請稍後再試')) {
-                data.noiseSettings.customNoiseRegexes = data.noiseSettings.customNoiseRegexes.replace(
-                    /(?:思考\|快速)/g,
-                    '思考|快速|請稍後再試'
-                );
-            }
-
-
-            if (typeof data.noiseSettings.customNoiseStrings === 'string') {
-                if (data.noiseSettings.customNoiseStrings.includes('K2.6')) {
-                    data.noiseSettings.customNoiseStrings = data.noiseSettings.customNoiseStrings
-                        .split('\n')
-                        .filter(l => !l.includes('K2.6'))
-                        .join('\n');
+            for (let i = 0; i < fullDataChronological.length; i++) {
+                const row = fullDataChronological[i];
+                let rawDateStr = row[idxDate] || "";
+                
+                let y, m, d;
+                let cleanDate = rawDateStr.replace(/[\/\-]/g, '');
+                if (cleanDate.length === 7) { 
+                    y = parseInt(cleanDate.substring(0, 3), 10) + 1911;
+                    m = parseInt(cleanDate.substring(3, 5), 10) - 1;
+                    d = parseInt(cleanDate.substring(5, 7), 10);
+                } else if (cleanDate.length === 8) { 
+                    y = parseInt(cleanDate.substring(0, 4), 10);
+                    m = parseInt(cleanDate.substring(4, 6), 10) - 1;
+                    d = parseInt(cleanDate.substring(6, 8), 10);
+                } else {
+                    continue;
                 }
-            } else {
-                data.noiseSettings.customNoiseStrings = DEFAULT_CONFIG.noiseSettings.customNoiseStrings;
-            }
+                
+                const dObj = new Date(y, m, d);
+                if (isNaN(dObj.getTime())) continue;
 
 
-            const nonCommentStrings = (data.noiseSettings.customNoiseStrings || '')
-                .split('\n')
-                .map(l => l.trim())
-                .filter(l => l && !l.startsWith('#') && !l.startsWith('//'));
-            if (nonCommentStrings.length === 0) {
-                data.noiseSettings.customNoiseStrings = DEFAULT_CONFIG.noiseSettings.customNoiseStrings;
-            }
-        }
-
-
-        // 4. 補齊 uiSettings
-        if (!data.uiSettings || typeof data.uiSettings !== 'object') {
-            data.uiSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.uiSettings));
-        } else {
-            if (typeof data.uiSettings.showCleanSingle !== 'boolean') data.uiSettings.showCleanSingle = true;
-            if (typeof data.uiSettings.showFullThread !== 'boolean') data.uiSettings.showFullThread = true;
-            if (!['right', 'bottom'].includes(data.uiSettings.purplePosition)) data.uiSettings.purplePosition = 'bottom';
-        }
-
-
-        // 5. 補齊 aiStudioSettings 與 3 模組按鈕
-        if (!data.aiStudioSettings || typeof data.aiStudioSettings !== 'object') {
-            data.aiStudioSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.aiStudioSettings));
-        } else {
-            const as = data.aiStudioSettings;
-            if (!['native_menu', 'pencil_edit', 'dom_parser'].includes(as.primaryEngine)) as.primaryEngine = 'native_menu';
-            if (!['grid_3_2', 'staircase', 'single_row'].includes(as.sliceLayout)) as.sliceLayout = 'staircase';
-            if (!['right', 'bottom', 'inherit'].includes(as.purplePosition)) as.purplePosition = 'inherit';
-            if (!['capsule_only', 'control_group', 'entire_toolbar'].includes(as.wheelSwitchScope)) as.wheelSwitchScope = 'capsule_only';
-            if (!['module_1', 'module_2', 'module_3'].includes(as.activeModuleId)) as.activeModuleId = 'module_1';
-            if (!['warn_block', 'lenient_full', 'custom_string'].includes(as.fallbackAction)) as.fallbackAction = 'warn_block';
-            if (typeof as.fallbackCustomText !== 'string') as.fallbackCustomText = '[ERROR: 錨點切片未命中]';
-
-
-            if (!as.modules || typeof as.modules !== 'object') {
-                as.modules = JSON.parse(JSON.stringify(DEFAULT_CONFIG.aiStudioSettings.modules));
-            } else {
-                ['module_1', 'module_2', 'module_3'].forEach(mKey => {
-                    const defMod = DEFAULT_CONFIG.aiStudioSettings.modules[mKey];
-                    if (!as.modules[mKey]) {
-                        as.modules[mKey] = JSON.parse(JSON.stringify(defMod));
-                    } else {
-                        const m = as.modules[mKey];
-                        if (typeof m.name !== 'string') m.name = defMod.name;
-                        if (typeof m.badgeText !== 'string') m.badgeText = defMod.badgeText;
-                        if (typeof m.badgeColor !== 'string') m.badgeColor = defMod.badgeColor;
-                        if (!Array.isArray(m.buttons)) {
-                            m.buttons = JSON.parse(JSON.stringify(defMod.buttons));
-                        } else {
-                            defMod.buttons.forEach((defBtn, bIdx) => {
-                                if (!m.buttons[bIdx]) {
-                                    m.buttons[bIdx] = JSON.parse(JSON.stringify(defBtn));
-                                } else {
-                                    const b = m.buttons[bIdx];
-                                    if (typeof b.name !== 'string') b.name = defBtn.name;
-                                    if (!['match', 'replace'].includes(b.mode)) b.mode = defBtn.mode || 'match';
-                                    if (typeof b.enabled !== 'boolean') b.enabled = defBtn.enabled;
-
-
-                                    if (b.id === 'm1_btn_3') {
-                                        b.name = defBtn.name;
-                                        b.pattern = defBtn.pattern;
-                                        b.fallbackPattern = defBtn.fallbackPattern;
-                                        b.suffix = '\n\n';
-                                    }
-                                    if (b.id === 'm1_btn_5') {
-                                        if (!b.pattern || b.pattern.includes('*?') || b.pattern.endsWith('/ig')) {
-                                            b.pattern = defBtn.pattern;
-                                            b.fallbackPattern = defBtn.fallbackPattern;
-                                        }
-                                    }
-
-
-                                    if (typeof b.pattern !== 'string') b.pattern = defBtn.pattern;
-                                    if (typeof b.fallbackPattern !== 'string') b.fallbackPattern = defBtn.fallbackPattern || '';
-                                    if (typeof b.replaceValue !== 'string') b.replaceValue = '';
-                                    if (typeof b.isCodeBlockTarget !== 'boolean') b.isCodeBlockTarget = false;
-                                    if (typeof b.prefix !== 'string') b.prefix = defBtn.prefix || '';
-                                    if (typeof b.suffix !== 'string') b.suffix = defBtn.suffix || '';
-                                    if (typeof b.autoDivider !== 'boolean') b.autoDivider = (defBtn.autoDivider === true);
-
-
-                                    if (b.id === 'm1_btn_1') {
-                                        if (typeof b.prefix !== 'string' || b.prefix.trim() === '') {
-                                            b.prefix = 'https://docs.google.com/document/d/1TDprIAm5WMbVc0k6Nv-DmS89RVOnx1BRYM13EcqjNSQ/edit?usp=sharing';
-                                        }
-                                    }
-                                }
-                            });
-                        }
-                    }
-                });
-            }
-            delete as.anchorButtons;
-        }
-
-
-        // 6. 補齊 profiles 各站點前綴與後綴
-        Object.keys(DEFAULT_CONFIG.profiles).forEach(key => {
-            if (!data.profiles[key]) {
-                data.profiles[key] = JSON.parse(JSON.stringify(DEFAULT_CONFIG.profiles[key]));
-            } else {
-                const p = data.profiles[key];
-                if (typeof p.enabled !== 'boolean') {
-                    p.enabled = DEFAULT_CONFIG.profiles[key]?.enabled ?? true;
+                let pKey = "";
+                if (kType === "month") {
+                    pKey = `M_${y}_${String(m+1).padStart(2, '0')}`;
+                } else if (kType === "week") {
+                    let dow = dObj.getDay();
+                    let diffToMonday = dow === 0 ? -6 : 1 - dow;
+                    let monday = new Date(dObj);
+                    monday.setDate(dObj.getDate() + diffToMonday);
+                    pKey = `W_${monday.getFullYear()}_${String(monday.getMonth()+1).padStart(2,'0')}_${String(monday.getDate()).padStart(2,'0')}`;
                 }
-                if (typeof p.enablePrefix !== 'boolean') p.enablePrefix = true;
-                if (typeof p.enableSuffix !== 'boolean') p.enableSuffix = true;
-                if (!p.prefixes || typeof p.prefixes !== 'object') p.prefixes = {};
-                if (!p.suffixes || typeof p.suffixes !== 'object') p.suffixes = {};
 
 
-                defaultSites.forEach(siteKey => {
-                    if (typeof p.prefixes[siteKey] === 'undefined') {
-                        p.prefixes[siteKey] = DEFAULT_CONFIG.profiles[key].prefixes[siteKey] ?? '';
-                    }
-                    if (typeof p.suffixes[siteKey] === 'undefined') {
-                        p.suffixes[siteKey] = '\n\n';
-                    }
-                });
+                const tClose = parseFloat(row[idxClose]);
+                const tOpenRaw = parseFloat(row[idxOpen]);
+                const tHighRaw = parseFloat(row[idxHigh]);
+                const tLowRaw = parseFloat(row[idxLow]);
+                const tVolRaw = parseFloat(row[idxVol]);
+                
+                const tOpen = isNaN(tOpenRaw) ? tClose : tOpenRaw;
+                const tHigh = isNaN(tHighRaw) ? tClose : tHighRaw;
+                const tLow = isNaN(tLowRaw) ? tClose : tLowRaw;
+                const tVol = isNaN(tVolRaw) ? 0 : tVolRaw;
+
+
+                if (currentPeriodKey !== pKey) {
+                    if (periodData) aggregatedData.push(periodData);
+                    currentPeriodKey = pKey;
+                    periodData = { 
+                        date: row[idxDate], 
+                        open: tOpen, 
+                        high: tHigh, 
+                        low: tLow, 
+                        close: tClose, 
+                        vol: tVol, 
+                        b20: row[idxBias20] || "-", b60: row[idxBias60] || "-" 
+                    };
+                } else {
+                    periodData.date = row[idxDate];
+                    periodData.high = Math.max(periodData.high, tHigh);
+                    periodData.low = Math.min(periodData.low, tLow);
+                    periodData.close = tClose;
+                    periodData.vol = Math.round((periodData.vol + tVol) * 100) / 100;
+                }
+            }
+            if (periodData) aggregatedData.push(periodData);
+        }
+
+
+        let targetData = aggregatedData.slice(-limit);
+        if (targetData.length === 0) return ["【抓取失敗】", "(無足夠K線資料)", ""];
+
+
+        let maxHigh = -Infinity, maxDate = "";
+        let minLow = Infinity, minDate = "";
+        targetData.forEach(p => {
+            if (!isNaN(p.high) && p.high !== -Infinity && p.high >= maxHigh) { maxHigh = p.high; maxDate = p.date; }
+            if (!isNaN(p.low) && p.low !== Infinity && p.low <= minLow) { minLow = p.low; minDate = p.date; }
+        });
+
+
+        const latestBar = targetData[targetData.length - 1];
+        const startDate = targetData[0].date || "未知";
+        const endDate = targetData[targetData.length - 1].date || "未知";
+        const typeLabel = kType === 'day' ? "日K" : (kType === 'week' ? "週K" : "月K");
+        const reportTitle = isMarket ? `技術分析(大盤${typeLabel})` : `技術分析(${typeLabel})`;
+
+
+        const fmtNum = (num) => {
+            if (num === Infinity || num === -Infinity || isNaN(num)) return "-";
+            return Number.isInteger(num) ? num.toString() : parseFloat(num.toFixed(2)).toString();
+        };
+
+
+        let out = [];
+        out.push(getMetaHeader(doc, reportTitle));
+        out.push(`【深海狙擊雷達】(基準：近 ${targetData.length} 個交易${typeLabel.replace('K','')})`);
+        out.push(`📊 統計期間：${startDate} ~ ${endDate}`);
+        out.push(`🚨 區間最高點：${fmtNum(maxHigh)} (發生於 ${maxDate || "未知"})`);
+        out.push(`🚨 區間最低點：${fmtNum(minLow)} (發生於 ${minDate || "未知"})`);
+        out.push(`📍 最新收盤：${fmtNum(latestBar.close)} | 月乖離(20)：${latestBar.b20} | 季乖離(60)：${latestBar.b60}`);
+
+
+        // 大盤輸出精簡：直接回傳雷達摘要，不輸出流水帳
+        if (isMarket) {
+            return out;
+        }
+
+
+        if (kSort === "desc") {
+            targetData.reverse();
+        }
+
+
+        const rows = [];
+        const volLabel = "成交量";
+
+
+        targetData.forEach(p => {
+            if (kType === "day") {
+                rows.push(`${p.date},${fmtNum(p.open)},${fmtNum(p.high)},${fmtNum(p.low)},${fmtNum(p.close)},${fmtNum(p.vol)},${p.b20},${p.b60}`);
+            } else {
+                rows.push(`${p.date},${fmtNum(p.open)},${fmtNum(p.high)},${fmtNum(p.low)},${fmtNum(p.close)},${fmtNum(p.vol)}`);
             }
         });
-        return data;
+
+
+        out.push("");
+        out.push(`--- 原始 ${typeLabel} 數據 ---`);
+        if (kType === "day") {
+            out.push(`日期,開盤,最高,最低,收盤,${volLabel},月乖離(20),季乖離(60)`);
+        } else {
+            out.push(`最後交易日,開盤,最高,最低,收盤,區間累計${volLabel}`);
+        }
+        out.push(...rows);
+
+
+        return out;
     }
 
 
-    const Storage = {
-        get() {
-            let data = null;
-            try {
-                if (typeof GM_getValue !== 'undefined') {
-                    data = GM_getValue(CONFIG_KEY, null);
-                } else {
-                    const val = localStorage.getItem(CONFIG_KEY);
-                    data = val ? JSON.parse(val) : null;
+    // --- 模組化註冊表 (Module Registry - 24 項獨立解析器) ---
+    const MODULE_REGISTRY = {
+        watchlist: { label: "自選股", urlSuffix: null, requiresExpand: true, delay: 600, domParserFn: (doc, limit) => {
+            let res = [];
+            const groupName = doc.querySelector('nav.groupTabs__nav button[class*="active"] .groupTabs__name')?.innerText.trim() 
+                || doc.querySelector('.selectBar__desc')?.innerText.trim() 
+                || "自選股名單";
+            const timeBox = doc.querySelector('.selectBar__lastUpdateTime');
+            let timeText = (timeBox && timeBox.querySelectorAll('span').length >= 3) 
+                ? `${timeBox.querySelectorAll('span')[0].innerText} ${timeBox.querySelectorAll('span')[2].innerText}` 
+                : "時間未知";
+
+
+            res.push(`【${groupName} | ${timeText}】`);
+            res.push("個股名稱\t股價(元)\t漲跌(元)\t漲跌幅(%)\t成交張數\t本益比(倍)");
+
+
+            const rows = doc.querySelectorAll('tr.watchlistTable__row, tbody .watchlistTable__row, .table__body .table__row');
+            rows.forEach(row => {
+                if (row.style.display === 'none' || row.classList.contains('table__row--disable')) return;
+
+
+                const nameEl = row.querySelector('.stockTitle__name, .stockTitle, td:nth-child(1)');
+                const idEl = row.querySelector('.stockTitle__id');
+                let stockTitle = nameEl ? nameEl.innerText.replace(/\n/g, ' ').trim() : "";
+                if (idEl && !stockTitle.includes(idEl.innerText.trim())) {
+                    stockTitle += ` (${idEl.innerText.trim()})`;
                 }
-            } catch (e) {
-                console.error('⚠️ [AI Copy] Storage 讀取失敗，恢復預設值:', e);
+
+
+                const priceEl = row.querySelector('.textQuote__value, td.watchlistTable__quote, td:nth-child(2)');
+                const price = priceEl ? priceEl.innerText.trim() : "-";
+
+
+                let diffPrice = "-", diffRate = "-";
+                const quotePriceEl = row.querySelector('.watchlistTable__quotePrice');
+                const quoteRateEl = row.querySelector('.watchlistTable__quoteRate');
+                if (quotePriceEl && quoteRateEl) {
+                    diffPrice = quotePriceEl.innerText.trim();
+                    diffRate = quoteRateEl.innerText.trim();
+                } else {
+                    const combinedQuote = row.querySelector('td.watchlistTable__quote--up, td.watchlistTable__quote--down, td:nth-child(3)');
+                    if (combinedQuote) {
+                        const parts = combinedQuote.innerText.trim().split(/[\s\n\r]+/);
+                        diffPrice = parts[0] || "-";
+                        diffRate = parts[1] || "-";
+                    }
+                }
+
+
+                const cols = row.querySelectorAll('td, .table__col');
+                let vol = "-", pe = "-";
+                if (cols.length >= 6) {
+                    vol = cols[cols.length - 2]?.innerText.trim() || "-";
+                    pe = cols[cols.length - 1]?.innerText.trim() || "-";
+                }
+
+
+                if (stockTitle && price !== "-") {
+                    res.push(`${stockTitle}\t${price}\t${diffPrice}\t${diffRate}\t${vol}\t${pe}`);
+                }
+            });
+            return res;
+        }},
+        realtime: { label: "即時五檔", urlSuffix: '', requiresExpand: false, delay: 800, domParserFn: (doc, limit) => {
+            let out = []; out.push(getMetaHeader(doc, "即時報價"));
+            const price = doc.querySelector('.stockData__price')?.innerText.trim() || ""; const quotePrice = doc.querySelector('.stockData__quotePrice')?.innerText.trim() || ""; const quotePercent = doc.querySelector('.stockData__quote')?.innerText.trim() || "";
+            out.push(`現價: ${price} | 漲跌: ${quotePrice} ${quotePercent}`); out.push("---------------------------------------");
+            const gridRows = doc.querySelectorAll('.immediate__data .wrapper .row'); let grid =[]; gridRows.forEach(r => { const k = r.querySelector('.row__key')?.innerText.trim() || ""; const v = r.querySelector('.row__value')?.innerText.trim() || ""; if (k) grid.push(`${k}: ${v}`); });
+            for (let i = 0; i < grid.length; i += 2) out.push(`${grid[i]}\t${grid[i+1] || ""}`);
+            out.push(`內盤比: ${doc.querySelector('.cm-askPriceChart__innerPercentage-inner')?.innerText.trim() || ""}\t外盤比: ${doc.querySelector('.cm-askPriceChart__innerPercentage-foreign')?.innerText.trim() || ""}`); out.push("---------------------------------------");
+            const chartArea = doc.querySelector('.cm-askPriceChart');
+            if (!chartArea) out.push("【無即時五檔數據 (可能為盤後或暫停交易)】");
+            else {
+                out.push(`【五檔委託】 總買量: ${doc.querySelector('.cm-askPriceChart__info-buy .cm-askPriceChart__infoTotal')?.innerText.trim() || "0"}\t總賣量: ${doc.querySelector('.cm-askPriceChart__info-sell .cm-askPriceChart__infoTotal')?.innerText.trim() || "0"}\n委買量\t買價\t賣價\t委賣量`);
+                const bItems = doc.querySelectorAll('.cm-askPriceChart__volume-buy .cm-askPriceChart__volumeItem'), sItems = doc.querySelectorAll('.cm-askPriceChart__volume-sell .cm-askPriceChart__volumeItem');
+                for (let i = 0; i < 5; i++) { 
+                    const bVol = bItems[i]?.querySelector('.cm-askPriceChart__volumeCount')?.innerText.trim() || "-";
+                    const bPrice = bItems[i]?.querySelector('.cm-askPriceChart__volumePrice')?.innerText.trim() || "-";
+                    const sPrice = sItems[i]?.querySelector('.cm-askPriceChart__volumePrice')?.innerText.trim() || "-";
+                    const sVol = sItems[i]?.querySelector('.cm-askPriceChart__volumeCount')?.innerText.trim() || "-";
+                    out.push(`${bVol}\t${bPrice}\t${sPrice}\t${sVol}`); 
+                }
             }
-            return sanitizeConfig(data);
+            return out;
+        }},
+        kline: { label: "K線狙擊", urlSuffix: '?s=technical-analysis', requiresExpand: false, delay: 1000, domParserFn: (doc, limit) => {
+            return parseKlineDataEngine(doc, limit, false);
+        }},
+        market_kline: { label: "大盤 K 線", urlSuffix: null, absoluteUrl: 'https://www.cmoney.tw/forum/market?s=technical-analysis', requiresExpand: false, delay: 1000, domParserFn: (doc, limit) => {
+            return parseKlineDataEngine(doc, limit, true);
+        }},
+        profile: {
+            label: "基本資料",
+            urlSuffix: '?s=profile',
+            requiresExpand: false,
+            delay: 600,
+            domParserFn: (doc, limit) => {
+                let res = [getMetaHeader(doc, "基本資料")];
+                const items = doc.querySelectorAll('.profile__item');
+                let map = {};
+                items.forEach(it => {
+                    const titleEl = it.querySelector('.profile__itemTitle');
+                    if (titleEl) {
+                        const key = titleEl.innerText.replace(/[\s\t\n]+/g, '').trim();
+                        const val = it.innerText.replace(titleEl.innerText, '').replace(/[\s\t\n]+/g, ' ').trim();
+                        if (key) map[key] = val;
+                    }
+                });
+
+
+                const isETF = !!map['基金名稱'];
+                if (isETF) {
+                    res.push(`基金名稱\t${map['基金名稱'] || "-"}`);
+                    res.push(`發行公司\t${map['發行公司'] || "-"}`);
+                    res.push(`類型\t${map['類型'] || "-"}`);
+                    res.push(`成立日期\t${map['成立日期'] || "-"}`);
+                    res.push(`資產規模(億)\t${map['資產規模(億)'] || "-"}`);
+                    res.push(`追蹤指數\t${map['追蹤指數'] || "-"}`);
+                    res.push(`配息頻率\t${map['配息頻率'] || "-"}`);
+                    res.push(`追蹤方式\t${map['追蹤方式'] || "-"}`);
+                } else {
+                    res.push(`上市日期\t${map['上市日期'] || map['上櫃日期'] || "-"}`);
+                    res.push(`掛牌年數\t${map['掛牌年數'] || "-"}`);
+                    res.push(`市場類別\t${map['上市上櫃'] || "-"}`);
+                    res.push(`成立日期\t${map['成立日期'] || "-"}`);
+                    res.push(`產業類別\t${map['產業'] || "-"}`);
+                    res.push(`細產業別\t${map['細產業別'] || "-"}`);
+                    res.push(`資本額(億)\t${map['資本額(億)'] || "-"}`);
+                    res.push(`股本(億)\t${map['股本(億)'] || "-"}`);
+                    res.push(`經營項目\t${map['經營項目'] || "-"}`);
+                }
+                return res;
+            }
         },
-        set(data) {
-            try {
-                if (typeof GM_setValue !== 'undefined') {
-                    GM_setValue(CONFIG_KEY, data);
-                } else {
-                    localStorage.setItem(CONFIG_KEY, JSON.stringify(data));
+        'institutional-target': {
+            label: "法人目標",
+            urlSuffix: '?s=institutional-target',
+            requiresExpand: false,
+            delay: 1000,
+            domParserFn: (doc, limit) => {
+                const stockName = doc.querySelector('.stockData__name')?.innerText.trim() || "未知名稱";
+                const stockId = doc.querySelector('.stockData__id')?.innerText.trim() || "";
+                
+                const bodyText = doc.body.innerText || "";
+                const explicitTimeEl = doc.querySelector('.institutionalTarget__updateTime, .reportSummary__time, .institutionalTarget__header .time');
+                let updateTime = explicitTimeEl ? explicitTimeEl.innerText.trim() : "";
+                if (!updateTime) {
+                    const reportDateMatch = bodyText.match(/更新時間\s*(\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/);
+                    updateTime = reportDateMatch ? reportDateMatch[1] : (doc.querySelector('.stockData__update span')?.innerText.trim() || "-");
                 }
-            } catch (e) {
-                console.error('⚠️ [AI Copy] Storage 寫入失敗:', e);
-                showToast('❌ 設定儲存失敗！可能是儲存空間已滿或被隱私模式阻擋。', true, 4000);
+                
+                const hasTargetKeyword = bodyText.includes('法人目標') || bodyText.includes('法人共識');
+                const targetTable = doc.querySelector('.institutionalTarget__targetTable');
+                const summaryTable = doc.querySelector('.institutionalTarget__reportSummaryTable, [class*="reportSummaryTable"], .institutionalTarget table') || 
+                                     Array.from(doc.querySelectorAll('.stockPanel__view table')).find(tbl => !tbl.classList.contains('institutionalTarget__targetTable'));
+
+
+                if (!hasTargetKeyword && !targetTable && !summaryTable) {
+                    return [
+                        `【${stockName} (${stockId}) | 法人目標價 | -】`,
+                        "(該標的尚無法人券商目標價報告或覆蓋)"
+                    ];
+                }
+
+
+                let summaryContent = "";
+                let brokers = "-";
+                let returnPotential = "-";
+                let epsEstimate = "-";
+
+
+                if (summaryTable) {
+                    const rows = summaryTable.querySelectorAll('tr, .row');
+                    rows.forEach(r => {
+                        const cells = r.querySelectorAll('th, td, .col, .cell');
+                        if (cells.length >= 2) {
+                            const keyEl = cells[0].cloneNode(true);
+                            keyEl.querySelectorAll('.badge, .tag, svg, i, button, span.icon').forEach(el => el.remove());
+                            const keyText = keyEl.innerText.replace(/[\s\t\u00A0]+/g, '').trim();
+
+
+                            const valEl = cells[1].cloneNode(true);
+                            valEl.querySelectorAll('.badge, .tag, svg, i, button, span.icon').forEach(el => el.remove());
+
+
+                            if (keyText.includes("總評")) {
+                                let rawHtml = valEl.innerHTML || "";
+                                rawHtml = rawHtml.replace(/<\/(p|div)>/gi, '\n\n')
+                                                 .replace(/<br\s*[\/]?>/gi, '\n')
+                                                 .replace(/<[^>]+>/g, '');
+                                let cleaned = rawHtml.replace(/(?:※|注意|免責聲明|本資料僅供參考)[^\n\r]*/g, '')
+                                                     .replace(/[^\S\r\n]+/g, ' ')
+                                                     .replace(/\n{3,}/g, '\n\n')
+                                                     .trim();
+                                summaryContent = cleaned;
+                            } else if (keyText.includes("法人") && !keyText.includes("目標價")) {
+                                brokers = valEl.innerText.replace(/[\n\r]+/g, ' ').replace(/[^\S\r\n]+/g, ' ').trim();
+                            } else if (keyText.includes("潛在報酬")) {
+                                returnPotential = valEl.innerText.replace(/[\n\r]+/g, ' ').replace(/[^\S\r\n]+/g, ' ').trim();
+                            } else if (keyText.includes("預估EPS") || keyText.includes("每股盈餘")) {
+                                epsEstimate = valEl.innerText.replace(/[\n\r]+/g, ' ').replace(/[^\S\r\n]+/g, ' ').trim();
+                            }
+                        }
+                    });
+                }
+
+
+                if (brokers === "-") {
+                    const bMatch = bodyText.match(/(?:覆蓋法人|納入機構|研究機構)[：:\s]*([^\n\r]+)/i);
+                    if (bMatch) brokers = bMatch[1].replace(/[\s\t\u00A0]+/g, ' ').trim();
+                }
+                if (returnPotential === "-") {
+                    const rMatch = bodyText.match(/(?:潛在報酬|報酬空間)[：:\s]*([^\n\r]+)/i);
+                    if (rMatch) returnPotential = rMatch[1].replace(/[\s\t\u00A0]+/g, ' ').trim();
+                }
+                if (epsEstimate === "-") {
+                    const eMatch = bodyText.match(/(?:預估\s*EPS|每股盈餘預估)[：:\s]*([^\n\r]+)/i);
+                    if (eMatch) epsEstimate = eMatch[1].replace(/[\s\t\u00A0]+/g, ' ').trim();
+                }
+
+
+                if (summaryContent === "" && brokers === "-" && returnPotential === "-" && !targetTable) {
+                    return [
+                        `【${stockName} (${stockId}) | 法人目標價 | -】`,
+                        "(該標的尚無法人券商目標價報告或覆蓋)"
+                    ];
+                }
+
+
+                let consensusMain = "看多";
+                const cMainMatch = bodyText.match(/(?:法人共識|整體共識)[：:\s]*(看多|中立|看空)/i);
+                if (cMainMatch) {
+                    consensusMain = cMainMatch[1];
+                }
+
+
+                let consensusRatio = "";
+                const cRatioMatch = bodyText.match(/(?:看多|中立|看空)\s*\d+(?:\.\d+)?%\s*｜[^\n\r]+/);
+                if (cRatioMatch) {
+                    consensusRatio = cRatioMatch[0].replace(/[\s\t\u00A0]+/g, ' ').trim();
+                }
+                const consensusStr = consensusRatio ? `${consensusMain} (${consensusRatio})` : consensusMain;
+
+
+                let maxTarget = "-";
+                let midTarget = "-";
+                let minTarget = "-";
+
+
+                if (targetTable) {
+                    const tText = targetTable.innerText || "";
+                    
+                    const maxMatch = tText.match(/最高目標價[\s\n\r]*([0-9.,]+)(?:[\s\n\r]*(\([+-]?[0-9.]+%\)|[+-]?[0-9.]+%))?/);
+                    if (maxMatch) {
+                        maxTarget = maxMatch[2] ? `${maxMatch[1]} (${maxMatch[2].replace(/[()]/g, '')})` : maxMatch[1];
+                    }
+
+
+                    const midMatch = tText.match(/中位目標價[\s\n\r]*([0-9.,]+)(?:[\s\n\r]*(\([+-]?[0-9.]+%\)|[+-]?[0-9.]+%))?/);
+                    if (midMatch) {
+                        midTarget = midMatch[2] ? `${midMatch[1]} (${midMatch[2].replace(/[()]/g, '')})` : midMatch[1];
+                    }
+
+
+                    const minMatch = tText.match(/最低目標價[\s\n\r]*([0-9.,]+)(?:[\s\n\r]*(\([+-]?[0-9.]+%\)|[+-]?[0-9.]+%))?/);
+                    if (minMatch) {
+                        minTarget = minMatch[2] ? `${minMatch[1]} (${minMatch[2].replace(/[()]/g, '')})` : minMatch[1];
+                    }
+                }
+
+
+                let out = [];
+                out.push(`【${stockName} (${stockId}) | 法人目標價 | ${updateTime}】`);
+                out.push(`法人共識: ${consensusStr}`);
+                out.push("---------------------------------------");
+                out.push(`最高目標價: ${maxTarget}`);
+                out.push(`中位目標價: ${midTarget}`);
+                out.push(`最低目標價: ${minTarget}`);
+                out.push("---------------------------------------");
+                out.push(`潛在報酬: ${returnPotential}`);
+                out.push(`預估EPS: ${epsEstimate}`);
+                out.push(`覆蓋法人: ${brokers}`);
+                
+                if (summaryContent) {
+                    out.push("---------------------------------------");
+                    out.push("【法人總評】");
+                    out.push(summaryContent);
+                }
+
+
+                return out;
             }
-        }
+        },
+        constituent: { 
+            label: "ETF 成分股", 
+            urlSuffix: '?s=constituent', 
+            requiresExpand: true, 
+            delay: 3000, 
+            domParserFn: (doc, limit) => {
+                let res = [getMetaHeader(doc, "成分股權重明細")];
+                
+                const industryRows = doc.querySelectorAll('.table-industry tbody tr, .industryDistribution__wrapper--table table tbody tr');
+                if (industryRows.length > 0) { 
+                    let added = false; 
+                    industryRows.forEach(row => { 
+                        const indName = row.querySelector('.table__industry, td:nth-child(2)')?.innerText.replace(/[\s\t\u00A0]+/g, ' ').trim() || ""; 
+                        if (indName) { 
+                            if (!added) { res.push("\n[產業分布]\n排名\t產業\t佔比"); added = true; } 
+                            const rank = row.querySelector('.table__rank, td:nth-child(1)')?.innerText.trim() || "";
+                            const pct = row.querySelector('.table__percentage, td:nth-child(3)')?.innerText.trim() || "";
+                            res.push(`${rank}\t${indName}\t${pct}`); 
+                        } 
+                    }); 
+                }
+
+
+                const assetSection = doc.querySelector('.assetDistribution, [class*="assetDistribution"]');
+                if (assetSection) { 
+                    res.push("\n[資產配置]\n資產種類\t權重"); 
+                    assetSection.querySelectorAll('.assetDistribution__item, [class*="assetItem"]').forEach(item => { 
+                        const type = item.querySelector('.assetDistribution__text--assetType, [class*="assetType"]')?.innerText.trim() || ""; 
+                        const weight = item.querySelector('.assetDistribution__text--assetWeight, [class*="assetWeight"]')?.innerText.trim() || "";
+                        if (type) res.push(`${type}\t${weight}`); 
+                    }); 
+                }
+
+
+                const holdingTable = doc.querySelector('.stockHolding__wrapper--table table, table.table-stockHolding');
+                if (holdingTable) {
+                    const theads = Array.from(holdingTable.querySelectorAll('thead th, thead td')).map(th => th.innerText.replace(/[\n\r\t]+/g, ' ').replace(/[\s\t\u00A0]+/g, ' ').trim()).filter(Boolean);
+                    const headerStr = theads.length >= 4 
+                        ? theads.slice(0, 4).join('\t') 
+                        : "標的\t持股規模 (市值) 與前日變動 (張數)\t權重 與前日變動\t季權重增減";
+
+
+                    let spotHoldings = [];
+                    let derivativeHoldings = [];
+
+
+                    Array.from(holdingTable.querySelectorAll('tbody tr')).forEach(row => {
+                        const cols = Array.from(row.querySelectorAll('td, th'));
+                        if (cols.length >= 3) {
+                            const nameNode = cols[0].cloneNode(true);
+                            nameNode.querySelectorAll('.badge, .tag, [class*="tag"], [class*="badge"], [class*="status"], i, svg').forEach(el => el.remove());
+                            const attrTitle = cols[0].querySelector('a, span, div')?.getAttribute('title') || cols[0].getAttribute('title') || cols[0].getAttribute('data-name');
+                            let hName = attrTitle ? attrTitle.trim() : nameNode.innerText.replace(/[\n\r\t]+/g, ' ').trim();
+                            hName = hName.replace(/[\s\t\u00A0]+/g, ' ');
+
+
+                            const hScale = cols[1] ? cols[1].innerText.replace(/[\n\r\t]+/g, ' ').replace(/[\s\t\u00A0]+/g, ' ').trim() : "-";
+                            const hWeight = cols[2] ? cols[2].innerText.replace(/[\n\r\t]+/g, ' ').replace(/[\s\t\u00A0]+/g, ' ').trim() : "-";
+                            const hChange = cols[3] ? cols[3].innerText.replace(/[\n\r\t]+/g, ' ').replace(/[\s\t\u00A0]+/g, ' ').trim() : "-";
+
+
+                            const weightMatch = hWeight.match(/^(\d+(\.\d+)?)/);
+                            const weightVal = weightMatch ? parseFloat(weightMatch[1]) : 0;
+
+
+                            if (hName) {
+                                const isDerivative = /(?:期貨|指數期|ETF期|FUT|NOTE|BOND\s*\(CBT\)|TREASURY\s*FUT|SWAP|SGX|E-MINI|MINI-SP|小.*指數)/i.test(hName);
+                                const itemObj = { hName, hScale, hWeight, hChange, weightVal };
+
+
+                                if (isDerivative) {
+                                    derivativeHoldings.push(itemObj);
+                                } else {
+                                    spotHoldings.push(itemObj);
+                                }
+                            }
+                        }
+                    });
+
+
+                    spotHoldings.sort((a, b) => b.weightVal - a.weightVal);
+
+
+                    res.push(`\n[持股明細 (Top ${limit})]\n${headerStr}`);
+                    spotHoldings.slice(0, limit).forEach(item => {
+                        res.push(`${item.hName}\t${item.hScale}\t${item.hWeight}\t${item.hChange}`);
+                    });
+
+
+                    if (derivativeHoldings.length > 0) {
+                        res.push(`\n[衍生品/避險部位]\n${headerStr}`);
+                        derivativeHoldings.forEach(item => {
+                            res.push(`${item.hName}\t${item.hScale}\t${item.hWeight}\t${item.hChange}`);
+                        });
+                    }
+                }
+                return res;
+            }
+        },
+        dividend: { 
+            label: "股利政策", 
+            urlSuffix: '?s=dividend', 
+            requiresExpand: true, 
+            delay: 1500, 
+            domParserFn: (doc, limit) => {
+                let res = [getMetaHeader(doc, "股利政策")];
+                const descEl = doc.querySelector('.dividend__text--infoDesc');
+                const dataRows = Array.from(doc.querySelectorAll('.dividend__wrapper--table tbody tr, .stockPanel__view table tbody tr'));
+
+
+                if (descEl) {
+                    res.push(`${descEl.innerText.trim()} (共${dataRows.length}筆數據)`);
+                }
+
+
+                res.push("除權息年度\t現金-股利\t現金-除息日\t現金-發放日\t現金-除息前股價\t現金-填息天數\t股票-股利\t股票-除權日\t股票-除權前股價\t股票-填權天數\t股利合計\t殖利率(%)\t盈餘分配-配息\t盈餘分配-配股\t盈餘分配-合計");
+                dataRows.slice(0, limit).forEach(r => {
+                    res.push(Array.from(r.querySelectorAll('td')).map(td => td.innerText.trim()).join('\t'));
+                });
+                return res;
+            }
+        },
+        eps: { label: "歷年 EPS", urlSuffix: '?s=eps', requiresExpand: true, delay: 800, domParserFn: (doc, limit) => {
+            let res = [getMetaHeader(doc, "歷年 EPS"), "年度/季別\t每股盈餘(EPS)\t季增率\t年增率"];
+            Array.from(doc.querySelectorAll('.eps__table tbody tr, .stockPanel__view table tbody tr')).slice(0, limit).forEach(r => { const c = Array.from(r.querySelectorAll('td')).map(td => td.innerText.trim()); if(c.length>=2) res.push(c.join('\t')); });
+            return res;
+        }},
+        revenue: { label: "月營收", urlSuffix: '?s=revenue', requiresExpand: true, delay: 800, domParserFn: (doc, limit) => {
+            let res = [getMetaHeader(doc, "營收數據")];
+            const targetTable = doc.querySelector('.revenue__table table, .stockPanel__view table'); if (!targetTable) return res;
+            const theads = Array.from(targetTable.querySelectorAll('thead th')).map(th => th.innerText.trim()); if (theads.length > 0) res.push(theads.join('\t'));
+            Array.from(targetTable.querySelectorAll('tbody tr')).slice(0, limit).forEach(r => { const c = Array.from(r.querySelectorAll('td')).map(td => td.innerText.trim()); if(c.length>=2) res.push(c.join('\t')); });
+            return res;
+        }},
+        'income-statement': {
+            label: "損益表",
+            urlSuffix: '?s=income-statement',
+            requiresExpand: true,
+            delay: 800,
+            domParserFn: (doc, limit) => {
+                let res = [getMetaHeader(doc, "損益表(季表) | 單位: 仟元")];
+                const targetTable = doc.querySelector('.stockPanel__view table, .incomeStatement__table table');
+                if (!targetTable) return res;
+
+
+                const theadCols = Array.from(targetTable.querySelectorAll('thead th, thead td')).map(th => th.innerText.replace(/[\n\r\t]+/g, ' ').trim());
+                
+                let dateIdx = theadCols.findIndex(t => t.includes("日期") || t.includes("季度") || t.includes("年度"));
+                if (dateIdx === -1) dateIdx = 0;
+
+
+                const getColIdx = (keywords) => theadCols.findIndex(t => keywords.some(k => t.includes(k)));
+                const idxRev = getColIdx(["營業收入", "營收"]);
+                const idxGross = getColIdx(["營業毛利", "毛利"]);
+                const idxExp = getColIdx(["營業費用", "費用"]);
+                const idxOpInc = getColIdx(["營業利益", "營業淨利"]);
+                const idxPreTax = getColIdx(["稅前淨利", "稅前盈餘", "稅前利益"]);
+                const idxNetInc = getColIdx(["稅後淨利", "本期淨利", "稅後盈餘"]);
+
+
+                res.push("日期\t營業收入\t營業毛利\t營業費用\t營業利益\t稅前淨利\t稅後淨利");
+
+
+                const rows = Array.from(targetTable.querySelectorAll('tbody tr'));
+                rows.slice(0, limit).forEach(r => {
+                    const cells = Array.from(r.querySelectorAll('td, th')).map(c => c.innerText.replace(/[\n\r\t]+/g, ' ').trim());
+                    if (cells.length >= 2) {
+                        const dateStr = cells[dateIdx] || "-";
+                        const cRev = idxRev !== -1 && cells[idxRev] !== undefined ? cells[idxRev] : "-";
+                        const cGross = idxGross !== -1 && cells[idxGross] !== undefined ? cells[idxGross] : "-";
+                        const cExp = idxExp !== -1 && cells[idxExp] !== undefined ? cells[idxExp] : "-";
+                        const cOpInc = idxOpInc !== -1 && cells[idxOpInc] !== undefined ? cells[idxOpInc] : "-";
+                        const cPreTax = idxPreTax !== -1 && cells[idxPreTax] !== undefined ? cells[idxPreTax] : "-";
+                        const cNetInc = idxNetInc !== -1 && cells[idxNetInc] !== undefined ? cells[idxNetInc] : "-";
+
+
+                        res.push(`${dateStr}\t${cRev}\t${cGross}\t${cExp}\t${cOpInc}\t${cPreTax}\t${cNetInc}`);
+                    }
+                });
+                return res;
+            }
+        },
+        'balance-sheet': {
+            label: "資產負債",
+            urlSuffix: '?s=balance-sheet',
+            requiresExpand: false,
+            delay: 1000,
+            domParserFn: async (doc, limit) => {
+                let res = [getMetaHeader(doc, "資產負債表(季表) | 單位: 仟元")];
+                res.push("日期\t現金及約當現金\t應收帳款及票據\t存貨\t流動資產\t固定資產\t總資產\t總負債\t股東權益總額");
+
+
+                const radioGroup = doc.querySelector('.balanceSheet__nav .cm-radioGroup__wrapper');
+                const items = radioGroup ? Array.from(radioGroup.querySelectorAll('label, div, span, button')) : [];
+
+
+                const getTableSnapshot = () => {
+                    // 🛡️ 收斂至父容器，杜絕裸露全域 table 誤抓 (FIX-04)
+                    const tbl = doc.querySelector('.balanceSheet__table table, .stockPanel__view table');
+                    if (!tbl) return { headers: [], rows: [] };
+                    const headers = Array.from(tbl.querySelectorAll('th, thead td')).map(c => c.innerText.replace(/[\n\r\t]+/g, ' ').trim()).filter(Boolean);
+                    const rows = Array.from(tbl.querySelectorAll('tbody tr')).slice(0, limit || 8).map(r => {
+                        return Array.from(r.querySelectorAll('td')).map(c => c.innerText.replace(/[\n\r\t]+/g, ' ').trim());
+                    });
+                    return { headers, rows };
+                };
+
+
+                const clickTab = async (name) => {
+                    const target = items.find(el => el.innerText?.trim() === name);
+                    if (target) {
+                        target.click();
+                        await new Promise(r => setTimeout(r, 600));
+                    }
+                };
+
+
+                await clickTab('資產');
+                const assetData = getTableSnapshot();
+
+
+                await clickTab('負債');
+                const debtData = getTableSnapshot();
+
+
+                await clickTab('股東權益');
+                const equityData = getTableSnapshot();
+
+
+                await clickTab('資產');
+
+
+                const mergedMap = new Map();
+
+
+                const aHeaders = assetData.headers;
+                const aDateIdx = aHeaders.findIndex(t => t.includes("日期") || t.includes("季度") || t.includes("年度"));
+                const aCashIdx = aHeaders.findIndex(t => t.includes("現金"));
+                const aRecIdx = aHeaders.findIndex(t => t.includes("應收"));
+                const aInvIdx = aHeaders.findIndex(t => t.includes("存貨"));
+
+
+                let aCurIdx = aHeaders.findIndex(t => t === "流動資產");
+                if (aCurIdx === -1) aCurIdx = aHeaders.findIndex(t => t.includes("流動資產") && !t.includes("其他"));
+
+
+                const aFixIdx = aHeaders.findIndex(t => t.includes("固定資產") || t.includes("不動產"));
+                const aTotalIdx = aHeaders.findIndex(t => t.includes("總資產") || t.includes("資產總計"));
+
+
+                assetData.rows.forEach(r => {
+                    const date = r[aDateIdx !== -1 ? aDateIdx : 0];
+                    if (date) {
+                        mergedMap.set(date, {
+                            date,
+                            cash: (aCashIdx !== -1 && r[aCashIdx]) ? r[aCashIdx] : "-",
+                            rec: (aRecIdx !== -1 && r[aRecIdx]) ? r[aRecIdx] : "-",
+                            inv: (aInvIdx !== -1 && r[aInvIdx]) ? r[aInvIdx] : "-",
+                            curAsset: (aCurIdx !== -1 && r[aCurIdx]) ? r[aCurIdx] : "-",
+                            fixAsset: (aFixIdx !== -1 && r[aFixIdx]) ? r[aFixIdx] : "-",
+                            totalAsset: (aTotalIdx !== -1 && r[aTotalIdx]) ? r[aTotalIdx] : "-",
+                            totalDebt: "-",
+                            equity: "-"
+                        });
+                    }
+                });
+
+
+                const dHeaders = debtData.headers;
+                const dDateIdx = dHeaders.findIndex(t => t.includes("日期") || t.includes("季度"));
+                const dTotalIdx = dHeaders.findIndex(t => t.includes("總負債") || t.includes("負債總計"));
+                debtData.rows.forEach(r => {
+                    const date = r[dDateIdx !== -1 ? dDateIdx : 0];
+                    if (mergedMap.has(date)) {
+                        mergedMap.get(date).totalDebt = (dTotalIdx !== -1 && r[dTotalIdx]) ? r[dTotalIdx] : "-";
+                    }
+                });
+
+
+                const eHeaders = equityData.headers;
+                const eDateIdx = eHeaders.findIndex(t => t.includes("日期") || t.includes("季度"));
+                const eTotalIdx = eHeaders.findIndex(t => t.includes("股東權益") || t.includes("權益總計"));
+                equityData.rows.forEach(r => {
+                    const date = r[eDateIdx !== -1 ? eDateIdx : 0];
+                    if (mergedMap.has(date)) {
+                        mergedMap.get(date).equity = (eTotalIdx !== -1 && r[eTotalIdx]) ? r[eTotalIdx] : "-";
+                    }
+                });
+
+
+                mergedMap.forEach(v => {
+                    res.push(`${v.date}\t${v.cash}\t${v.rec}\t${v.inv}\t${v.curAsset}\t${v.fixAsset}\t${v.totalAsset}\t${v.totalDebt}\t${v.equity}`);
+                });
+
+
+                return res;
+            }
+        },
+        discount: { label: "折溢價", urlSuffix: '?s=discount-premium', requiresExpand: true, delay: 1000, domParserFn: (doc, limit) => {
+            let out = [getMetaHeader(doc, "折溢價紀錄"), "日期\t市價\t淨值\t折溢價\t折溢價%"];
+            Array.from(doc.querySelectorAll('.discountPremium__wrapper--table table tbody tr, .stockPanel__view table tbody tr')).slice(0, limit).forEach(r => out.push(Array.from(r.querySelectorAll('td')).map(td => td.innerText.trim()).join('\t')));
+            return out;
+        }},
+        'trading-fee': { 
+            label: "ETF 交易費用", 
+            urlSuffix: '?s=trading-fee', 
+            requiresExpand: false, 
+            delay: 1000, 
+            domParserFn: (doc, limit) => {
+                let res = [getMetaHeader(doc, "ETF 交易費用與股務資訊")];
+                const stockId = (window.location.pathname.match(/\/stock\/(\w+)/) || [])[1] || "";
+                const stockName = doc.querySelector('.stockData__name')?.innerText || "";
+                
+                const isBondETF = stockId.toUpperCase().endsWith('B') || 
+                                  stockId.toUpperCase().endsWith('D') || 
+                                  /債|非投等|公債|公司債|複合收益/i.test(stockName);
+
+
+                const targetSection = Array.from(doc.querySelectorAll('.stockPanel__section, .stockPanel__view section')).find(sec => {
+                    const txt = sec.innerText || "";
+                    return txt.includes("管理費") || txt.includes("交易費用") || txt.includes("保管費");
+                });
+
+
+                if (targetSection) {
+                    let rawText = targetSection.innerText || "";
+                    
+                    const mgmtMatch = rawText.match(/管理費[\s\n\r]*([\s\S]*?)(?=保管費|交易手續費|證券交易稅|$)/i);
+                    const custMatch = rawText.match(/保管費[\s\n\r]*([\s\S]*?)(?=交易手續費|證券交易稅|股務資訊|$)/i);
+                    const feeMatch = rawText.match(/交易手續費[\s\n\r]*([\s\S]*?)(?=證券交易稅|股務資訊|$)/i);
+                    const bankMatch = rawText.match(/保管銀行[\s\n\r]*([\s\S]*?)(?=配息頻率|$)/i);
+                    const freqMatch = rawText.match(/配息頻率[\s\n\r]*([\s\S]*?)$/i);
+
+
+                    const cleanStr = (s) => (s || "")
+                        .replace(/[\/]+/g, ' ')
+                        .replace(/%(\s*)(?=(?:規模|淨資產|逾|超過|新臺幣|\d+億))/g, '%; ')
+                        .replace(/;+/g, ';')
+                        .replace(/[\n\r]+/g, ' ')
+                        .replace(/[\s\t\u00A0]+/g, ' ')
+                        .trim();
+
+
+                    res.push(`管理費: ${cleanStr(mgmtMatch?.[1]) || "詳見公開說明書"}`);
+                    res.push(`保管費: ${cleanStr(custMatch?.[1]) || "詳見公開說明書"}`);
+                    res.push(`交易手續費: ${cleanStr(feeMatch?.[1]) || "依券商規定 (買賣時收取)"}`);
+                    
+                    if (isBondETF) {
+                        res.push("證券交易稅: 0% (停徵/免徵)");
+                    } else {
+                        res.push("證券交易稅: 1‰ (賣出時由券商代扣)");
+                    }
+
+
+                    if (bankMatch || freqMatch) {
+                        res.push("---------------------------------------");
+                        if (bankMatch) res.push(`保管銀行: ${cleanStr(bankMatch[1])}`);
+                        if (freqMatch) res.push(`配息頻率: ${cleanStr(freqMatch[1])}`);
+                    }
+                } else {
+                    res.push("(未找到交易費用與股務資訊區塊)");
+                }
+                return res;
+            }
+        },
+        risk: { label: "ETF 風險指標", urlSuffix: '?s=risk', requiresExpand: false, delay: 800, domParserFn: (doc, limit) => {
+            let res = [getMetaHeader(doc, "ETF 風險指標")];
+            const table = doc.querySelector('.risk__table table, .stockPanel__view table');
+            if (!table) return res;
+            const theads = Array.from(table.querySelectorAll('thead th')).map(th => th.innerText.trim());
+            if (theads.length > 0) res.push(theads.join('\t'));
+            else res.push("指標\t近一個月\t近三個月\t近一年");
+            Array.from(table.querySelectorAll('tbody tr')).slice(0, limit).forEach(r => {
+                const c = Array.from(r.querySelectorAll('td, th')).map(td => td.innerText.trim());
+                if (c.length >= 2) res.push(c.join('\t'));
+            });
+            return res;
+        }},
+        drawdown: { label: "ETF 歷史回撤", urlSuffix: '?s=drawdown', requiresExpand: false, delay: 800, domParserFn: (doc, limit) => {
+            let res = [getMetaHeader(doc, "ETF 歷史回撤")];
+            const table = doc.querySelector('.drawdown__table table, .stockPanel__view table');
+            if (!table) return res;
+            const theads = Array.from(table.querySelectorAll('thead th')).map(th => th.innerText.trim());
+            if (theads.length > 0) res.push(theads.join('\t'));
+            else res.push("日期\t市價\t回撤率%");
+            Array.from(table.querySelectorAll('tbody tr')).slice(0, limit).forEach(r => {
+                const c = Array.from(r.querySelectorAll('td, th')).map(td => td.innerText.trim());
+                if (c.length >= 2) res.push(c.join('\t'));
+            });
+            return res;
+        }},
+        pe: { label: "PE 河流圖", urlSuffix: '?s=pe', requiresExpand: true, delay: 1000, domParserFn: (doc, limit) => {
+            let res = [getMetaHeader(doc, "本益比(PE)數據")];
+            const table = doc.querySelector('.stockPanel__view table'); if (!table) return res;
+            const theads = Array.from(table.querySelectorAll('thead th')).map(th => th.innerText.trim()); if (theads.length > 0) res.push(theads.join('\t'));
+            Array.from(table.querySelectorAll('tbody tr')).slice(0, limit).forEach(r => { const c = Array.from(r.querySelectorAll('td')).map(td => td.innerText.trim()); if(c.length>=2) res.push(c.join('\t')); });
+            return res;
+        }},
+        pb: { label: "PB 河流圖", urlSuffix: '?s=pb', requiresExpand: true, delay: 1000, domParserFn: (doc, limit) => {
+            let res = [getMetaHeader(doc, "股價淨值比(PB)數據")];
+            const table = doc.querySelector('.stockPanel__view table'); if (!table) return res;
+            const theads = Array.from(table.querySelectorAll('thead th')).map(th => th.innerText.trim()); if (theads.length > 0) res.push(theads.join('\t'));
+            Array.from(table.querySelectorAll('tbody tr')).slice(0, limit).forEach(r => { const c = Array.from(r.querySelectorAll('td')).map(td => td.innerText.trim()); if(c.length>=2) res.push(c.join('\t')); });
+            return res;
+        }},
+        shareholding: { label: "大戶散戶", urlSuffix: '?s=shareholding-distribution', requiresExpand: true, delay: 1000, domParserFn: (doc, limit) => {
+            let res = [getMetaHeader(doc, "大戶散戶持股增減")];
+            const table = doc.querySelector('.stockPanel__view table, .shareholdingDistribution__table table'); if (!table) return res;
+            const theads = Array.from(table.querySelectorAll('thead th')).map(th => th.innerText.trim()); if (theads.length > 0) res.push(theads.join('\t'));
+            Array.from(table.querySelectorAll('tbody tr')).slice(0, limit).forEach(r => { const c = Array.from(r.querySelectorAll('td')).map(td => td.innerText.trim()); if(c.length>=2) res.push(c.join('\t')); });
+            return res;
+        }},
+        stockfindetail: { label: "三率趨勢", urlSuffix: '?s=stockfindetail', requiresExpand: true, delay: 1000, domParserFn: (doc, limit) => {
+            let res = [getMetaHeader(doc, "三率趨勢(毛利/營益/淨利)")];
+            const table = doc.querySelector('.stockPanel__view table'); if (!table) return res;
+            const theads = Array.from(table.querySelectorAll('thead th')).map(th => th.innerText.trim()); if (theads.length > 0) res.push(theads.join('\t'));
+            Array.from(table.querySelectorAll('tbody tr')).slice(0, limit).forEach(r => { const c = Array.from(r.querySelectorAll('td')).map(td => td.innerText.trim()); if(c.length>=2) res.push(c.join('\t')); });
+            return res;
+        }},
+        div_comp: { label: "股利組成", urlSuffix: '?s=dividend-composition', requiresExpand: true, delay: 1000, domParserFn: (doc, limit) => {
+            let res = [getMetaHeader(doc, "ETF 股利組成")];
+            const table = doc.querySelector('.dividendComposition__wrapper--table table, .stockPanel__view table'); 
+            if (!table) return res;
+            
+            const theadRows = Array.from(table.querySelectorAll('thead tr'));
+            let headerLine = "";
+            if (theadRows.length > 0) {
+                const lastThead = theadRows[theadRows.length - 1];
+                const ths = Array.from(lastThead.querySelectorAll('th, td')).map(th => th.innerText.replace(/[\n\r\t]+/g, ' ').trim()).filter(Boolean);
+                headerLine = ths.join('\t');
+            }
+            if (headerLine) {
+                res.push(headerLine);
+            }
+
+
+            Array.from(table.querySelectorAll('tbody tr')).slice(0, limit).forEach(r => { 
+                const c = Array.from(r.querySelectorAll('td, th')).map(td => td.innerText.replace(/[\n\r\t]+/g, ' ').trim()); 
+                if(c.length >= 2) res.push(c.join('\t')); 
+            });
+            return res;
+        }},
+        'revenue-source': { label: "營收組成", urlSuffix: '?s=revenue-source', requiresExpand: false, delay: 800, domParserFn: (doc, limit) => {
+            let res = [getMetaHeader(doc, "營收組成")];
+            const tables = doc.querySelectorAll('.revenueSource__table table, .stockPanel__view table');
+            if(tables.length === 0) return res;
+            tables.forEach((tbl, idx) => {
+                if(idx > 0) res.push("-----------------");
+                const theads = Array.from(tbl.querySelectorAll('thead th')).map(th => th.innerText.trim());
+                if (theads.length > 0) res.push(theads.join('\t'));
+                Array.from(tbl.querySelectorAll('tbody tr')).forEach(r => {
+                    const c = Array.from(r.querySelectorAll('td')).map(td => td.innerText.trim());
+                    if(c.length >= 2) res.push(c.join('\t'));
+                });
+            });
+            return res;
+        }},
+        'cash-flow': { label: "現金流量表", urlSuffix: '?s=cash-flow', requiresExpand: true, delay: 800, domParserFn: (doc, limit) => {
+            let res = [getMetaHeader(doc, "現金流量表")];
+            const table = doc.querySelector('.stockPanel__view table');
+            if(!table) return res;
+            const theads = Array.from(table.querySelectorAll('thead th')).map(th => th.innerText.trim());
+            if (theads.length > 0) res.push(theads.join('\t'));
+            Array.from(table.querySelectorAll('tbody tr')).slice(0, limit).forEach(r => {
+                const c = Array.from(r.querySelectorAll('td')).map(td => td.innerText.trim());
+                if(c.length >= 2) res.push(c.join('\t'));
+            });
+            return res;
+        }},
+        'financial-ratio': { label: "財務比率", urlSuffix: '?s=financial-ratio', requiresExpand: true, delay: 800, domParserFn: (doc, limit) => {
+            let res = [getMetaHeader(doc, "財務比率")];
+            const tables = doc.querySelectorAll('.stockPanel__view table');
+            if(tables.length === 0) return res;
+            tables.forEach((tbl, idx) => {
+                if(idx > 0) res.push("-----------------");
+                const theads = Array.from(tbl.querySelectorAll('thead th')).map(th => th.innerText.trim());
+                if (theads.length > 0) res.push(theads.join('\t'));
+                Array.from(tbl.querySelectorAll('tbody tr')).forEach(r => {
+                    const c = Array.from(r.querySelectorAll('td')).map(td => td.innerText.trim());
+                    if(c.length >= 2) res.push(c.join('\t'));
+                });
+            });
+            return res;
+        }}
     };
 
 
-    let globalConfig = Storage.get();
+    function executeSinglePageScrape(moduleKey) {
+        const mod = MODULE_REGISTRY[moduleKey];
+        if (!mod) return;
+        
+        const isKlineModule = (moduleKey === "kline" || moduleKey === "market_kline");
 
 
-    // ==========================================
-    // 0.1 跨站點 QA 採集暫存池資料結構與 TTL 防線
-    // ==========================================
-    function getQaQueue() {
-        let raw = null;
-        try {
-            if (typeof GM_getValue !== 'undefined') {
-                raw = GM_getValue(QA_QUEUE_KEY, null);
-            } else {
-                const val = localStorage.getItem(QA_QUEUE_KEY);
-                raw = val ? JSON.parse(val) : null;
-            }
-        } catch (e) {
-            console.error('⚠️ [AI Copy] QA Queue 讀取失敗:', e);
-        }
+        const executeAction = () => {
+            clickShowMoreAndExecute(async () => {
+                let res = null;
+                try {
+                    res = await mod.domParserFn(document, getAutoLimit(moduleKey, null, false));
+                } catch (err) {
+                    console.error("Single Scrape Error:", err);
+                    res = ["【抓取失敗】", `(解析異常: ${err.message})`, ""];
+                }
+                finishScrape(res, `✅ 單頁抓取成功：${mod.label}`);
+            }, mod.delay, mod.requiresExpand);
+        };
 
 
-        if (!raw || typeof raw !== 'object' || !raw.items) {
-            raw = { lastUpdated: Date.now(), items: {} };
-        }
-
-
-        // TTL 逾時自滅檢查 (0 為永不過期)
-        const ttlHours = globalConfig.qaQueueSettings?.ttlHours ?? 2;
-        if (ttlHours > 0) {
-            const ttlMs = ttlHours * 60 * 60 * 1000;
-            if (Date.now() - (raw.lastUpdated || 0) > ttlMs) {
-                raw = { lastUpdated: Date.now(), items: {} };
-                setQaQueue(raw);
-            }
-        }
-        return raw;
-    }
-
-
-    function setQaQueue(queueData) {
-        try {
-            if (typeof GM_setValue !== 'undefined') {
-                GM_setValue(QA_QUEUE_KEY, queueData);
-            } else {
-                localStorage.setItem(QA_QUEUE_KEY, JSON.stringify(queueData));
-            }
-        } catch (e) {
-            console.error('⚠️ [AI Copy] QA Queue 寫入失敗:', e);
-            showToast('❌ 設定儲存失敗！可能是儲存空間已滿或被隱私模式阻擋。', true, 4000);
+        if (isKlineModule) {
+            const originalScrollY = window.scrollY;
+            window.scrollTo({ top: document.body.scrollHeight / 2, behavior: 'smooth' });
+            showToast("⏳ 等待 K 線資料載入中...");
+            
+            if (singleScrapePoller) clearInterval(singleScrapePoller);
+            
+            let checkCount = 0;
+            singleScrapePoller = setInterval(() => {
+                if (window.__cm_kline_data_cache || checkCount >= 40) {
+                    clearInterval(singleScrapePoller);
+                    singleScrapePoller = null; 
+                    window.scrollTo({ top: originalScrollY, behavior: 'smooth' });
+                    executeAction();
+                }
+                checkCount++;
+            }, 500);
+        } else {
+            executeAction();
         }
     }
 
 
-    function clearQaQueue() {
-        const emptyQueue = { lastUpdated: Date.now(), items: {} };
-        setQaQueue(emptyQueue);
-        updateGearIndicator();
-    }
+    function startRelayBatchScrape() {
+        const match = location.pathname.match(/\/stock\/([A-Za-z0-9]+)(?:[\/\?#]|$)/);
+        if (!match) { showToast("⚠️ 批量抓取僅支援個股/ETF頁面發起"); return; }
+        const stockId = match[1].toUpperCase();
 
 
-    function updateGearIndicator() {
-        const queue = getQaQueue();
-        const count = Object.keys(queue.items || {}).length;
-        const gearBtns = document.querySelectorAll('.ai-copy-gear-btn');
-        const summaryKey = globalConfig.qaQueueSettings?.summaryHotkey || 'F7';
+        const modulesToFetch = Array.from(document.querySelectorAll('.cm-module-cb:checked')).map(cb => cb.value).filter(k => MODULE_REGISTRY[k] && (MODULE_REGISTRY[k].urlSuffix !== null || MODULE_REGISTRY[k].absoluteUrl));
+        if (modulesToFetch.length === 0) { showToast("⚠️ 未勾選任何支援批次的模組"); return; }
 
 
-        gearBtns.forEach(btn => {
-            if (count > 0) {
-                btn.classList.add('ai-copy-gear-active');
-                btn.title = `【QA 採集中：已暫存 ${count} 站】點擊開啟管理器，右鍵強制清空佇列 (按 ${summaryKey} 總結匯出)`;
-            } else {
-                btn.classList.remove('ai-copy-gear-active');
-                btn.title = '開啟參數設定管理器 (右鍵可清空 QA 採集佇列)';
-            }
+        document.getElementById('cm-btn-batch-exec').innerText = "⏳ 開啟分頁彙整中...";
+        document.getElementById('cm-btn-batch-exec').disabled = true;
+
+
+        // FIX-01: 注入任務指紋與啟動時間戳記
+        const taskId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        GM_setValue("cm_batch_task", { 
+            id: taskId, 
+            active: true, 
+            stockId: stockId, 
+            queue: modulesToFetch, 
+            total: modulesToFetch.length, 
+            results: {}, 
+            lastProgressTime: Date.now() 
         });
+        
+        const firstMod = MODULE_REGISTRY[modulesToFetch[0]];
+        const targetUrl = firstMod.absoluteUrl ? firstMod.absoluteUrl : `https://www.cmoney.tw/forum/stock/${stockId}${firstMod.urlSuffix}`;
+        window.open(targetUrl, "CMScrapeWorker");
+
+
+        if (batchMonitorTimer) clearInterval(batchMonitorTimer);
+        let lastQueueLen = modulesToFetch.length;
+
+
+        batchMonitorTimer = setInterval(() => {
+            const task = GM_getValue("cm_batch_task");
+            const btn = document.getElementById('cm-btn-batch-exec');
+            const sb = document.getElementById('cm-status-bar');
+
+
+            if (!task || !task.active || task.id !== taskId) {
+                if (btn) { btn.innerText = "⚡ 自動開頁彙整勾選資料"; btn.disabled = false; }
+                clearInterval(batchMonitorTimer);
+                return;
+            }
+
+
+            // 停滯偵測：若超過 180,000ms (3分鐘) 無任何進度，強制釋放
+            if (task.queue.length !== lastQueueLen) {
+                lastQueueLen = task.queue.length;
+                task.lastProgressTime = Date.now();
+                GM_setValue("cm_batch_task", task);
+            } else if (Date.now() - (task.lastProgressTime || Date.now()) > 180000) {
+                clearInterval(batchMonitorTimer);
+                if (btn) { btn.innerText = "⚡ 自動開頁彙整勾選資料"; btn.disabled = false; }
+                task.active = false;
+                GM_setValue("cm_batch_task", task);
+                showToast("⚠️ 批次任務進度超時停滯 (3分鐘)，已自動中斷並解鎖！", "error");
+                if (sb) sb.innerText = "⚠️ 任務超時中斷";
+                return;
+            }
+
+
+            if (!task.active || task.queue.length === 0) {
+                clearInterval(batchMonitorTimer);
+                if (btn) { btn.innerText = "⚡ 自動開頁彙整勾選資料"; btn.disabled = false; }
+                let finalOut = [];
+                for (let k in task.results) {
+                    let data = task.results[k];
+                    if (data && data.length > 1) finalOut.push(`\n\n=== 【${MODULE_REGISTRY[k].label}】 ===\n\n` + data.join('\n'));
+                    else finalOut.push(`\n\n=== 【${MODULE_REGISTRY[k].label}】 ===\n\n${data?.[0] || "(無數據或抓取失敗)"}`);
+                }
+                if (finalOut.length > 0) {
+                    const finalString = finalOut.join('').trim();
+                    GM_setValue("cm_last_scraped_data", finalString);
+                    GM_setValue("cm_last_scraped_stock_id", task.stockId);
+
+
+                    try { window.focus(); } catch (e) {}
+                    GM_setClipboard(finalString);
+                    if (navigator.clipboard?.writeText) {
+                        navigator.clipboard.writeText(finalString).catch(() => {});
+                    }
+
+
+                    const recopyBtn = document.getElementById('cm-btn-recopy');
+                    const hasError = finalString.includes("【抓取失敗】");
+                    let toastMsg = hasError ? `⚠️ ${task.total} 個模組已彙整，但部分抓取失敗！` : `✅ ${task.total} 個模組彙整完成！`;
+
+
+                    if (!document.hasFocus()) {
+                        toastMsg = "✅ 批次已完成！視窗未聚焦，請按 F9 或點擊按鈕複製";
+                        if (recopyBtn) recopyBtn.classList.add('cm-btn-pulse');
+                    } else {
+                        if (recopyBtn) recopyBtn.classList.remove('cm-btn-pulse');
+                    }
+                    
+                    showToast(toastMsg);
+                    if (sb) sb.innerText = hasError ? "⚠️ 批次彙整 (部分失敗)" : "✅ 批次彙整已複製";
+                }
+                GM_setValue("cm_batch_task", null);
+            } else {
+                let done = task.total - task.queue.length;
+                if (btn) btn.innerText = `⏳ 彙整中 (${done}/${task.total})...`;
+            }
+        }, 1000);
     }
 
 
-    // ==========================================
-    // 1. Toast 幾何定位與雙態切換工具
-    // ==========================================
-    let isToastPositioningMode = false;
+    function checkAndExecuteWorkerTask() {
+        // FIX-01: 限制僅在名為 CMScrapeWorker 的視窗內執行 Worker 任務
+        if (window.name !== 'CMScrapeWorker') return;
 
 
-    function applyToastPosition(toast) {
-        const pos = globalConfig.toastPosition;
-        if (pos && pos.left && pos.top) {
-            toast.style.left = pos.left;
-            toast.style.top = pos.top;
-            toast.style.bottom = 'auto';
-            toast.style.right = 'auto';
-            toast.dataset.hasCustomPos = 'true';
-        } else {
-            toast.style.bottom = '80px';
-            toast.style.right = '24px';
-            toast.style.left = 'auto';
-            toast.style.top = 'auto';
-            toast.dataset.hasCustomPos = 'false';
-        }
-    }
+        const task = GM_getValue("cm_batch_task");
+        if (!task || !task.active) return;
 
 
-    function showToast(message, isError = false, duration = 2200) {
-        if (isToastPositioningMode) return; // 處於拖曳定位模式時不被覆蓋
+        const currentModKey = getCurrentPageModule(); 
+        const match = location.pathname.match(/\/stock\/([A-Za-z0-9]+)(?:[\/\?#]|$)/); 
+        const currentStockId = match ? match[1].toUpperCase() : "";
 
 
-        let toast = document.getElementById('ai-copy-toast');
-        if (!toast) {
-            toast = document.createElement('div');
-            toast.id = 'ai-copy-toast';
-            toast.className = 'ai-copy-toast-node';
-            document.body.appendChild(toast);
-        }
+        const isTargetModule = task.queue.length > 0 && task.queue[0] === currentModKey;
+        const isTargetStock = currentModKey === "market_kline" || task.stockId === currentStockId;
 
 
-        applyToastPosition(toast);
-        const customBg = globalConfig.toastSettings?.background || DEFAULT_CONFIG.toastSettings.background;
-        const customFontSize = globalConfig.toastSettings?.fontSize || 18;
+        if (isTargetModule && isTargetStock) {
+            document.getElementById('cm-worker-overlay')?.remove();
+            
+            const overlay = document.createElement('div'); overlay.id = 'cm-worker-overlay';
+            overlay.innerHTML = `<div class="cm-spinner"></div><h2>自動彙整系統運作中 (${task.total - task.queue.length + 1}/${task.total})</h2><p>正在抓取：${MODULE_REGISTRY[currentModKey].label}...</p><p style="color:#aaa; font-size:14px; margin-top:10px;">請勿操作此視窗，完成後將自動關閉或跳轉</p>`;
+            document.body.appendChild(overlay);
 
 
-        toast.textContent = message;
-        toast.style.fontSize = `${customFontSize}px`;
-        toast.style.setProperty('background', isError ? 'rgba(220, 38, 38, 0.95)' : customBg, 'important');
-        toast.style.pointerEvents = 'none'; // 平時點擊強制穿透
-        toast.style.opacity = '1';
-        toast.style.transform = 'none';
-
-
-        if (toast._timer) clearTimeout(toast._timer);
-        toast._timer = setTimeout(() => {
-            toast.style.opacity = '0';
-            toast.style.transform = 'translateY(10px)';
-        }, duration);
-    }
-
-
-    function toggleToastPositioningMode() {
-        let toast = document.getElementById('ai-copy-toast');
-        if (!toast) {
-            toast = document.createElement('div');
-            toast.id = 'ai-copy-toast';
-            toast.className = 'ai-copy-toast-node';
-            document.body.appendChild(toast);
-        }
-
-
-        const toastBtns = document.querySelectorAll('.ai-copy-toast-btn');
-
-
-        if (!isToastPositioningMode) {
-            // 進入長亮拖曳定位模式
-            isToastPositioningMode = true;
-            toastBtns.forEach(b => b.classList.add('ai-copy-toast-btn-active'));
-
-
-            if (toast._timer) clearTimeout(toast._timer);
-
-
-            applyToastPosition(toast);
-            const customBg = globalConfig.toastSettings?.background || DEFAULT_CONFIG.toastSettings.background;
-            const customFontSize = globalConfig.toastSettings?.fontSize || 18;
-
-
-            toast.textContent = '🍞 [Toast 預覽] 按住本框可自由拖曳定位，完成後再次點擊 🍞 鎖定';
-            toast.style.fontSize = `${customFontSize}px`;
-            toast.style.setProperty('background', customBg, 'important');
-
-
-            // 實體解鎖：強制關閉過渡與清除 transform，杜絕平移死鎖與每按一次就位移
-            toast.classList.add('ai-copy-toast-active');
-            toast.classList.add('ai-copy-is-dragging');
-            toast.style.setProperty('pointer-events', 'auto', 'important');
-            toast.style.opacity = '1';
-            toast.style.transform = 'none';
-
-
-            // 視窗絕對座標原位鎖定（杜絕 auto 與累加偏誤）
-            const curRect = toast.getBoundingClientRect();
-            toast.style.left = `${Math.round(curRect.left)}px`;
-            toast.style.top = `${Math.round(curRect.top)}px`;
-            toast.style.right = 'auto';
-            toast.style.bottom = 'auto';
-
-
-            setupDraggableUI(toast, toast, false, null, true);
-        } else {
-            // 退出並物理鎖定座標
-            isToastPositioningMode = false;
-            toastBtns.forEach(b => b.classList.remove('ai-copy-toast-btn-active'));
-            toast.classList.remove('ai-copy-toast-active');
-            toast.classList.remove('ai-copy-is-dragging');
-            toast.style.setProperty('pointer-events', 'none', 'important');
-
-
-            // 100% 物理左上角真理座標記錄
-            const rect = toast.getBoundingClientRect();
-            globalConfig.toastPosition = {
-                left: `${Math.round(rect.left)}px`,
-                top: `${Math.round(rect.top)}px`
-            };
-            Storage.set(globalConfig);
-
-
-            toast.style.opacity = '0';
-            toast.style.transform = 'translateY(10px)';
+            let isWatchdogFired = false;
+            // FIX-04: Watchdog 延長至 25,000ms (25 秒)
+            const watchdogTimer = setTimeout(() => {
+                isWatchdogFired = true; 
+                let currentTask = GM_getValue("cm_batch_task");
+                if (currentTask && currentTask.active && currentTask.id === task.id && currentTask.queue[0] === currentModKey) {
+                    currentTask.results[currentModKey] = ["【抓取失敗】", "(網路超時或頁面卡死，自動略過)", ""];
+                    currentTask.queue.shift();
+                    currentTask.lastProgressTime = Date.now();
+                    GM_setValue("cm_batch_task", currentTask);
+                    if (currentTask.queue.length > 0) {
+                        const nextMod = MODULE_REGISTRY[currentTask.queue[0]];
+                        const nextUrl = nextMod.absoluteUrl ? nextMod.absoluteUrl : `https://www.cmoney.tw/forum/stock/${currentTask.stockId}${nextMod.urlSuffix}`;
+                        window.location.href = nextUrl;
+                    } else {
+                        currentTask.active = false; GM_setValue("cm_batch_task", currentTask); window.close();
+                    }
+                }
+            }, 25000);
 
 
             setTimeout(() => {
-                showToast('📍 Toast 提示位置已成功鎖定！');
-            }, 80);
+                const mod = MODULE_REGISTRY[currentModKey];
+                const isKlineModule = (currentModKey === "kline" || currentModKey === "market_kline");
+
+
+                function executeScrapeAndJump() {
+                    if (isWatchdogFired) return;
+                    clickShowMoreAndExecute(async () => {
+                        if (isWatchdogFired) return; 
+                        let res = null;
+                        try {
+                            res = await mod.domParserFn(document, getAutoLimit(currentModKey, task.stockId, true));
+                        } catch (err) {
+                            console.error("Scrape Error at module:", currentModKey, err);
+                            res = ["【抓取失敗】", `(解析異常: ${err.message})`, ""];
+                        }
+                        clearTimeout(watchdogTimer);
+
+
+                        let latestTask = GM_getValue("cm_batch_task");
+                        // FIX-01: 移轉前驗證任務指紋與佇列頭部
+                        if (!latestTask || latestTask.id !== task.id || latestTask.queue[0] !== currentModKey) return;
+
+
+                        latestTask.results[currentModKey] = res; 
+                        latestTask.queue.shift();
+                        latestTask.lastProgressTime = Date.now();
+                        GM_setValue("cm_batch_task", latestTask);
+
+
+                        if (latestTask.queue.length > 0) {
+                            const nextMod = MODULE_REGISTRY[latestTask.queue[0]];
+                            const nextUrl = nextMod.absoluteUrl ? nextMod.absoluteUrl : `https://www.cmoney.tw/forum/stock/${latestTask.stockId}${nextMod.urlSuffix}`;
+                            window.location.href = nextUrl;
+                        } else {
+                            latestTask.active = false; 
+                            GM_setValue("cm_batch_task", latestTask); 
+                            window.close();
+                        }
+                    }, mod.delay, mod.requiresExpand);
+                }
+
+
+                if (isKlineModule) {
+                    const originalScrollY = window.scrollY;
+                    window.scrollTo({ top: document.body.scrollHeight / 2, behavior: 'smooth' });
+                    let checkCount = 0;
+                    const poller = setInterval(() => {
+                        if (window.__cm_kline_data_cache || checkCount >= 50) {
+                            clearInterval(poller);
+                            window.scrollTo({ top: originalScrollY, behavior: 'smooth' });
+                            executeScrapeAndJump();
+                        }
+                        checkCount++;
+                    }, 500);
+                } else {
+                    executeScrapeAndJump();
+                }
+
+
+            }, 1500);
         }
     }
 
 
-    function copyToClipboard(text) {
-        if (typeof GM_setClipboard !== 'undefined') {
-            GM_setClipboard(text, 'text');
-        } else if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(text);
+    function toggleSideDrawer(side) {
+        const drawer = document.getElementById(`drawer-${side}`);
+        const btn = document.getElementById(`cm-toggle-${side}`);
+        const panel = document.getElementById('cm-main-panel');
+        if (!drawer || !btn || !panel) return;
+
+
+        const isOpen = drawer.classList.contains('open');
+        const drawerWidth = getDynamicUIParams().drawerW;
+
+
+        let rawLeft = parseFloat(panel.style.left);
+        let currentLeft = Number.isFinite(rawLeft) ? rawLeft : 200;
+
+
+        if (!isOpen) {
+            if (side === 'left') {
+                const newLeft = Math.max(0, currentLeft - drawerWidth);
+                panel.style.left = newLeft + 'px';
+            }
+            drawer.classList.add('open');
+            btn.innerText = side === 'left' ? '▶ 收合' : '收合 ◀';
+            GM_setValue(`cm_${side}_open`, true);
         } else {
-            const textarea = document.createElement('textarea');
-            textarea.value = text;
-            document.body.appendChild(textarea);
-            textarea.select();
-            document.execCommand('copy');
-            document.body.removeChild(textarea);
+            if (side === 'left') {
+                const newLeft = currentLeft + drawerWidth;
+                panel.style.left = newLeft + 'px';
+            }
+            drawer.classList.remove('open');
+            btn.innerText = side === 'left' ? '◀ 設定' : '參數 ▶';
+            GM_setValue(`cm_${side}_open`, false);
         }
+
+
+        // FIX-02: 夾緊與 NaN 防禦
+        const finalTop = Number.isFinite(parseFloat(panel.style.top)) ? parseFloat(panel.style.top) : 150;
+        const finalLeft = Number.isFinite(parseFloat(panel.style.left)) ? parseFloat(panel.style.left) : 200;
+        GM_setValue("panel_pos", { top: finalTop, left: finalLeft });
     }
 
 
-    // ==========================================
-    // 2. 雲端 JSON 同步引擎 (Google Docs 純內容覆蓋，座標絕對隔離)
-    // ==========================================
-    function getGoogleDocRawUrl(url) {
+    // [SYNC-01] Google 試算表 CSV URL 轉譯與 HTML 防禦
+    function getGoogleSheetsCsvUrl(url) {
         if (!url) return '';
-        const docMatch = url.match(/\/document\/d\/([a-zA-Z0-9-_]+)/);
-        if (docMatch && docMatch[1]) {
-            return `https://docs.google.com/document/d/${docMatch[1]}/export?format=txt`;
+        const idMatch = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+        if (idMatch && idMatch[1]) {
+            const spreadsheetId = idMatch[1];
+            const gidMatch = url.match(/[#&?]gid=([0-9]+)/);
+            const gid = (gidMatch && gidMatch[1]) ? gidMatch[1] : '0';
+            return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
         }
         return url;
-    }
-
-
-    function getSafeDocLinkUrl(rawUrl) {
-        if (!rawUrl) return '#';
-        const trimmed = rawUrl.trim();
-        if (trimmed.startsWith('https://') || trimmed.startsWith('http://')) {
-            return trimmed;
-        }
-        return '#';
     }
 
 
@@ -899,5393 +1920,1003 @@
     }
 
 
-    function sanitizeJsonString(text) {
-        if (!text) return '';
-        return text
-            .trim()
-            .replace(/^\uFEFF/, '')
-            .replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"')
-            .replace(/[\u2018\u2019\u201A\u201B\u2032\u2035]/g, "'")
-            .replace(/\u00a0/g, ' ');
-    }
-
-
-    function fetchCloudData(url) {
-        return fetch(url, { credentials: 'omit' })
-            .then(res => {
-                if (!res.ok) throw new Error("HTTP 狀態碼: " + res.status);
-                return res.text();
-            })
-            .catch(err => {
-                return new Promise((resolve, reject) => {
-                    if (typeof GM_xmlhttpRequest !== 'undefined') {
-                        GM_xmlhttpRequest({
-                            method: "GET",
-                            url: url,
-                            anonymous: true,
-                            onload: (res) => {
-                                if (res.status >= 200 && res.status < 300) resolve(res.responseText);
-                                else reject(new Error("備用連線狀態碼: " + res.status));
-                            },
-                            onerror: () => reject(new Error("雲端連線失敗，請檢查網址與共享權限。"))
-                        });
-                    } else {
-                        reject(err);
-                    }
-                });
-            });
-    }
-
-
-    async function syncFromJsonDoc(onSuccessCallback) {
-        const url = globalConfig.jsonSyncUrl;
-        if (!url || !url.trim()) {
-            showToast('⚠️ 請先填入 Google Doc 雲端同步連結！', true);
+    function syncGoogleSheetLists(targetUrl) {
+        const url = getGoogleSheetsCsvUrl(targetUrl || CONFIG.sync_sheet_url);
+        if (!url) {
+            showToast("⚠️ 試算表網址為空，無法同步！", "error");
             return;
         }
 
 
-        showToast('⏳ 正在從 Google Docs 同步配置...');
-        try {
-            const rawUrl = getGoogleDocRawUrl(url.trim());
-            const rawText = await fetchCloudData(rawUrl);
-
-
-            if (isHtmlResponse(rawText)) {
-                alert('⚠️ 同步失敗！\n此 Google Doc 處於非共享狀態，請至雲端將共用權限設為「知道連結的任何人均可檢視」。');
-                showToast('❌ 雲端檔案非共享狀態！', true);
-                return;
-            }
-
-
-            const cleanedText = sanitizeJsonString(rawText);
-            const parsed = JSON.parse(cleanedText);
-
-
-            if (!parsed || typeof parsed !== 'object') {
-                throw new Error('解析結果非合法 JSON 物件');
-            }
-
-
-            if (confirm('確定使用此雲端配置「覆蓋」純內容設定嗎？\n(為防止按鈕跑位，本機懸浮卡片、小光球、Toast 座標與自訂熱鍵將 100% 嚴格保留)')) {
-                const preservedLocal = JSON.parse(JSON.stringify(globalConfig));
-                const preservedHotkeys = {
-                    captureHotkey: globalConfig.qaQueueSettings?.captureHotkey,
-                    summaryHotkey: globalConfig.qaQueueSettings?.summaryHotkey
-                };
-
-
-                globalConfig = sanitizeConfig(parsed);
-                applyLocalOnlyOverrides(globalConfig, preservedLocal);
-
-
-                // 【Hotfix-02】：由 truthy 檢查改為 !== undefined 嚴格型別校驗
-                if (typeof preservedHotkeys.captureHotkey !== 'undefined' && globalConfig.qaQueueSettings) {
-                    globalConfig.qaQueueSettings.captureHotkey = preservedHotkeys.captureHotkey;
-                }
-                if (typeof preservedHotkeys.summaryHotkey !== 'undefined' && globalConfig.qaQueueSettings) {
-                    globalConfig.qaQueueSettings.summaryHotkey = preservedHotkeys.summaryHotkey;
-                }
-
-
-                Storage.set(globalConfig);
-                if (typeof onSuccessCallback === 'function') onSuccessCallback();
-                showToast('🎉 雲端內容配置已成功同步覆蓋 (本機座標與熱鍵完好保留)！');
-            }
-        } catch (err) {
-            console.error('❌ [AI Copy] 雲端 JSON 同步失敗:', err);
-            alert(`❌ 雲端 JSON 同步失敗：\n${err.message}\n\n可能原因：\n1. Google Doc 內容非合法 JSON 格式。\n2. 檔案未開啟公開檢視權限。`);
-            showToast('❌ JSON 解析或同步失敗！', true);
-        }
-    }
-
-
-    // ==========================================
-    // 3. 全域 DOM 雜訊與雙軌開放式清洗管線
-    // ==========================================
-    const UNIVERSAL_NOISE_SELECTORS = [
-        '.katex-mathml', '.MathJax_Preview',
-        '.line-numbers', '.line-numbers-rows', '.gutter', '.linenumber', '[class*="line-number"]',
-        'button', 'svg', 'mat-icon', 'span.material-symbols-outlined',
-        '.copy-code-button', '.table-action-btn', '.action-btn', '[class*="action-bar"]',
-        '[class*="toolbar"]', '[class*="feedback"]', '.actions-container', 'ms-turn-actions',
-        '[data-testid*="copy"]', '[aria-label*="複製"]', '[aria-label*="朗讀"]',
-        '[aria-label*="好"]', '[aria-label*="不好"]', '[aria-label*="Read Aloud"]',
-        '[aria-label*="Copy"]', '[aria-label*="Copy code"]', '.text-xs.text-gray-500', '.text-gray-400',
-        '[class*="table-tool"]', '[class*="table-header"]', '[class*="sheet-copy"]',
-        '.ds-greeting', '.welcome-card', '.suggest-box', '.chat-recommend-prompt',
-        '.thinking-box', '.think-container', '.tool-call-wrap', '.answer-info-right',
-        '[data-testid*="citation"]', '.citation', '[class*="citation"]', '.group-hover\\:visible',
-        `#${UI_CONTAINER_ID}`, `#${FLOATING_ORB_ID}`, '#ai-copy-toast', `#${MODAL_OVERLAY_ID}`, '.ai-copy-toast-node'
-    ];
-
-
-    function cleanUniversalNoise(node) {
-        if (!node || node.nodeType !== Node.ELEMENT_NODE) return node;
-        UNIVERSAL_NOISE_SELECTORS.forEach(sel => {
-            node.querySelectorAll(sel).forEach(el => el.remove());
-        });
-        return node;
-    }
-
-
-    function applyNoiseStrings(text, rawStrings) {
-        if (!text || !rawStrings || !rawStrings.trim()) return text;
-        let result = text;
-        const lines = rawStrings.split('\n');
-        lines.forEach(line => {
-            const rule = line.trim();
-            if (!rule || rule.startsWith('#') || rule.startsWith('//')) return;
-            result = result.replaceAll(rule, '');
-        });
-        return result;
-    }
-
-
-    function findRegexClosingSlash(rule) {
-        if (!rule || rule.length <= 1 || !rule.startsWith('/')) return -1;
-        for (let i = rule.length - 1; i >= 1; i--) {
-            if (rule[i] === '/') {
-                let slashCount = 0;
-                for (let j = i - 1; j >= 0; j--) {
-                    if (rule[j] === '\\') {
-                        slashCount++;
-                    } else {
-                        break;
-                    }
-                }
-                if (slashCount % 2 === 0) {
-                    return i;
-                }
-            }
-        }
-        return -1;
-    }
-
-
-    function applyNoiseRegexes(text, rawRegexes) {
-        if (!text || !rawRegexes || !rawRegexes.trim()) return text;
-        let result = text;
-        const lines = rawRegexes.split('\n');
-        lines.forEach(line => {
-            const rule = line.trim();
-            if (!rule || rule.startsWith('#') || rule.startsWith('//')) return;
-
-
-            try {
-                if (rule.startsWith('/') && rule.length > 1) {
-                    const lastSlashIndex = findRegexClosingSlash(rule);
-
-
-                    if (lastSlashIndex > 0) {
-                        const patternStr = rule.substring(1, lastSlashIndex);
-                        const flagsStr = rule.substring(lastSlashIndex + 1) || 'g';
-                        const regex = new RegExp(patternStr, flagsStr);
-                        result = result.replace(regex, '');
-                    } else {
-                        result = result.replaceAll(rule, '');
-                    }
-                } else {
-                    result = result.replaceAll(rule, '');
-                }
-            } catch (regexErr) {
-                console.warn('⚠️ [AI Copy] 自訂正則規則語法無效，已自動跳過:', rule, regexErr);
-            }
-        });
-        return result;
-    }
-
-
-    function sanitizeMarkdownArtifacts(text) {
-        if (!text) return '';
-        let result = text;
-        const settings = globalConfig.noiseSettings || DEFAULT_CONFIG.noiseSettings;
-        const order = settings.pipelineOrder || 'string_first';
-
-
-        if (order === 'string_first') {
-            result = applyNoiseStrings(result, settings.customNoiseStrings);
-            result = applyNoiseRegexes(result, settings.customNoiseRegexes);
-        } else {
-            result = applyNoiseRegexes(result, settings.customNoiseRegexes);
-            result = applyNoiseStrings(result, settings.customNoiseStrings);
-        }
-
-
-        return result.replace(/\n{3,}/g, '\n\n').trim();
-    }
-
-
-    // ==========================================
-    // 4. AI Studio 多引擎降級容錯提取 (Multi-Engine Chain)
-    // ==========================================
-    async function tryAiStudioNativeMenuCopy() {
-        try {
-            const buttons = Array.from(document.querySelectorAll('button[aria-label="View more actions"], button[mattooltip="View more actions"], button.mat-mdc-menu-trigger'));
-            const validButtons = buttons.filter(b => {
-                if (b.closest('ms-playground-toolbar') || b.closest(`#${UI_CONTAINER_ID}`) || b.closest(`#${FLOATING_ORB_ID}`)) return false;
-                const turn = b.closest('ms-chat-turn, [data-turn-role="Model"]');
-                return !!turn;
-            });
-
-
-            if (validButtons.length === 0) return null;
-            const targetMoreBtn = validButtons[validButtons.length - 1];
-
-
-            targetMoreBtn.click();
-
-
-            let targetMenuItem = null;
-            for (let i = 0; i < 15; i++) {
-                await new Promise(r => setTimeout(r, 30));
-                const overlay = document.querySelector('.cdk-overlay-container');
-                if (overlay) {
-                    const menuItems = Array.from(overlay.querySelectorAll('button[role="menuitem"], .mat-mdc-menu-item'));
-                    targetMenuItem = menuItems.find(item => {
-                        const txt = item.textContent || '';
-                        return txt.includes('Copy as markdown') || txt.includes('複製為 Markdown') || txt.includes('Markdown');
-                    });
-                    if (targetMenuItem) break;
-                }
-            }
-
-
-            if (!targetMenuItem) {
-                document.body.click();
-                return null;
-            }
-
-
-            targetMenuItem.click();
-            await new Promise(r => setTimeout(r, 120));
-
-
-            if (navigator.clipboard && navigator.clipboard.readText) {
-                const readMd = await navigator.clipboard.readText();
-                if (readMd && readMd.trim().length > 0) {
-                    return readMd.trim();
-                }
-            }
-            return null;
-        } catch (e) {
-            console.warn('⚠️ [AI Copy] AI Studio 原生選單提取異常:', e);
-            try { document.body.click(); } catch (_) {}
-            return null;
-        }
-    }
-
-
-    async function getAiStudioLastTurnMarkdown() {
-        try {
-            const allTurns = Array.from(document.querySelectorAll('ms-chat-turn'));
-            const modelTurns = allTurns.filter(turn => {
-                if (turn.closest(`#${UI_CONTAINER_ID}`) || turn.closest(`#${FLOATING_ORB_ID}`) || turn.id === UI_CONTAINER_ID) return false;
-                const role = turn.getAttribute('data-turn-role') || turn.getAttribute('data-role');
-                if (role && role.toLowerCase() === 'model') return true;
-                const isModel = turn.querySelector('[data-turn-role="Model"], [data-role="model"], .model-turn-container');
-                const isUser = turn.querySelector('[data-turn-role="User"], [data-role="user"]');
-                return !!isModel && !isUser;
-            });
-
-
-            if (modelTurns.length === 0) return null;
-            const lastTurn = modelTurns[modelTurns.length - 1];
-
-
-            let textarea = lastTurn.querySelector('textarea');
-            if (textarea && textarea.value) {
-                return textarea.value;
-            }
-
-
-            let editBtn = lastTurn.querySelector('button[aria-label*="Edit"], button[aria-label*="edit"], button[mattooltip*="Edit"], button[mattooltip*="edit"]');
-            if (!editBtn) {
-                const buttons = Array.from(lastTurn.querySelectorAll('button'));
-                editBtn = buttons.find(b => {
-                    const txt = b.innerText || b.getAttribute('aria-label') || '';
-                    return txt.includes('Edit') || txt.includes('編輯') || txt.includes('edit');
-                });
-            }
-
-
-            if (!editBtn) return null;
-
-
-            editBtn.click();
-
-
-            for (let i = 0; i < 15; i++) {
-                await new Promise(r => setTimeout(r, 20));
-                textarea = lastTurn.querySelector('textarea');
-                if (textarea && typeof textarea.value === 'string' && textarea.value.length > 0) {
-                    break;
-                }
-            }
-
-
-            let resultText = '';
-            if (textarea && textarea.value) {
-                resultText = textarea.value;
-            }
-
-
-            const allTurnButtons = Array.from(lastTurn.querySelectorAll('button'));
-            const cancelBtn = allTurnButtons.find(b => {
-                const txt = (b.innerText || b.getAttribute('aria-label') || '').toLowerCase();
-                return txt.includes('cancel') || txt.includes('取消') || txt.includes('close');
-            });
-
-
-            if (cancelBtn) {
-                cancelBtn.click();
-            } else {
-                editBtn.click();
-            }
-
-
-            return resultText || null;
-        } catch (e) {
-            console.warn('⚠️ [AI Copy] 模擬編輯提取異常:', e);
-            return null;
-        }
-    }
-
-
-    // ==========================================
-    // 5. DOM 轉 Markdown 核心引擎
-    // ==========================================
-    function parseTableToMarkdown(tableEl) {
-        const tableClone = tableEl.cloneNode(true);
-        cleanUniversalNoise(tableClone);
-
-
-        const rows = Array.from(tableClone.querySelectorAll('tr'));
-        if (rows.length === 0) return '';
-
-
-        let md = '\n\n';
-        const headers = [];
-        const headerCells = rows[0].querySelectorAll('th, td');
-
-
-        headerCells.forEach(cell => {
-            const cellText = cell.textContent.replace(/[\r\n]+/g, ' ').replace(/\|/g, '\\|').trim();
-            headers.push(cellText || ' ');
-        });
-
-
-        md += '| ' + headers.join(' | ') + ' |\n';
-        md += '| ' + headers.map(() => '---').join(' | ') + ' |\n';
-
-
-        for (let i = 1; i < rows.length; i++) {
-            const cells = Array.from(rows[i].querySelectorAll('td, th'));
-            if (cells.length > 0) {
-                const rowData = cells.map(c => {
-                    return c.textContent
-                        .replace(/[\r\n]+/g, '<br>')
-                        .replace(/\|/g, '\\|')
-                        .trim() || ' ';
-                });
-                md += '| ' + rowData.join(' | ') + ' |\n';
-            }
-        }
-        return md + '\n\n';
-    }
-
-
-    function parseCodeBlock(codeContainer) {
-        let language = codeContainer.getAttribute('data-language') || codeContainer.getAttribute('data-lang') || codeContainer.getAttribute('language') || codeContainer.getAttribute('lang') || '';
-
-
-        if (!language) {
-            const shell = codeContainer.closest('.codeblock-shell') || codeContainer.querySelector('.codeblock-shell');
-            if (shell) language = shell.getAttribute('data-lang') || '';
-        }
-
-
-        const langSpan = codeContainer.querySelector('.segment-code-lang, [class*="code-lang"], [class*="lang"]');
-        if (langSpan && langSpan.textContent && !language) {
-            language = langSpan.textContent.trim();
-        }
-
-
-        const headerEl = codeContainer.querySelector('[class*="header"], [class*="title"], [class*="code-nav"], [class*="tools"]');
-        if (headerEl && !language) {
-            language = headerEl.textContent
-                .replace(/(複製|下载|下載|copy|download|text|code)/gi, '')
-                .replace(/[\r\n\t]+/g, '')
-                .trim();
-        }
-
-
-        const preEl = codeContainer.tagName.toLowerCase() === 'pre' ? codeContainer : codeContainer.querySelector('pre');
-        const codeEl = preEl ? (preEl.querySelector('code') || preEl) : (codeContainer.querySelector('code') || codeContainer);
-
-
-        if (!language && preEl) {
-            const match = (preEl.className || '').match(/(?:language-|lang-)([a-zA-Z0-9_+-]+)/);
-            if (match) language = match[1];
-        }
-        if (!language && codeEl) {
-            const match = (codeEl.className || '').match(/(?:language-|lang-)([a-zA-Z0-9_+-]+)/);
-            if (match) language = match[1];
-        }
-
-
-        let rawCodeText = '';
-        const cmLines = Array.from(codeContainer.querySelectorAll('.cm-line'));
-        const standardLines = Array.from((codeEl || codeContainer).querySelectorAll('.code-line, [class*="line-content"], .view-line'));
-
-
-        if (cmLines.length > 0) {
-            rawCodeText = cmLines.map(ln => ln.textContent || '').join('\n');
-        } else if (standardLines.length > 0) {
-            rawCodeText = standardLines.map(ln => ln.textContent || ln.innerText || '').join('\n');
-        } else {
-            rawCodeText = (codeEl || codeContainer).textContent || '';
-        }
-
-
-        const cleanCodeText = rawCodeText
-            .replace(/^content_expand_less/g, '')
-            .replace(/^content_copy/g, '')
-            .replace(/\r\n/g, '\n')
-            .trim();
-
-
-        return `\n\n\`\`\`${language}\n${cleanCodeText}\n\`\`\`\n\n`;
-    }
-
-
-    function convertNodeToMarkdown(node) {
-        if (!node) return '';
-        if (node.nodeType === Node.TEXT_NODE) return node.textContent;
-        if (node.nodeType !== Node.ELEMENT_NODE) return '';
-
-
-        const tagName = node.tagName.toLowerCase();
-        const className = typeof node.className === 'string' ? node.className : '';
-
-
-        const isCodeBlock = (tagName === 'div' && (className.includes('segment-code') || className.includes('code-block') || className.includes('codeContainer') || className.includes('syntax-highlighter') || className.includes('monaco-editor') || className.includes('cm-editor') || className.includes('cm-content') || className.includes('codeblock-shell')) && !className.includes('inline') && !className.includes('codespan')) ||
-                            (tagName === 'ms-code-block') ||
-                            (tagName === 'pre' && (className.includes('shiki') || (!node.closest('.segment-code') && !node.closest('[class*="code-block"]'))));
-
-
-        if (isCodeBlock) {
-            if (node.dataset.processedByAiCopy) return '';
-            node.dataset.processedByAiCopy = 'true';
-            return parseCodeBlock(node);
-        }
-
-
-        if (tagName === 'code' || className.includes('segment-code-inline') || className.includes('qwen-markdown-codespan') || className.includes('codespan')) {
-            if (!node.closest('.segment-code') && !node.closest('pre') && !node.closest('[class*="code-block"]') && !node.closest('.monaco-editor') && !node.closest('.cm-editor') && !node.closest('.codeblock-shell')) {
-                return ` \`${node.textContent.trim()}\` `;
-            }
-        }
-
-
-        if (tagName === 'table') {
-            return parseTableToMarkdown(node);
-        }
-
-
-        if (/^h[1-6]$/.test(tagName)) {
-            const level = parseInt(tagName[1], 10);
-            return `\n\n${'#'.repeat(level)} ${getChildMarkdown(node).trim()}\n\n`;
-        }
-
-
-        if (tagName === 'ul' || tagName === 'ol') {
-            const isOrdered = tagName === 'ol';
-            let itemsMd = '';
-            let index = 1;
-            Array.from(node.children).forEach(child => {
-                if (child.tagName.toLowerCase() === 'li') {
-                    itemsMd += `${isOrdered ? `${index++}. ` : '* '}${getChildMarkdown(child).trim()}\n`;
-                }
-            });
-            return `\n\n${itemsMd}\n\n`;
-        }
-
-
-        if (tagName === 'strong' || tagName === 'b') return `**${getChildMarkdown(node)}**`;
-        if (tagName === 'em' || tagName === 'i') return `*${getChildMarkdown(node)}*`;
-        if (tagName === 'del' || tagName === 's') return `~~${getChildMarkdown(node)}~~`;
-        if (tagName === 'a') return `[${getChildMarkdown(node)}](${node.getAttribute('href') || '#'})`;
-        if (tagName === 'p') return `\n\n${getChildMarkdown(node)}\n\n`;
-        if (tagName === 'blockquote') {
-            const content = getChildMarkdown(node).trim();
-            return '\n\n' + content.split('\n').map(l => `> ${l}`).join('\n') + '\n\n';
-        }
-        if (tagName === 'br') return '\n';
-
-
-        return getChildMarkdown(node);
-    }
-
-
-    function getChildMarkdown(node) {
-        let result = '';
-        node.childNodes.forEach(child => {
-            result += convertNodeToMarkdown(child);
-        });
-        return result;
-    }
-
-
-    function domToMarkdown(element, cleanNodeFn) {
-        if (!element) return '';
-        const cleaned = cleanNodeFn ? cleanNodeFn(element) : element.cloneNode(true);
-        cleanUniversalNoise(cleaned);
-
-
-        const md = convertNodeToMarkdown(cleaned);
-        cleaned.querySelectorAll('[data-processed-by-ai-copy]').forEach(el => delete el.dataset.processedByAiCopy);
-        return sanitizeMarkdownArtifacts(md);
-    }
-
-
-    // ==========================================
-    // 5.1 Z.AI Live DOM 結構化 Markdown 轉譯器
-    // ==========================================
-    function parseZaiProseToMarkdown(node) {
-        if (!node) return '';
-        if (node.nodeType === Node.TEXT_NODE) return node.textContent;
-        if (node.nodeType !== Node.ELEMENT_NODE) return '';
-
-
-        const tag = node.tagName.toLowerCase();
-        const className = typeof node.className === 'string' ? node.className : '';
-
-
-        // 1. 雜訊過濾
-        if (tag === 'button' || tag === 'svg' || className.includes('copy-code-button')) {
-            return '';
-        }
-
-
-        // 2. 表格轉譯
-        if (tag === 'table') {
-            const rows = Array.from(node.querySelectorAll('tr'));
-            if (rows.length === 0) return '';
-            let md = '\n\n';
-            const headers = [];
-            const headerCells = rows[0].querySelectorAll('th, td');
-            headerCells.forEach(cell => {
-                const cellText = cell.textContent.replace(/[\r\n]+/g, ' ').replace(/\|/g, '\\|').trim();
-                headers.push(cellText || ' ');
-            });
-            md += '| ' + headers.join(' | ') + ' |\n';
-            md += '| ' + headers.map(() => '---').join(' | ') + ' |\n';
-            for (let i = 1; i < rows.length; i++) {
-                const cells = Array.from(rows[i].querySelectorAll('td, th'));
-                if (cells.length > 0) {
-                    const rowData = cells.map(c => {
-                        return c.textContent
-                            .replace(/[\r\n]+/g, '<br>')
-                            .replace(/\|/g, '\\|')
-                            .trim() || ' ';
-                    });
-                    md += '| ' + rowData.join(' | ') + ' |\n';
-                }
-            }
-            return md + '\n\n';
-        }
-
-
-        // 3. 標題轉譯
-        if (/^h[1-6]$/.test(tag)) {
-            const level = parseInt(tag[1], 10);
-            return `\n\n${'#'.repeat(level)} ${walkZaiChildren(node).trim()}\n\n`;
-        }
-
-
-        // 4. 代碼區塊 (pre)
-        if (tag === 'pre') {
-            const codeEl = node.querySelector('code') || node;
-            let lang = '';
-            const match = (codeEl.className || node.className || '').match(/(?:language-|lang-)(\w+)/);
-            if (match) lang = match[1];
-            return `\n\n\`\`\`${lang}\n${codeEl.textContent.trim()}\n\`\`\`\n\n`;
-        }
-
-
-        // 5. 行內代碼
-        if (tag === 'code' && !node.closest('pre')) {
-            return ` \`${node.textContent.trim()}\` `;
-        }
-
-
-        // 6. 段落與容器
-        if (tag === 'p' || tag === 'div') {
-            const text = walkZaiChildren(node).trim();
-            return text ? `\n\n${text}\n\n` : '';
-        }
-
-
-        // 7. 區塊引用
-        if (tag === 'blockquote') {
-            const text = walkZaiChildren(node).trim();
-            return '\n\n' + text.split('\n').map(l => `> ${l}`).join('\n') + '\n\n';
-        }
-
-
-        // 8. 清單
-        if (tag === 'ul' || tag === 'ol') {
-            const isOrdered = tag === 'ol';
-            let itemsMd = '';
-            let index = 1;
-            Array.from(node.children).forEach(child => {
-                if (child.tagName.toLowerCase() === 'li') {
-                    itemsMd += `${isOrdered ? `${index++}. ` : '* '}${walkZaiChildren(child).trim()}\n`;
-                }
-            });
-            return `\n\n${itemsMd}\n\n`;
-        }
-
-
-        // 9. 行內強調與折行
-        if (tag === 'strong' || tag === 'b') return `**${walkZaiChildren(node)}**`;
-        if (tag === 'em' || tag === 'i') return `*${walkZaiChildren(node)}*`;
-        if (tag === 'del' || tag === 's') return `~~${walkZaiChildren(node)}~~`;
-        if (tag === 'a') return `[${walkZaiChildren(node)}](${node.getAttribute('href') || '#'})`;
-        if (tag === 'br') return '\n';
-
-
-        // 10. 平滑透傳
-        return walkZaiChildren(node);
-    }
-
-
-    function walkZaiChildren(node) {
-        let res = '';
-        node.childNodes.forEach(c => {
-            res += parseZaiProseToMarkdown(c);
-        });
-        return res;
-    }
-
-
-    // ==========================================
-    // 6. 平台適配器 (Adapters Pattern - 11 大站點陣容)
-    // ==========================================
-    const Adapters = {
-        ChatGPT: {
-            id: 'chatgpt',
-            name: 'ChatGPT',
-            isMatch: () => location.hostname.includes('chatgpt.com') || location.hostname.includes('openai.com'),
-            getAiNodes: () => {
-                const rawAssistantNodes = Array.from(document.querySelectorAll('[data-message-author-role="assistant"]'));
-                return rawAssistantNodes.filter(node => {
-                    return node.innerText && node.innerText.trim().length > 0;
-                }).map(node => {
-                    return node.querySelector('.markdown') || node;
-                });
-            },
-            getUserNodes: () => {
-                const rawUserNodes = Array.from(document.querySelectorAll('[data-message-author-role="user"]'));
-                return rawUserNodes.filter(node => node.innerText && node.innerText.trim().length > 0);
-            },
-            cleanNode: (node) => {
-                const clone = node.cloneNode(true);
-                clone.querySelectorAll('.katex').forEach(katexEl => {
-                    const texAnno = katexEl.querySelector('annotation[encoding="application/x-tex"]');
-                    if (texAnno) {
-                        const isDisplay = katexEl.classList.contains('katex-display') || katexEl.parentElement?.classList.contains('katex-display');
-                        const tex = texAnno.textContent.trim();
-                        const textNode = document.createTextNode(isDisplay ? `\n$$\n${tex}\n$$\n` : ` $${tex}$ `);
-                        const target = (katexEl.parentElement && katexEl.parentElement.classList.contains('katex-display')) ? katexEl.parentElement : katexEl;
-                        target.parentNode.replaceChild(textNode, target);
-                    }
-                });
-
-
-                clone.querySelectorAll('[data-testid*="attachment"], [class*="attachment"]').forEach(attEl => {
-                    const title = attEl.innerText.trim();
-                    const textNode = document.createTextNode(`\n[📎 附加檔案: ${title || '文字附件'}]\n`);
-                    attEl.parentNode.replaceChild(textNode, attEl);
-                });
-
-
-                cleanUniversalNoise(clone);
-                return clone;
-            }
-        },
-        Claude: {
-            id: 'claude',
-            name: 'Claude',
-            isMatch: () => location.hostname.includes('claude.ai'),
-            getAiNodes: () => {
-                const candidates = Array.from(document.querySelectorAll('.standard-markdown, [class*="font-claude-message"]'));
-                return candidates.filter(node => {
-                    if (node.closest(`#${UI_CONTAINER_ID}`) || node.closest(`#${FLOATING_ORB_ID}`)) return false;
-                    const isUser = node.closest('[data-testid="user-message"], [class*="user-message"]');
-                    const text = node.innerText ? node.innerText.trim() : '';
-                    return !isUser && text.length > 0;
-                });
-            },
-            getUserNodes: () => {
-                const nodes = Array.from(document.querySelectorAll('[data-testid="user-message"], [class*="user-message"]'));
-                return nodes.filter(n => n.innerText && n.innerText.trim().length > 0);
-            },
-            cleanNode: (node) => {
-                const clone = node.cloneNode(true);
-                cleanUniversalNoise(clone);
-                return clone;
-            }
-        },
-        DeepSeek: {
-            id: 'deepseek',
-            name: 'DeepSeek',
-            isMatch: () => location.hostname.includes('deepseek.com'),
-            getAiNodes: () => {
-                const candidates = Array.from(document.querySelectorAll('.ds-markdown, .ds-assistant-message-main-content'));
-                return candidates.filter(node => {
-                    const isGreeting = node.closest('.ds-greeting') || node.classList.contains('ds-greeting');
-                    const hasText = node.innerText && node.innerText.trim().length > 0;
-                    return !isGreeting && hasText;
-                });
-            },
-            getUserNodes: () => {
-                const nodes = Array.from(document.querySelectorAll('.ds-user-message, [class*="user-message"], [class*="user-content"]'));
-                return nodes.filter(n => n.innerText && n.innerText.trim().length > 0);
-            },
-            cleanNode: (node) => {
-                const clone = node.cloneNode(true);
-                cleanUniversalNoise(clone);
-                clone.querySelectorAll('button, svg, .ds-icon').forEach(el => el.remove());
-                return clone;
-            }
-        },
-        Qwen: {
-            id: 'qwen',
-            name: '通義千問',
-            isMatch: () => location.hostname.includes('qwen.ai') || location.hostname.includes('aliyun.com'),
-            getAiNodes: () => {
-                const rawNodes = Array.from(document.querySelectorAll('.response-message-content, [class*="response-message-content"], .markdown-body'));
-                return rawNodes.filter(node => {
-                    const isUserChild = node.closest('.user-message-content, [class*="user-message"]');
-                    const isWelcome = node.closest('.welcome-card, [class*="welcome"]');
-                    const isActionBar = node.closest('[class*="action"], [class*="toolbar"], [class*="footer"]');
-                    const hasText = node.innerText && node.innerText.trim().length > 0;
-                    return !isUserChild && !isWelcome && !isActionBar && hasText;
-                });
-            },
-            getUserNodes: () => {
-                const rawNodes = Array.from(document.querySelectorAll('.user-message-content, [class*="user-message-content"]'));
-                return rawNodes.filter(node => node.innerText && node.innerText.trim().length > 0);
-            },
-            cleanNode: (node) => {
-                const clone = node.cloneNode(true);
-                cleanUniversalNoise(clone);
-                const unwantedSelectors = [
-                    '.think', '.reasoning', '[class*="think"]', '[class*="reasoning"]'
-                ];
-                unwantedSelectors.forEach(sel => {
-                    clone.querySelectorAll(sel).forEach(el => el.remove());
-                });
-                return clone;
-            }
-        },
-        Kimi: {
-            id: 'kimi',
-            name: 'Kimi',
-            isMatch: () => location.hostname.includes('kimi.ai') || location.hostname.includes('moonshot.cn') || location.hostname.includes('kimi.com'),
-            getAiNodes: () => {
-                const rawSegments = Array.from(document.querySelectorAll('.segment-assistant'));
-                const validNodes = [];
-                rawSegments.forEach(s => {
-                    const isRecommend = s.closest('.chat-recommend-prompt') || s.querySelector('.chat-recommend-prompt');
-                    if (isRecommend) return;
-
-
-                    const content = s.querySelector('.segment-content') || s;
-                    const text = content.innerText ? content.innerText.trim() : '';
-                    if (text.length > 0) {
-                        validNodes.push(content);
-                    }
-                });
-                return validNodes;
-            },
-            getUserNodes: () => {
-                const rawNodes = Array.from(document.querySelectorAll('.segment-user'));
-                return rawNodes.map(s => s.querySelector('.segment-content') || s).filter(n => n.innerText && n.innerText.trim().length > 0);
-            },
-            cleanNode: (node) => {
-                const clone = node.cloneNode(true);
-                cleanUniversalNoise(clone);
-                const unwantedSelectors = [
-                    '.toolcall-container', '.thinking-container', '.block-container',
-                    '.segment-assistant-actions-content', '.table-action-btn',
-                    '[class*="table-tool"]', '[class*="table-header"]'
-                ];
-                unwantedSelectors.forEach(sel => {
-                    clone.querySelectorAll(sel).forEach(el => el.remove());
-                });
-                return clone;
-            }
-        },
-        Zhipu: {
-            id: 'zhipu',
-            name: '智譜',
-            isMatch: () => location.hostname.includes('chatglm.cn') || location.hostname.includes('bigmodel.cn'),
-            getAiNodes: () => {
-                const items = Array.from(document.querySelectorAll('.chat-content .chat-item, .chat-item, [class*="chat-item"]'));
-                const aiItems = items.filter(it => {
-                    if (it.closest(`#${UI_CONTAINER_ID}`) || it.closest(`#${FLOATING_ORB_ID}`)) return false;
-                    const isUser = it.classList.contains('user') || it.querySelector('.user-msg, [class*="user-icon"]');
-                    return !isUser;
-                });
-
-
-                const nodes = [];
-                aiItems.forEach(it => {
-                    const content = it.querySelector('.content-wrap, .markdown-body, [class*="content"]') || it;
-                    if (content.innerText && content.innerText.trim().length > 0) {
-                        nodes.push(content);
-                    }
-                });
-                return nodes;
-            },
-            getUserNodes: () => {
-                const items = Array.from(document.querySelectorAll('.chat-content .chat-item, .chat-item, [class*="chat-item"]'));
-                const userItems = items.filter(it => {
-                    return it.classList.contains('user') || it.querySelector('.user-msg, [class*="user-icon"]');
-                });
-                return userItems.filter(n => n.innerText && n.innerText.trim().length > 0);
-            },
-            getMarkdownAsync: async (node) => {
-                try {
-                    const copyBtns = Array.from(document.querySelectorAll('.chat-content .chat-item:last-child .answer-info-right span[name*="复制"], .answer-info-right .icon-copy, .chat-item:last-child [class*="copy"]'));
-                    if (copyBtns.length > 0) {
-                        const targetBtn = copyBtns[copyBtns.length - 1];
-                        targetBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-                        await new Promise(r => setTimeout(r, 150));
-                        if (navigator.clipboard && navigator.clipboard.readText) {
-                            const clipText = await navigator.clipboard.readText();
-                            if (clipText && clipText.trim().length > 0) {
-                                return sanitizeMarkdownArtifacts(clipText);
-                            }
-                        }
-                    }
-                } catch (err) {
-                    console.warn('⚠️ [AI Copy] 智譜原生代理複製異常，降級至 DOM 轉譯:', err);
-                }
-                return domToMarkdown(node, Adapters.Zhipu.cleanNode);
-            },
-            cleanNode: (node) => {
-                const clone = node.cloneNode(true);
-                cleanUniversalNoise(clone);
-                const unwanted = [
-                    '.thinking-box', '.think-container', '.tool-call-wrap',
-                    '.answer-info-right', '.code-lang-label', '.copy-btn'
-                ];
-                unwanted.forEach(sel => clone.querySelectorAll(sel).forEach(el => el.remove()));
-                return clone;
-            }
-        },
-        AiStudio: {
-            id: 'aistudio',
-            name: 'Gemini',
-            isMatch: () => location.hostname.includes('aistudio.google.com'),
-            getAiNodes: () => {
-                const candidates = Array.from(document.querySelectorAll('ms-chat-turn, [data-turn-role="Model"], ms-prompt-renderer ms-chat-turn'));
-                const modelNodes = [];
-
-
-                candidates.forEach(el => {
-                    if (el.closest(`#${UI_CONTAINER_ID}`) || el.closest(`#${FLOATING_ORB_ID}`) || el.id === UI_CONTAINER_ID) return;
-
-
-                    const parentTurn = el.closest('ms-chat-turn') || el.closest('[data-turn-role="Model"]') || el;
-                    const role = parentTurn.getAttribute('data-turn-role') || parentTurn.getAttribute('data-role');
-                    if (role && role.toLowerCase() === 'user') return;
-
-
-                    if (!modelNodes.includes(parentTurn) && parentTurn.innerText && parentTurn.innerText.trim().length > 0) {
-                        modelNodes.push(parentTurn);
-                    }
-                });
-
-
-                return modelNodes;
-            },
-            getUserNodes: () => [],
-            getMarkdownAsync: async (node) => {
-                const settings = globalConfig.aiStudioSettings || DEFAULT_CONFIG.aiStudioSettings;
-                const engine = settings.primaryEngine || 'native_menu';
-
-
-                if (engine === 'native_menu') {
-                    const menuMd = await tryAiStudioNativeMenuCopy();
-                    if (menuMd && menuMd.trim().length > 0) return sanitizeMarkdownArtifacts(menuMd);
-                    console.warn('⚠️ [AI Copy] 原生選單代理失敗，降級至模擬編輯...');
-                }
-
-
-                if (engine === 'pencil_edit' || engine === 'native_menu') {
-                    const editMd = await getAiStudioLastTurnMarkdown();
-                    if (editMd && editMd.trim().length > 0) return sanitizeMarkdownArtifacts(editMd);
-                    console.warn('⚠️ [AI Copy] 模擬編輯提取失敗，降級至 DOM 轉譯...');
-                }
-
-
-                return domToMarkdown(node, Adapters.AiStudio.cleanNode);
-            },
-            cleanNode: (node) => {
-                const clone = node.cloneNode(true);
-                cleanUniversalNoise(clone);
-                const unwantedSelectors = [
-                    'ms-turn-actions', '.turn-actions', '.run-button', 'ms-chat-turn-options',
-                    '[data-turn-role="User"]', '.user-turn-header', '.thumb-container'
-                ];
-                unwantedSelectors.forEach(sel => {
-                    clone.querySelectorAll(sel).forEach(el => el.remove());
-                });
-                return clone;
-            }
-        },
-        Mistral: {
-            id: 'mistral',
-            name: 'Mistral',
-            isMatch: () => location.hostname.includes('console.mistral.ai'),
-            getAiNodes: () => {
-                const proseCandidates = Array.from(document.querySelectorAll('[role="article"] .prose, div.prose.max-w-none, .prose'));
-                const validNodes = proseCandidates.filter(el => {
-                    if (el.closest(`#${UI_CONTAINER_ID}`) || el.closest(`#${FLOATING_ORB_ID}`)) return false;
-                    const text = el.innerText ? el.innerText.trim() : '';
-                    return text.length > 0;
-                });
-                return validNodes;
-            },
-            getUserNodes: () => [],
-            cleanNode: (node) => {
-                const clone = node.cloneNode(true);
-                cleanUniversalNoise(clone);
-                clone.querySelectorAll('button[aria-label*="Copy code"], button[aria-label="Copy code to clipboard"]').forEach(b => b.remove());
-                clone.querySelectorAll('div, span, p').forEach(el => {
-                    if (el.children.length === 0 && (el.innerText || '').trim() === 'Assistant') {
-                        el.remove();
-                    }
-                });
-                return clone;
-            }
-        },
-        Perplexity: {
-            id: 'perplexity',
-            name: 'Perplexity',
-            isMatch: () => location.hostname.includes('perplexity.ai'),
-            getAiNodes: () => {
-                const candidates = Array.from(document.querySelectorAll('div.prose[data-renderer="lm"], .prose.dark\\:prose-invert, [data-testid*="answer"], div.prose'));
-                return candidates.filter(el => {
-                    if (el.closest(`#${UI_CONTAINER_ID}`) || el.closest(`#${FLOATING_ORB_ID}`)) return false;
-                    const isUser = el.closest('[class*="user-bubble"], [class*="query"], .group\\/user-bubble');
-                    const text = el.innerText ? el.innerText.trim() : '';
-                    return !isUser && text.length > 0;
-                });
-            },
-            getUserNodes: () => {
-                const nodes = Array.from(document.querySelectorAll('[class*="user-bubble"], div.group\\/user-bubble, div[class*="query"]'));
-                return nodes.filter(n => n.innerText && n.innerText.trim().length > 0);
-            },
-            cleanNode: (node) => {
-                const clone = node.cloneNode(true);
-                cleanUniversalNoise(clone);
-                clone.querySelectorAll('[data-testid*="citation"], .citation, [class*="citation"]').forEach(el => el.remove());
-                return clone;
-            }
-        },
-        Zai: {
-            id: 'zai',
-            name: 'Z.AI',
-            isMatch: () => location.hostname.includes('chat.z.ai'),
-            getAiNodes: () => {
-                const candidates = Array.from(document.querySelectorAll('.chat-assistant .markdown-prose, #response-content-container, div.chat-assistant, .chat-assistant'));
-                return candidates.filter(el => {
-                    if (el.closest(`#${UI_CONTAINER_ID}`) || el.closest(`#${FLOATING_ORB_ID}`)) return false;
-                    const isUser = el.closest('.chat-user, .user-message') || el.classList.contains('chat-user');
-                    const text = el.innerText ? el.innerText.trim() : '';
-                    return !isUser && text.length > 0;
-                });
-            },
-            getUserNodes: () => {
-                const nodes = Array.from(document.querySelectorAll('div.user-message .chat-user.markdown-prose, div.user-message, .chat-user'));
-                return nodes.filter(n => n.innerText && n.innerText.trim().length > 0);
-            },
-            getMarkdownAsync: async (node) => {
-                try {
-                    const allButtons = Array.from(node.querySelectorAll('button'));
-                    const validButtons = allButtons.filter(b => {
-                        if (b.closest('pre')) return false;
-                        const cName = b.className || '';
-                        if (typeof cName === 'string' && (cName.includes('copy-code') || cName.includes('absolute'))) return false;
-
-
-                        const pathEl = b.querySelector('svg path');
-                        if (!pathEl) return false;
-                        const d = pathEl.getAttribute('d') || '';
-                        return d.startsWith('M12.668');
-                    });
-
-
-                    if (validButtons.length > 0) {
-                        const targetBtn = validButtons[validButtons.length - 1];
-                        targetBtn.click();
-                        await new Promise(r => setTimeout(r, 200));
-
-
-                        if (navigator.clipboard && navigator.clipboard.readText) {
-                            const clipText = await navigator.clipboard.readText();
-                            if (clipText && clipText.trim().length > 0) {
-                                return sanitizeMarkdownArtifacts(clipText);
-                            }
-                        }
-                    }
-                } catch (err) {
-                    console.warn('⚠️ [AI Copy] Z.AI 原生代理複製失敗，降級至 DOM 轉譯:', err);
-                }
-                return domToMarkdown(node, Adapters.Zai.cleanNode);
-            },
-            cleanNode: (node) => {
-                const clone = node.cloneNode(true);
-                cleanUniversalNoise(clone);
-                clone.querySelectorAll('.copy-code-button, button.invisible, button.group-hover\\:visible').forEach(el => el.remove());
-                return clone;
-            }
-        },
-        MiniMax: {
-            id: 'minimax',
-            name: 'MiniMax',
-            isMatch: () => location.hostname.includes('agent.minimax.io') || location.hostname.includes('minimax.io'),
-            getAiNodes: () => {
-                const rawNodes = Array.from(document.querySelectorAll('[data-role="assistant"] .mavis-chat-markdown-flow, [data-testid="message-item"][data-role="assistant"] .mavis-chat-markdown-flow, .mavis-chat-markdown-flow'));
-                return rawNodes.filter(node => {
-                    if (node.closest(`#${UI_CONTAINER_ID}`) || node.closest(`#${FLOATING_ORB_ID}`)) return false;
-                    return node.innerText && node.innerText.trim().length > 0;
-                });
-            },
-            getUserNodes: () => {
-                const rawNodes = Array.from(document.querySelectorAll('.message-container-user-text, [data-role="user"] .message-container-user-text'));
-                return rawNodes.filter(node => node.innerText && node.innerText.trim().length > 0);
-            },
-            cleanNode: (node) => {
-                const clone = node.cloneNode(true);
-                cleanUniversalNoise(clone);
-                clone.querySelectorAll('button, svg, .ant-dropdown, [class*="action-bar"]').forEach(el => el.remove());
-                return clone;
-            }
-        }
-    };
-
-
-    function getCurrentAdapter() {
-        if (Adapters.ChatGPT.isMatch()) return Adapters.ChatGPT;
-        if (Adapters.Claude.isMatch()) return Adapters.Claude;
-        if (Adapters.DeepSeek.isMatch()) return Adapters.DeepSeek;
-        if (Adapters.Qwen.isMatch()) return Adapters.Qwen;
-        if (Adapters.Kimi.isMatch()) return Adapters.Kimi;
-        if (Adapters.Zhipu.isMatch()) return Adapters.Zhipu;
-        if (Adapters.AiStudio.isMatch()) return Adapters.AiStudio;
-        if (Adapters.Mistral.isMatch()) return Adapters.Mistral;
-        if (Adapters.Perplexity.isMatch()) return Adapters.Perplexity;
-        if (Adapters.Zai.isMatch()) return Adapters.Zai;
-        if (Adapters.MiniMax.isMatch()) return Adapters.MiniMax;
-        return null;
-    }
-
-
-    // ==========================================
-    // 7. 切片雙引擎、Claude、Z.AI 與 MiniMax 預覽提取管線
-    // ==========================================
-    function isClaudeArtifactActive() {
-        const candidates = Array.from(document.querySelectorAll('[data-testid*="artifact"], [class*="artifact"], .font-mono, [role="region"], [aria-label*="Artifact"]'));
-        for (const el of candidates) {
-            const rect = el.getBoundingClientRect();
-            if (rect.left > window.innerWidth * 0.4 && rect.width > 200 && rect.height > 100) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-
-    function isZaiPreviewActive() {
-        // 1. Z.AI 右側抽屜 Markdown Prose
-        const proseViewers = Array.from(document.querySelectorAll('.markdown-prose, [class*="markdown-prose"]'));
-        for (const p of proseViewers) {
-            const rect = p.getBoundingClientRect();
-            if (rect.left > window.innerWidth * 0.35 && rect.width > 200) {
-                const txt = (p.innerText || p.textContent || '').trim();
-                if (txt.length > 50) return true;
-            }
-        }
-
-
-        // 2. DOCX Viewer
-        const docxViewer = document.querySelector('.DocxViewer, div.docx-wrapper, section.docx');
-        if (docxViewer) {
-            const rect = docxViewer.getBoundingClientRect();
-            if (rect.width > 100 && rect.height > 100) return true;
-        }
-
-
-        // 3. CodeMirror 6
-        const cmViewers = Array.from(document.querySelectorAll('.cm-editor, .cm-content'));
-        for (const cm of cmViewers) {
-            const rect = cm.getBoundingClientRect();
-            if (rect.width > 200 && rect.height > 200 && rect.right > window.innerWidth * 0.5) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-
-    function isMiniMaxPreviewActive() {
-        const previewers = Array.from(document.querySelectorAll('div[data-testid="previewer-content"], div[data-testid="markdown-view"]'));
-        for (const p of previewers) {
-            const rect = p.getBoundingClientRect();
-            if (rect.width > 200 && rect.height > 200) return true;
-        }
-        return false;
-    }
-
-
-    function parseDocxToMarkdown(viewerEl) {
-        if (!viewerEl) return '';
-        const clone = viewerEl.cloneNode(true);
-        cleanUniversalNoise(clone);
-
-
-        function walkDocxNode(node) {
-            if (!node) return '';
-            if (node.nodeType === Node.TEXT_NODE) return node.textContent;
-            if (node.nodeType !== Node.ELEMENT_NODE) return '';
-
-
-            const tag = node.tagName.toLowerCase();
-            if (tag === 'table') {
-                return parseTableToMarkdown(node);
-            }
-            if (/^h[1-6]$/.test(tag)) {
-                const level = parseInt(tag[1], 10);
-                return `\n\n${'#'.repeat(level)} ${walkDocxChildren(node).trim()}\n\n`;
-            }
-            if (tag === 'p' || tag === 'div') {
-                const text = walkDocxChildren(node).trim();
-                return text ? `\n\n${text}\n\n` : '';
-            }
-            if (tag === 'br') return '\n';
-            if (tag === 'ul' || tag === 'ol') {
-                const isOrdered = tag === 'ol';
-                let itemsMd = '';
-                let index = 1;
-                Array.from(node.children).forEach(child => {
-                    if (child.tagName.toLowerCase() === 'li') {
-                        itemsMd += `${isOrdered ? `${index++}. ` : '* '}${walkDocxChildren(child).trim()}\n`;
-                    }
-                });
-                return `\n\n${itemsMd}\n\n`;
-            }
-            if (tag === 'strong' || tag === 'b') return `**${walkDocxChildren(node)}**`;
-            if (tag === 'em' || tag === 'i') return `*${walkDocxChildren(node)}*`;
-            return walkDocxChildren(node);
-        }
-
-
-        function walkDocxChildren(node) {
-            let res = '';
-            node.childNodes.forEach(c => { res += walkDocxNode(c); });
-            return res;
-        }
-
-
-        const rawMd = walkDocxNode(clone);
-        return rawMd.replace(/\n{3,}/g, '\n\n').trim();
-    }
-
-
-    function getZaiPreviewText() {
-        // 1. 優先檢索右側抽屜 Markdown Prose
-        const proseViewers = Array.from(document.querySelectorAll('.markdown-prose, [class*="markdown-prose"]'));
-        for (const p of proseViewers) {
-            const rect = p.getBoundingClientRect();
-            if (rect.left > window.innerWidth * 0.35 && rect.width > 200) {
-                const md = parseZaiProseToMarkdown(p).replace(/\n{3,}/g, '\n\n').trim();
-                if (md && md.length > 30) return md;
-            }
-        }
-
-
-        // 2. DOCX Viewer
-        const docxViewer = document.querySelector('.DocxViewer, div.docx-wrapper, section.docx');
-        if (docxViewer) {
-            const rect = docxViewer.getBoundingClientRect();
-            if (rect.width > 100 && rect.height > 100) {
-                const mdText = parseDocxToMarkdown(docxViewer);
-                return mdText ? mdText.trim() : '';
-            }
-        }
-
-
-        // 3. CodeMirror 6
-        const cmViewers = Array.from(document.querySelectorAll('.cm-editor, .cm-content'));
-        for (const cm of cmViewers) {
-            const rect = cm.getBoundingClientRect();
-            if (rect.width > 200 && rect.height > 200 && rect.right > window.innerWidth * 0.5) {
-                const cmLines = Array.from(cm.querySelectorAll('.cm-line'));
-                let codeText = '';
-                if (cmLines.length > 0) {
-                    codeText = cmLines.map(ln => ln.textContent || '').join('\n');
-                } else {
-                    codeText = cm.innerText || cm.textContent || '';
-                }
-                return codeText ? codeText.trim() : '';
-            }
-        }
-        return '';
-    }
-
-
-    function closeZaiPreviewDrawer() {
-        const candidates = Array.from(document.querySelectorAll('button, [role="button"]'));
-        const closeBtn = candidates.find(btn => {
-            const rect = btn.getBoundingClientRect();
-            if (rect.left <= window.innerWidth * 0.5 || rect.top > 120) return false;
-            const txt = (btn.textContent || btn.getAttribute('aria-label') || btn.getAttribute('title') || '').trim();
-            if (/close|關閉|关闭|exit/i.test(txt)) return true;
-            const svgPath = btn.querySelector('svg path');
-            if (svgPath) {
-                const d = svgPath.getAttribute('d') || '';
-                if (d.includes('M6 18') || d.includes('M18 6') || d.includes('19 6.41') || d.includes('6.41 19')) {
-                    return true;
-                }
-            }
-            return false;
-        });
-        if (closeBtn) {
-            closeBtn.click();
-            return true;
-        }
-        return false;
-    }
-
-
-    async function getClaudeDeliverableText() {
-        if (!isClaudeArtifactActive()) return null;
-
-
-        const allButtons = Array.from(document.querySelectorAll('button'));
-        const copyBtns = allButtons.filter(b => {
-            const rect = b.getBoundingClientRect();
-            if (rect.top >= 80 || rect.left <= window.innerWidth * 0.5 || rect.width <= 20) return false;
-            const txt = (b.textContent || b.getAttribute('aria-label') || '').trim();
-            return /^(複製|Copy)$/i.test(txt);
-        });
-
-
-        if (copyBtns.length === 0) {
-            // 嘗試檢索 Artifacts 容器內的 DOM 轉譯
-            const artifactRegion = document.querySelector('[data-testid*="artifact"], [class*="artifact"], [role="region"]');
-            if (artifactRegion) {
-                return domToMarkdown(artifactRegion, Adapters.Claude.cleanNode);
-            }
-            return null;
-        }
-
-
-        const targetBtn = copyBtns[copyBtns.length - 1];
-        targetBtn.click();
-        await new Promise(r => setTimeout(r, 200));
-
-
-        // 【Hotfix-01】：以 try-catch 包覆讀取並於異常時平滑降級至 DOM 轉譯
-        if (navigator.clipboard && navigator.clipboard.readText) {
-            try {
-                const clipText = await navigator.clipboard.readText();
-                if (clipText && clipText.trim().length > 0) {
-                    return clipText.trim();
-                }
-            } catch (clipErr) {
-                console.warn('⚠️ [AI Copy] Claude 剪貼簿讀取受阻，降級至 DOM 轉譯:', clipErr);
-            }
-        }
-
-
-        // 若剪貼簿讀取失敗或拒絕，自動降級嘗試 DOM 轉譯提取
-        const artifactRegion = document.querySelector('[data-testid*="artifact"], [class*="artifact"], [role="region"]');
-        if (artifactRegion) {
-            return domToMarkdown(artifactRegion, Adapters.Claude.cleanNode);
-        }
-        return null;
-    }
-
-
-    async function handleClaudePreviewAction() {
-        const text = await getClaudeDeliverableText();
-        if (!text || !text.trim()) {
-            showToast('⚠️ 右側無 Artifacts 成果物，已為您複製最後對話內容！', false, 2600);
-            await handleCopyAction('SINGLE_CLEAN');
-            return;
-        }
-        copyToClipboard(text);
-        showToast(`✅ 已複製右側 Artifacts 成果物 (共 ${text.length} 字)！`);
-    }
-
-
-    async function getZaiDeliverableText() {
-        const isDrawerOpen = isZaiPreviewActive();
-
-
-        // 1. 定位最新回覆輪次 (Last AI Turn)
-        const aiNodes = Adapters.Zai.getAiNodes();
-        let lastTurnContainer = null;
-        if (aiNodes.length > 0) {
-            const lastAiNode = aiNodes[aiNodes.length - 1];
-            lastTurnContainer = lastAiNode.closest('.chat-assistant, [class*="chat-assistant"]') || lastAiNode.parentElement;
-        }
-
-
-        // 2. 檢索最新一輪內部是否具備預覽按鈕
-        let targetBtn = null;
-        if (lastTurnContainer) {
-            const allButtons = Array.from(lastTurnContainer.querySelectorAll('button, [role="button"]'));
-            const previewButtons = allButtons.filter(b => {
-                const txt = (b.textContent || '').trim();
-                const aria = b.getAttribute('aria-label') || '';
-                const title = b.getAttribute('title') || '';
-                return /^(预览|預覽)$/i.test(txt) || title.includes('预览') || title.includes('預覽') || aria.includes('预览') || aria.includes('預覽');
-            });
-            if (previewButtons.length > 0) {
-                targetBtn = previewButtons[previewButtons.length - 1];
-            }
-        }
-
-
-        // 3. 判定無成果物出口：若無按鈕且抽屜未開，判定此輪為純文字對話，返回 null
-        if (!targetBtn && !isDrawerOpen) {
-            return null;
-        }
-
-
-        // 4. 舊抽屜銷毀清場：若抽屜開啟且有新預覽按鈕，先關閉並讓步 250ms
-        if (isDrawerOpen && targetBtn) {
-            closeZaiPreviewDrawer();
-            await new Promise(r => setTimeout(r, 250));
-        }
-
-
-        // 5. 抽屜已開啟且無新按鈕：直接提取當前抽屜內容
-        if (!targetBtn && isDrawerOpen) {
-            const currentText = getZaiPreviewText();
-            return (currentText && currentText.trim()) ? currentText : null;
-        }
-
-
-        // 6. 觸發開門與水合煞車輪詢
-        showToast('⏳ 正在自動開啟 Z.AI 成果物抽屜...');
-        targetBtn.click();
-
-
-        const startTime = Date.now();
-        let text = '';
-        let lastObservedText = '';
-        let stableRounds = 0;
-
-
-        while (Date.now() - startTime < 10000) {
-            await new Promise(r => setTimeout(r, 200));
-            text = getZaiPreviewText();
-            if (text && text.length > 30) {
-                if (text === lastObservedText) {
-                    stableRounds++;
-                    if (stableRounds >= 2) break; // 連續 400ms 水合沈澱煞車
-                } else {
-                    lastObservedText = text;
-                    stableRounds = 0;
-                }
-            }
-        }
-
-
-        await new Promise(r => setTimeout(r, 150));
-        const finalText = text || getZaiPreviewText();
-        return (finalText && finalText.trim()) ? finalText : null;
-    }
-
-
-    async function handleZaiPreviewAction() {
-        const text = await getZaiDeliverableText();
-        if (!text || !text.trim()) {
-            showToast('⚠️ 右側無檔案預覽，已為您複製最後對話內容！', false, 2600);
-            await handleCopyAction('SINGLE_CLEAN');
-            return;
-        }
-        copyToClipboard(text);
-        showToast(`✅ 已複製右側預覽 (共 ${text.length} 字)！`);
-    }
-
-
-    function injectMiniMaxFiberBridge() {
-        if (document.getElementById('minimax-fiber-bridge')) return;
-        const script = document.createElement('script');
-        script.id = 'minimax-fiber-bridge';
-        script.textContent = `(${function () {
-            window.addEventListener('__MINIMAX_EXTRACT_REQUEST__', () => {
-                const root = document.querySelector('div[data-testid="markdown-view"]') || document.querySelector('div[data-testid="previewer-content"]');
-                if (!root) {
-                    window.dispatchEvent(new CustomEvent('__MINIMAX_EXTRACT_RESPONSE__', {
-                        detail: { success: false, markdown: '', fromFiber: false, msg: '未偵測到成果物容器' }
-                    }));
+        showToast("⏳ 正在同步 Google 試算表名單...");
+
+
+        GM_xmlhttpRequest({
+            method: "GET",
+            url: url,
+            timeout: 10000,
+            onload: function(response) {
+                if (response.status !== 200) {
+                    showToast(`⚠️ 雲端名單拉取失敗 (狀態碼 ${response.status})，已保留本機現有名單！`, "error");
                     return;
                 }
 
-                let rawMarkdown = '';
-                let fromFiber = false;
 
-                try {
-                    const fiberKey = Object.keys(root).find(k => k.startsWith('__reactFiber$'));
-                    if (fiberKey) {
-                        let current = root[fiberKey];
-                        let depth = 0;
-                        while (current && depth < 30) {
-                            if (current.memoizedProps) {
-                                for (const key of Object.keys(current.memoizedProps)) {
-                                    const val = current.memoizedProps[key];
-                                    if (typeof val === 'string' && val.length > 100 && /(^#|\n#|\*\*|> )/.test(val)) {
-                                        rawMarkdown = val;
-                                        fromFiber = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            if (fromFiber) break;
-
-                            if (current.memoizedState) {
-                                let s = current.memoizedState;
-                                while (s) {
-                                    if (typeof s.memoizedState === 'string' && s.memoizedState.length > 100 && /(^#|\n#|\*\*|> )/.test(s.memoizedState)) {
-                                        rawMarkdown = s.memoizedState;
-                                        fromFiber = true;
-                                        break;
-                                    }
-                                    s = s.next;
-                                }
-                            }
-                            if (fromFiber) break;
-
-                            current = current.return;
-                            depth++;
-                        }
-                    }
-                } catch (err) {
-                    console.warn('[AI Copy] Fiber 提取異常:', err);
-                }
-
-                if (!rawMarkdown) {
-                    rawMarkdown = (root.innerText || root.textContent || '').trim();
-                }
-
-                window.dispatchEvent(new CustomEvent('__MINIMAX_EXTRACT_RESPONSE__', {
-                    detail: { success: true, markdown: rawMarkdown, fromFiber: fromFiber, msg: '' }
-                }));
-            });
-        }.toString()})();`;
-        (document.head || document.documentElement).appendChild(script);
-    }
-
-
-    async function getMiniMaxDeliverableText() {
-        injectMiniMaxFiberBridge();
-        const isDrawerOpen = isMiniMaxPreviewActive();
-
-
-        if (isDrawerOpen) {
-            const closeBtn = document.querySelector('button[data-testid="file-tab-close"], div[data-testid="file-panel-close-button"]');
-            if (closeBtn) {
-                closeBtn.click();
-                await new Promise(r => setTimeout(r, 200));
-            }
-        }
-
-
-        const allButtons = Array.from(document.querySelectorAll('button'));
-        const openButtons = allButtons.filter(b => (b.textContent || '').includes('Open file'));
-
-
-        if (openButtons.length === 0) return null;
-
-
-        const matchedBtn = openButtons.slice().reverse().find(b => {
-            const card = b.closest('[class*="card"], [class*="message"], [data-role="assistant"]') || b.parentElement;
-            const txt = card ? card.textContent : '';
-            return /QA|審查|驗收|報告|MD|Artifact/i.test(txt);
-        });
-
-
-        const targetBtn = matchedBtn || openButtons[openButtons.length - 1];
-        showToast('⏳ 正在自動開啟成果物抽屜...');
-        targetBtn.click();
-
-
-        const startTime = Date.now();
-        let isReady = false;
-        let lastObservedText = '';
-        let stableRounds = 0;
-
-
-        // 【Hotfix-03】：下放文字長度門檻至 > 0，並增加逾時非空兜底
-        while (Date.now() - startTime < 10000) {
-            const drawer = document.querySelector('div[data-testid="markdown-view"], div[data-testid="previewer-content"]');
-            if (drawer) {
-                const txt = (drawer.innerText || drawer.textContent || '').trim();
-                if (txt.length > 0) {
-                    if (txt === lastObservedText) {
-                        stableRounds++;
-                        if (stableRounds >= 2) {
-                            isReady = true;
-                            break; // 連續 400ms 水合煞車
-                        }
-                    } else {
-                        lastObservedText = txt;
-                        stableRounds = 0;
-                    }
-                }
-            }
-            await new Promise(r => setTimeout(r, 200));
-        }
-
-
-        // 兜底保底：若因極端延遲未達煞車，只要內容非空仍判定就緒
-        if (!isReady && lastObservedText.length > 0) {
-            isReady = true;
-        }
-
-
-        if (!isReady) return null;
-
-
-        let extractResult = null;
-        try {
-            extractResult = await new Promise((resolve) => {
-                const timer = setTimeout(() => {
-                    window.removeEventListener('__MINIMAX_EXTRACT_RESPONSE__', onResponse);
-                    resolve({ success: false, markdown: '', fromFiber: false, msg: '提取超時' });
-                }, 3000);
-
-
-                function onResponse(e) {
-                    clearTimeout(timer);
-                    window.removeEventListener('__MINIMAX_EXTRACT_RESPONSE__', onResponse);
-                    resolve(e.detail || { success: false, markdown: '', fromFiber: false });
-                }
-
-
-                window.addEventListener('__MINIMAX_EXTRACT_RESPONSE__', onResponse);
-                window.dispatchEvent(new CustomEvent('__MINIMAX_EXTRACT_REQUEST__'));
-            });
-        } catch (e) {
-            console.warn('⚠️ [AI Copy] Fiber 橋接通訊異常:', e);
-        }
-
-
-        let contentText = '';
-        let fromFiber = false;
-
-
-        if (extractResult && extractResult.success && extractResult.markdown) {
-            contentText = extractResult.markdown;
-            fromFiber = !!extractResult.fromFiber;
-        } else {
-            const fallbackEl = document.querySelector('div[data-testid="markdown-view"], div[data-testid="previewer-content"]');
-            contentText = fallbackEl ? (fallbackEl.innerText || fallbackEl.textContent || '').trim() : '';
-        }
-
-
-        // 僅保留 150ms 微任務延遲
-        await new Promise(r => setTimeout(r, 150));
-
-
-        return { contentText, fromFiber };
-    }
-
-
-    async function handleMiniMaxDeliverableCopyAction() {
-        const result = await getMiniMaxDeliverableText();
-        if (!result || !result.contentText || !result.contentText.trim()) {
-            showToast('⚠️ 未能提取到有效的成果物內容！', true, 3000);
-            return;
-        }
-
-
-        const { contentText, fromFiber } = result;
-        copyToClipboard(contentText.trim());
-        showToast(`✅ 已成功複製成果物 (${fromFiber ? '無損 Raw MD' : '降級文本'}，共 ${contentText.length} 字)！`);
-    }
-
-
-    async function getAssistantMarkdownText(adapter) {
-        const aiNodes = adapter.getAiNodes();
-        if (aiNodes.length === 0) return '';
-        const lastAi = aiNodes[aiNodes.length - 1];
-
-
-        let markdownText = '';
-        if (typeof adapter.getMarkdownAsync === 'function') {
-            markdownText = await adapter.getMarkdownAsync(lastAi);
-        } else {
-            markdownText = domToMarkdown(lastAi, adapter.cleanNode);
-        }
-
-
-        if (!markdownText || !markdownText.trim()) {
-            markdownText = adapter.cleanNode(lastAi).innerText.trim();
-        }
-        return markdownText;
-    }
-
-
-    function executeSingleMatchSlice(fullText, singlePattern, isCodeBlockTarget) {
-        if (!singlePattern || !singlePattern.trim()) return null;
-        try {
-            let patternStr = singlePattern.trim();
-            let flagsStr = 'i';
-
-
-            if (patternStr.startsWith('/') && patternStr.length > 1) {
-                const lastSlashIndex = findRegexClosingSlash(patternStr);
-                if (lastSlashIndex > 0) {
-                    flagsStr = patternStr.substring(lastSlashIndex + 1);
-                    patternStr = patternStr.substring(1, lastSlashIndex);
-                }
-            }
-
-
-            // 代碼塊目標解耦 i 旗標，強制補齊 g
-            if (isCodeBlockTarget && !flagsStr.includes('g')) {
-                flagsStr += 'g';
-            }
-
-
-            let regex = new RegExp(patternStr, flagsStr);
-
-
-            if (isCodeBlockTarget && regex.global) {
-                const matches = Array.from(fullText.matchAll(regex));
-                if (matches.length > 0) {
-                    let maxLen = -1;
-                    let bestMatch = '';
-                    matches.forEach(m => {
-                        const candidate = (typeof m[1] !== 'undefined') ? m[1] : m[0];
-                        if (candidate && candidate.length > maxLen) {
-                            maxLen = candidate.length;
-                            bestMatch = candidate;
-                        }
-                    });
-                    if (maxLen >= 0) return bestMatch;
-                }
-            } else {
-                const match = fullText.match(regex);
-                if (match) {
-                    return (typeof match[1] !== 'undefined') ? match[1] : match[0];
-                }
-            }
-        } catch (err) {
-            console.warn('⚠️ [AI Copy] 切片正則解析異常:', err, singlePattern);
-        }
-        return null;
-    }
-
-
-    function executeMatchSlice(fullText, rawPattern, isCodeBlockTarget) {
-        if (!rawPattern || !rawPattern.trim()) return null;
-        if (rawPattern.includes('\n')) {
-            const lines = rawPattern.split('\n');
-            for (let line of lines) {
-                line = line.trim();
-                if (!line || line.startsWith('#') || line.startsWith('//')) continue;
-                const res = executeSingleMatchSlice(fullText, line, isCodeBlockTarget);
-                if (res !== null) return res;
-            }
-            return null;
-        }
-        return executeSingleMatchSlice(fullText, rawPattern, isCodeBlockTarget);
-    }
-
-
-    function sanitizeAffixText(text) {
-        if (!text) return '';
-        let result = text
-            .replace(/^\uFEFF/, '')
-            .replace(/\r\n/g, '\n')
-            .replace(/\r/g, '\n')
-            .replace(/\u00a0/g, ' ');
-
-
-        result = result.replace(/^[ \t]*[—―─_–-]{2,}[ \t]*$/gm, '---');
-        result = result.trimEnd();
-        result = result.replace(/[—―─]{1,2}-?$/g, '---');
-
-
-        if (result.length > 0) {
-            result += '\n\n';
-        }
-        return result;
-    }
-
-
-    async function resolveAffixContent(rawAffixStr, affixType = '前綴') {
-        if (typeof rawAffixStr !== 'string' || !rawAffixStr) return { content: '', isDegraded: false };
-        const trimmed = rawAffixStr.trim();
-        if (!trimmed) return { content: '', isDegraded: false };
-
-
-        const isUrl = /^[^\S\r\n]*https?:\/\/[^\s]+[^\S\r\n]*$/i.test(rawAffixStr);
-        if (!isUrl) {
-            return { content: rawAffixStr, isDegraded: false };
-        }
-
-
-        showToast(`⏳ 正在從雲端載入${affixType}...`);
-        try {
-            const rawUrl = getGoogleDocRawUrl(trimmed);
-            const rawText = await fetchCloudData(rawUrl);
-
-
-            if (isHtmlResponse(rawText)) {
-                return { content: '', isDegraded: true };
-            }
-            return { content: sanitizeAffixText(rawText), isDegraded: false };
-        } catch (err) {
-            console.warn(`⚠️ [AI Copy] 雲端${affixType}載入失敗:`, err);
-            return { content: '', isDegraded: true };
-        }
-    }
-
-
-    // 【切片酬載組合演算法 (composeSlicePayload)】
-    function composeSlicePayload(prefix, body, rawSuffix) {
-        const p = prefix ?? '';
-        const b = (body ?? '').trim();
-        const s = rawSuffix ?? '';
-        let tail = '\n\n';
-        if (s.endsWith('\n\n')) {
-            tail = s;
-        } else if (s.endsWith('\n')) {
-            tail = s + '\n';
-        } else if (s.length > 0) {
-            tail = s + '\n\n';
-        }
-        return `${p}${b}${tail}`;
-    }
-
-
-    async function handleSliceCopyAction(btnDef) {
-        const adapter = getCurrentAdapter();
-        if (!adapter) {
-            showToast('⚠️ 未辨識出目前運行的 AI 平台！', true);
-            return;
-        }
-
-
-        if (!btnDef || !btnDef.enabled) {
-            showToast('⚠️ 切片規則不存在或未啟用！', true);
-            return;
-        }
-
-
-        const fullText = await getAssistantMarkdownText(adapter);
-        if (!fullText || !fullText.trim()) {
-            showToast('⚠️ 未找到回覆內容！', true);
-            return;
-        }
-
-
-        const rawPattern = (btnDef.pattern || '').trim();
-        const rawPrefix = (typeof btnDef.prefix === 'string') ? btnDef.prefix : '';
-        const rawSuffix = (typeof btnDef.suffix === 'string') ? btnDef.suffix : '';
-
-
-        const prefixRes = await resolveAffixContent(rawPrefix, '前綴');
-        let safePrefix = prefixRes.content;
-        const prefixDegraded = prefixRes.isDegraded;
-
-
-        if (safePrefix && safePrefix.trim().length > 0 && !safePrefix.endsWith('\n')) {
-            safePrefix += '\n\n';
-        }
-
-
-        if (btnDef.autoDivider === true && safePrefix && safePrefix.trim().length > 0) {
-            const trimmedPrefix = safePrefix.trimEnd();
-            const prefixLines = trimmedPrefix.split('\n').filter(l => l.trim().length > 0);
-            const lastLine = prefixLines.length > 0 ? prefixLines[prefixLines.length - 1].trim() : '';
-            const dividerRegex = /^(?:[-=*_~—–─]{2,}|[-=*_~—–─]{2,}.+[-=*_~—–─]{2,})$/;
-
-
-            if (!dividerRegex.test(lastLine)) {
-                safePrefix = safePrefix.trimEnd() + '\n\n---\n\n';
-            }
-        }
-
-
-        let safeSuffix = rawSuffix;
-        if (safeSuffix === '\n' || safeSuffix === '\n\n') {
-            // 原樣保留純換行
-        } else if (safeSuffix) {
-            const suffixRes = await resolveAffixContent(safeSuffix, '後綴');
-            safeSuffix = suffixRes.content;
-            if (safeSuffix && safeSuffix.trim().length > 0 && !safeSuffix.startsWith('\n')) {
-                safeSuffix = '\n\n' + safeSuffix;
-            }
-        }
-
-
-        let finalSuffix = safeSuffix;
-        if (btnDef.id === 'm1_btn_3' && !finalSuffix) {
-            finalSuffix = '\n\n';
-        }
-
-
-        if (btnDef.mode === 'replace') {
-            let targetText = fullText;
-            if (rawPattern) {
-                try {
-                    let regex = null;
-                    if (rawPattern.startsWith('/') && rawPattern.length > 1) {
-                        const lastSlashIndex = findRegexClosingSlash(rawPattern);
-                        if (lastSlashIndex > 0) {
-                            const p = rawPattern.substring(1, lastSlashIndex);
-                            const f = rawPattern.substring(lastSlashIndex + 1);
-                            regex = new RegExp(p, f);
-                        } else {
-                            regex = new RegExp(rawPattern, 'gi');
-                        }
-                    } else {
-                        regex = new RegExp(rawPattern, 'gi');
-                    }
-                    targetText = fullText.replace(regex, btnDef.replaceValue || '');
-                } catch (e) {
-                    console.warn('⚠️ [AI Copy] 替換正則語法無效:', e);
-                    showToast('❌ 替換正則語法無效，操作已中止！', true, 4000);
+                const text = response.responseText || "";
+                if (isHtmlResponse(text)) {
+                    showToast("⚠️ 雲端名單拉取失敗 (需公開檢視權限或遇到登入頁)，已保留本機現有名單！", "error");
                     return;
                 }
-            }
-            const finalPayload = composeSlicePayload(safePrefix, targetText, finalSuffix);
-            copyToClipboard(finalPayload);
-            if (prefixDegraded) {
-                showToast(`⚠️ 雲端前綴載入失敗，本次複製已自動省略前綴！ (已局部清洗：「${btnDef.name}」)`);
-            } else {
-                showToast(`🧹 已局部清洗：「${btnDef.name}」！`);
-            }
-            return;
-        }
 
 
-        let targetText = null;
-        let usedFallback = false;
-
-
-        if (rawPattern) {
-            targetText = executeMatchSlice(fullText, rawPattern, !!btnDef.isCodeBlockTarget);
-        }
-
-
-        if (targetText === null && btnDef.fallbackPattern && btnDef.fallbackPattern.trim()) {
-            targetText = executeMatchSlice(fullText, btnDef.fallbackPattern.trim(), !!btnDef.isCodeBlockTarget);
-            if (targetText !== null) {
-                usedFallback = true;
-            }
-        }
-
-
-        if (targetText !== null) {
-            const finalPayload = composeSlicePayload(safePrefix, targetText, finalSuffix);
-            copyToClipboard(finalPayload);
-
-
-            if (prefixDegraded) {
-                showToast(`⚠️ 雲端前綴載入失敗，本次複製已自動省略前綴！ (已截取：「${btnDef.name}」)`);
-            } else if (safePrefix && safePrefix.trim()) {
-                showToast(`✂️ 已截取 (含專屬前綴)：「${btnDef.name}」！`);
-            } else if (usedFallback) {
-                showToast(`🛟 已由備援正則截取：「${btnDef.name}」！`);
-            } else {
-                showToast(`✂️ 已精準截取：「${btnDef.name}」！`);
-            }
-        } else {
-            const fallbackAction = globalConfig.aiStudioSettings?.fallbackAction || 'warn_block';
-            if (fallbackAction === 'warn_block') {
-                showToast(`🛑 截取失敗：未找到「${btnDef.name}」目標錨點！`, true, 4000);
-            } else if (fallbackAction === 'lenient_full') {
-                const finalPayload = composeSlicePayload(safePrefix, fullText, finalSuffix);
-                copyToClipboard(finalPayload);
-                showToast(`⚠️ 未在回覆中找到目標錨點，已複製全量文本！`);
-            } else if (fallbackAction === 'custom_string') {
-                const placeholder = globalConfig.aiStudioSettings?.fallbackCustomText || '[ERROR: 錨點切片未命中]';
-                const finalPayload = composeSlicePayload(safePrefix, placeholder, safeSuffix);
-                copyToClipboard(finalPayload);
-                showToast(`⚠️ 未命中目標錨點，已複製失敗佔位字串！`);
-            }
-        }
-    }
-
-
-    // ==========================================
-    // 7.1 跨站點採集多態提取 (Claude / Z.AI 智能階梯降級支援)
-    // ==========================================
-    async function extractSiteTextByAction(adapter, action) {
-        let rawText = null;
-
-
-        if (action === 'PREVIEW' || action === 'PREVIEW_CLEAN') {
-            if (adapter.id === 'claude') {
-                const deliverableText = await getClaudeDeliverableText();
-                if (deliverableText && deliverableText.trim()) {
-                    rawText = deliverableText;
-                } else {
-                    rawText = await getAssistantMarkdownText(adapter);
+                const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+                if (lines.length === 0) {
+                    showToast("⚠️ 雲端名單為空，已啟動防空熔斷保留現有名單！", "error");
+                    return;
                 }
-            } else if (adapter.id === 'zai') {
-                const deliverableText = await getZaiDeliverableText();
-                if (deliverableText && deliverableText.trim()) {
-                    rawText = deliverableText;
-                } else {
-                    rawText = await getAssistantMarkdownText(adapter);
+
+
+                let marketCapList = [];
+                let highDivList = [];
+                let divWhiteList = [];
+
+
+                lines.forEach((line, idx) => {
+                    const cols = line.split(',').map(c => c.replace(/^["']|["']$/g, '').trim());
+                    if (idx === 0) {
+                        const headerStr = cols.join('');
+                        if (headerStr.includes("市值") || headerStr.includes("高股息") || headerStr.includes("白名單")) {
+                            return;
+                        }
+                    }
+
+
+                    // A 欄：市值型 ETF (萬能補零)
+                    if (cols[0]) {
+                        let c0 = cols[0].toUpperCase();
+                        if (/^[0-9]+[A-Z]?$/.test(c0) && !c0.startsWith('00')) {
+                            c0 = '00' + c0;
+                        }
+                        if (c0) marketCapList.push(c0);
+                    }
+
+
+                    // B 欄：高股息 ETF (萬能補零)
+                    if (cols[1]) {
+                        let c1 = cols[1].toUpperCase();
+                        if (/^[0-9]+[A-Z]?$/.test(c1) && !c1.startsWith('00')) {
+                            c1 = '00' + c1;
+                        }
+                        if (c1) highDivList.push(c1);
+                    }
+
+
+                    // C 欄：個股白名單 (僅 trim 與大寫，嚴禁補 00)
+                    if (cols[2]) {
+                        let c2 = cols[2].toUpperCase();
+                        if (c2) divWhiteList.push(c2);
+                    }
+                });
+
+
+                marketCapList = Array.from(new Set(marketCapList)).filter(Boolean);
+                highDivList = Array.from(new Set(highDivList)).filter(Boolean);
+                divWhiteList = Array.from(new Set(divWhiteList)).filter(Boolean);
+
+
+                if (marketCapList.length === 0 && highDivList.length === 0 && divWhiteList.length === 0) {
+                    showToast("⚠️ 雲端名單為空，已啟動防空熔斷保留現有名單！", "error");
+                    return;
                 }
-            } else if (adapter.id === 'minimax') {
-                const res = await getMiniMaxDeliverableText();
-                if (!res || !res.contentText || !res.contentText.trim()) {
-                    showToast('⚠️ MiniMax 成果物抽屜未開啟或加載逾時！', true);
-                    return null;
-                }
-                rawText = res.contentText.trim();
-            } else {
-                rawText = await getAssistantMarkdownText(adapter);
+
+
+                GM_setValue("cm_etf_market_cap_list", marketCapList);
+                GM_setValue("cm_etf_high_dividend_list", highDivList);
+                GM_setValue("cm_div_whitelist", divWhiteList);
+                GM_setValue("white_list", divWhiteList.join(','));
+
+
+                const whiteArea = document.getElementById('cfg-white');
+                if (whiteArea) whiteArea.value = divWhiteList.join(',');
+
+
+                showToast(`✅ 雲端名單同步完成！(市值 ${marketCapList.length} / 高股息 ${highDivList.length} / 個股 ${divWhiteList.length})`);
+            },
+            ontimeout: function() {
+                showToast("⚠️ 雲端名單拉取超時，已保留本機現有名單！", "error");
+            },
+            onerror: function() {
+                showToast("⚠️ 雲端名單拉取失敗，已保留本機現有名單！", "error");
             }
-        } else {
-            rawText = await getAssistantMarkdownText(adapter);
-        }
-
-
-        if (!rawText || !rawText.trim()) return null;
-
-
-        // 純淨模式：絕不附加前後綴
-        if (action === 'SINGLE_CLEAN' || action === 'PREVIEW_CLEAN') {
-            return rawText.trim();
-        }
-
-
-        // 一般模式 (SINGLE / PREVIEW)：裝配 Profile 前後綴
-        const activeProfile = globalConfig.profiles?.[globalConfig.activeProfileId];
-        let prefix = '';
-        let suffix = '\n\n';
-
-
-        if (activeProfile && activeProfile.enabled) {
-            if (activeProfile.enablePrefix !== false) {
-                const pText = (activeProfile.prefixes && activeProfile.prefixes[adapter.id]) || '';
-                prefix = pText ? (pText.endsWith('\n') ? pText : pText + '\n') : '';
-            }
-            if (activeProfile.enableSuffix !== false) {
-                suffix = (activeProfile.suffixes && activeProfile.suffixes[adapter.id]) ?? '\n\n';
-            }
-        }
-
-
-        return `${prefix}${rawText.trim()}${suffix}`;
-    }
-
-
-    async function handleCopyAction(mode) {
-        const adapter = getCurrentAdapter();
-        if (!adapter) {
-            showToast('⚠️ 未辨識出目前運行的 AI 平台！', true);
-            return;
-        }
-
-
-        const activeProfile = globalConfig.profiles?.[globalConfig.activeProfileId];
-        let prefix = '';
-        let suffix = '';
-
-
-        if (mode === 'SINGLE' || mode === 'FULL_THREAD') {
-            if (activeProfile && activeProfile.enabled) {
-                if (activeProfile.enablePrefix !== false) {
-                    const pText = (activeProfile.prefixes && activeProfile.prefixes[adapter.id]) || '';
-                    prefix = pText ? (pText.endsWith('\n') ? pText : pText + '\n') : '';
-                }
-                if (activeProfile.enableSuffix !== false) {
-                    suffix = (activeProfile.suffixes && activeProfile.suffixes[adapter.id]);
-                    if (typeof suffix === 'undefined') suffix = '\n\n';
-                }
-            }
-        }
-
-
-        if (mode === 'SINGLE' || mode === 'SINGLE_CLEAN') {
-            const markdownText = await getAssistantMarkdownText(adapter);
-            if (!markdownText || !markdownText.trim()) {
-                showToast(`⚠️ 未找到 ${adapter.name} 的回覆內容！`, true);
-                return;
-            }
-
-
-            let finalText = '';
-            if (mode === 'SINGLE_CLEAN') {
-                finalText = markdownText;
-            } else {
-                finalText = `${prefix}${markdownText}${suffix}`;
-            }
-
-
-            copyToClipboard(finalText);
-            const isClean = mode === 'SINGLE_CLEAN';
-            showToast(`✅ 已複製 ${adapter.name} ${isClean ? '乾淨回覆 (無前後綴)' : '最後回覆'}！${(!isClean && (prefix || suffix)) ? ' (含自訂格式)' : ''}`);
-
-
-        } else if (mode === 'FULL_THREAD') {
-            if (adapter.id === 'aistudio' || adapter.id === 'mistral') {
-                showToast(`⚠️ ${adapter.name} 專用模式僅支援複製最後回覆！`, true);
-                return;
-            }
-
-
-            const aiNodes = adapter.getAiNodes();
-            const userNodes = adapter.getUserNodes();
-
-
-            const allMessages = [];
-            userNodes.forEach(node => allMessages.push({ node, isUser: true }));
-            aiNodes.forEach(node => allMessages.push({ node, isUser: false }));
-
-
-            allMessages.sort((a, b) => (a.node.compareDocumentPosition(b.node) & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1);
-
-
-            if (allMessages.length === 0) {
-                showToast('⚠️ 未找到對話內容！', true);
-                return;
-            }
-
-
-            let fullText = '';
-            for (const msg of allMessages) {
-                if (msg.isUser) {
-                    fullText += `### 👤 User:\n${msg.node.innerText.trim()}\n\n---\n\n`;
-                } else {
-                    let text = domToMarkdown(msg.node, adapter.cleanNode);
-                    if (!text || !text.trim()) text = adapter.cleanNode(msg.node).innerText.trim();
-                    fullText += `### 🤖 ${adapter.name}:\n${text}\n\n========================================\n\n`;
-                }
-            }
-
-
-            const body = fullText.trim();
-            const finalText = `${prefix}${body}${suffix}`;
-            copyToClipboard(finalText);
-            showToast(`✅ 已複製 ${adapter.name} 全對話歷史！${(prefix || suffix) ? ' (含自訂格式)' : ''}`);
-        }
-    }
-
-
-    // ==========================================
-    // 7.2 跨站點採集入庫、滿額自動總結與滾動更新管線
-    // ==========================================
-    async function handleCaptureAction() {
-        const adapter = getCurrentAdapter();
-        if (!adapter) {
-            showToast('⚠️ 未辨識出目前運行的 AI 平台！', true);
-            return;
-        }
-
-
-        const siteId = adapter.id;
-        const siteLabel = ALL_SITE_DEFS[siteId]?.label || adapter.name;
-        const action = globalConfig.qaQueueSettings?.siteActions?.[siteId] || 'SINGLE';
-
-
-        showToast(`⏳ 正在採集 ${siteLabel}...`);
-        const extractedText = await extractSiteTextByAction(adapter, action);
-
-
-        if (!extractedText || !extractedText.trim()) {
-            showToast(`⚠️ ${siteLabel} 提取內容為空！`, true);
-            return;
-        }
-
-
-        const activeProfile = globalConfig.profiles?.[globalConfig.activeProfileId];
-        const affixTag = (activeProfile && activeProfile.enabled && activeProfile.prefixes?.[siteId]) ? activeProfile.prefixes[siteId].trim() : action;
-
-
-        const queue = getQaQueue();
-        queue.items[siteId] = {
-            siteId: siteId,
-            siteLabel: siteLabel,
-            action: action,
-            affixTag: affixTag,
-            content: extractedText.trim() + '\n\n',
-            timestamp: Date.now()
-        };
-        queue.lastUpdated = Date.now();
-        setQaQueue(queue);
-
-
-        updateGearIndicator();
-
-
-        const count = Object.keys(queue.items).length;
-        const targetCount = globalConfig.qaQueueSettings?.targetCount ?? 6;
-        const keepQueue = globalConfig.qaQueueSettings?.keepQueueOnAutoSummary ?? true;
-
-
-        // 滿額 N 站自動總結 / 滾動更新管線
-        if (targetCount > 0 && count >= targetCount) {
-            const items = Object.values(queue.items || {});
-            const siteOrder = globalConfig.siteTabOrder || ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'claude', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
-            items.sort((a, b) => {
-                let idxA = siteOrder.indexOf(a.siteId);
-                let idxB = siteOrder.indexOf(b.siteId);
-                if (idxA === -1) idxA = 999;
-                if (idxB === -1) idxB = 999;
-                return idxA - idxB;
-            });
-
-
-            const mergedText = items.map(it => it.content.trim()).join('\n\n===\n\n') + '\n\n';
-            copyToClipboard(mergedText);
-
-
-            if (keepQueue) {
-                showToast(`🎉 [滿額滾動更新] 已將 ${count} 站總結寫入剪貼簿！(佇列已保留，後續採集將自動追加)`, false, 3500);
-            } else {
-                clearQaQueue();
-                showToast(`🎉 [滿額自動總結] 已合併複製 ${count} 站總結至剪貼簿！佇列已清空。`, false, 3500);
-            }
-            return;
-        }
-
-
-        const summaryKey = globalConfig.qaQueueSettings?.summaryHotkey || 'F7';
-        showToast(`📥 [佇列已採集 ${count} 站] ${siteLabel} (${affixTag}) 已暫存！ (按 ${summaryKey} 總結複製)`, false, 2800);
-    }
-
-
-    function handleSummaryAction() {
-        const queue = getQaQueue();
-        const items = Object.values(queue.items || {});
-        const count = items.length;
-
-
-        if (count === 0) {
-            showToast('ℹ️ 採集佇列目前為空，請先在 AI 頁面按採集熱鍵！', true, 2500);
-            return;
-        }
-
-
-        const siteOrder = globalConfig.siteTabOrder || ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'claude', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
-        items.sort((a, b) => {
-            let idxA = siteOrder.indexOf(a.siteId);
-            let idxB = siteOrder.indexOf(b.siteId);
-            if (idxA === -1) idxA = 999;
-            if (idxB === -1) idxB = 999;
-            return idxA - idxB;
         });
-
-
-        const mergedText = items.map(it => it.content.trim()).join('\n\n===\n\n') + '\n\n';
-        copyToClipboard(mergedText);
-
-
-        clearQaQueue();
-        showToast(`🎉 已合併複製 ${count} 站 QA 總結至剪貼簿！佇列已清空。`, false, 3200);
     }
 
 
-    // ==========================================
-    // 8. 模組雙向輪播與膠囊調度體系 (Carousel & Capsule)
-    // ==========================================
-    const MODULE_SEQUENCE = ['module_1', 'module_2', 'module_3'];
-    let lastWheelTimestamp = 0;
+    function createUI() {
+        if (document.getElementById('cm-drawer-btn')) return;
 
 
-    function switchModule(direction = 'next') {
-        const curMod = globalConfig.aiStudioSettings?.activeModuleId || 'module_1';
-        let idx = MODULE_SEQUENCE.indexOf(curMod);
-        if (idx === -1) idx = 0;
+        const ui = getDynamicUIParams();
+        const btnFloat = document.createElement('div'); btnFloat.id = 'cm-drawer-btn'; btnFloat.innerHTML = '⚡'; document.body.appendChild(btnFloat);
+        const panel = document.createElement('div'); panel.id = 'cm-main-panel';
 
 
-        if (direction === 'next') {
-            idx = (idx + 1) % MODULE_SEQUENCE.length;
-        } else {
-            idx = (idx - 1 + MODULE_SEQUENCE.length) % MODULE_SEQUENCE.length;
-        }
+        // 雙欄排版 Accordion 結構
+        const cbHtml = `
+            <div class="cm-checkbox-area-grid">
+                <!-- 頂部通欄 -->
+                <div class="cm-grid-full">
+                    <div class="cm-cb-group" style="padding: 6px 8px; margin-bottom: 2px; background: #333; border-radius: 6px; border: 1px solid #555;">
+                        <label class="cm-cb-label"><input type="checkbox" class="cm-cb-input cm-module-cb" value="realtime"> 即時五檔</label>
+                    </div>
+                </div>
 
+                <!-- 左欄：技術分析 + 財務分析 -->
+                <div class="cm-grid-left">
+                    <details id="acc-tech" ${ACC_STATE['acc-tech'] ? 'open' : ''}>
+                        <summary>技術分析</summary>
+                        <div style="padding: 6px; display: flex; flex-direction: column; gap: 6px;">
+                            <!-- 個股 K 線 -->
+                            <div style="background: #2b2b2b; padding: 5px; border-radius: 4px; border: 1px solid #444;">
+                                <label class="cm-cb-label" style="cursor:pointer; margin-bottom: 3px;">
+                                    <input type="checkbox" class="cm-cb-input cm-module-cb" value="kline"> 個股 K 線狙擊
+                                </label>
+                                <div style="display: flex; align-items: center; justify-content: flex-end; gap: 4px;">
+                                    <select id="cfg-prof-stock-ktype" class="cm-conf-select" style="max-width: 65px; text-align: left;">
+                                        <option value="day">日K</option>
+                                        <option value="week">週K</option>
+                                        <option value="month">月K</option>
+                                    </select>
+                                    <input type="number" id="cfg-prof-stock-kdays" class="cm-conf-input" style="width: 42px;" value="60">
+                                    <span style="font-size: 11px; color: #aaa;">筆</span>
+                                </div>
+                            </div>
+                            <!-- 大盤 K 線 -->
+                            <div style="background: #2b2b2b; padding: 5px; border-radius: 4px; border: 1px solid #444;">
+                                <label class="cm-cb-label" style="cursor:pointer; color:#5cb85c; margin-bottom: 3px;">
+                                    <input type="checkbox" class="cm-cb-input cm-module-cb" value="market_kline"> 大盤加權指數 K 線
+                                </label>
+                                <div style="display: flex; align-items: center; justify-content: flex-end; gap: 4px;">
+                                    <select id="cfg-prof-market-ktype" class="cm-conf-select" style="max-width: 65px; text-align: left;">
+                                        <option value="day">日K</option>
+                                        <option value="week">週K</option>
+                                        <option value="month">月K</option>
+                                    </select>
+                                    <input type="number" id="cfg-prof-market-kdays" class="cm-conf-input" style="width: 42px;" value="60">
+                                    <span style="font-size: 11px; color: #aaa;">筆</span>
+                                </div>
+                            </div>
+                        </div>
+                    </details>
 
-        const targetModId = MODULE_SEQUENCE[idx];
-        globalConfig.aiStudioSettings.activeModuleId = targetModId;
-        Storage.set(globalConfig);
+                    <details id="acc-finance" ${ACC_STATE['acc-finance'] ? 'open' : ''}>
+                        <summary>財務分析</summary>
+                        <div class="cm-checkbox-grid">
+                            <label class="cm-cb-label"><input type="checkbox" class="cm-cb-input cm-module-cb" value="eps"> 歷年 EPS</label>
+                            <label class="cm-cb-label"><input type="checkbox" class="cm-cb-input cm-module-cb" value="revenue"> 月營收</label>
+                            <label class="cm-cb-label"><input type="checkbox" class="cm-cb-input cm-module-cb" value="income-statement"> 損益表</label>
+                            <label class="cm-cb-label"><input type="checkbox" class="cm-cb-input cm-module-cb" value="balance-sheet"> 資產負債</label>
+                            <label class="cm-cb-label"><input type="checkbox" class="cm-cb-input cm-module-cb" value="stockfindetail"> 三率趨勢</label>
+                            <label class="cm-cb-label"><input type="checkbox" class="cm-cb-input cm-module-cb" value="revenue-source"> 營收組成</label>
+                            <label class="cm-cb-label"><input type="checkbox" class="cm-cb-input cm-module-cb" value="cash-flow"> 現金流量表</label>
+                            <label class="cm-cb-label"><input type="checkbox" class="cm-cb-input cm-module-cb" value="financial-ratio"> 財務比率</label>
+                        </div>
+                    </details>
+                </div>
 
+                <!-- 右欄：基本分析 + 籌碼分析 + ETF專區 -->
+                <div class="cm-grid-right">
+                    <details id="acc-basic" ${ACC_STATE['acc-basic'] ? 'open' : ''}>
+                        <summary>基本分析</summary>
+                        <div class="cm-checkbox-grid">
+                            <label class="cm-cb-label"><input type="checkbox" class="cm-cb-input cm-module-cb" value="profile"> 基本資料</label>
+                            <label class="cm-cb-label cm-stock-only-cb"><input type="checkbox" class="cm-cb-input cm-module-cb" value="institutional-target"> 法人目標</label>
+                            <label class="cm-cb-label cm-stock-only-cb"><input type="checkbox" class="cm-cb-input cm-module-cb" value="pe"> PE 河流圖</label>
+                            <label class="cm-cb-label cm-stock-only-cb"><input type="checkbox" class="cm-cb-input cm-module-cb" value="pb"> PB 河流圖</label>
+                            <label class="cm-cb-label"><input type="checkbox" class="cm-cb-input cm-module-cb" value="dividend"> 股利政策</label>
+                        </div>
+                    </details>
 
-        const modDef = globalConfig.aiStudioSettings.modules[targetModId];
-        showToast(`🔄 已切換至：【${modDef.badgeText}】${modDef.name}`, false, 1800);
-        mountUI(true);
-    }
+                    <details id="acc-chip" ${ACC_STATE['acc-chip'] ? 'open' : ''}>
+                        <summary>籌碼分析</summary>
+                        <div class="cm-checkbox-grid">
+                            <label class="cm-cb-label"><input type="checkbox" class="cm-cb-input cm-module-cb" value="shareholding"> 大戶散戶</label>
+                        </div>
+                    </details>
 
-
-    // ==========================================
-    // 9. UI 樣式注入 (含 Toast 定位、狀態燈號、穿透契約、微光虛線輪廓與綠鍵永駐)
-    // ==========================================
-    function injectStyles() {
-        const css = `
-            #${UI_CONTAINER_ID} {
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                font-size: 13px;
-                color: #f3f4f6;
-                z-index: 2147483640;
-                position: fixed;
-            }
-
-            /* UX 穿透契約：消除空氣牆 */
-            #${UI_CONTAINER_ID},
-            .ai-copy-btn-bar,
-            .ai-copy-btn-bar-staircase,
-            .ai-copy-left-col,
-            .ai-copy-right-col,
-            .ai-copy-main-row,
-            .ai-copy-sub-row,
-            .ai-copy-sub-row-single,
-            .ai-copy-sub-row-grid,
-            .ai-copy-grid-row {
-                pointer-events: none !important;
-            }
-            .ai-copy-btn,
-            .ai-copy-btn-docx,
-            .ai-copy-btn-purple,
-            .ai-copy-capsule-btn,
-            .ai-copy-icon-btn,
-            .ai-copy-btn-slice,
-            .ai-copy-drag-handle,
-            #${FLOATING_ORB_ID} {
-                pointer-events: auto !important;
-            }
-
-            /* 拖曳中微光輪廓樣式 */
-            .ai-copy-is-dragging {
-                outline: 1.5px dashed rgba(138, 180, 248, 0.7) !important;
-                outline-offset: 3px;
-                background: rgba(15, 23, 42, 0.25) !important;
-                border-radius: 8px;
-                box-shadow: 0 0 16px rgba(138, 180, 248, 0.15) !important;
-            }
-
-            /* 齒輪佇列動態活躍燈號 */
-            .ai-copy-gear-active {
-                background: #f59e0b !important;
-                color: #ffffff !important;
-                border: 1px solid rgba(255, 255, 255, 0.4) !important;
-                box-shadow: 0 0 10px rgba(245, 158, 11, 0.7), 0 4px 12px rgba(0,0,0,0.4) !important;
-                animation: ai-copy-pulse 2s infinite ease-in-out;
-            }
-            @keyframes ai-copy-pulse {
-                0%, 100% { filter: brightness(1); }
-                50% { filter: brightness(1.2); }
-            }
-
-            /* Toast 定位按鈕長亮活躍外發光 */
-            .ai-copy-toast-btn-active {
-                background: #6b21a8 !important;
-                color: #ffffff !important;
-                border: 1px solid rgba(255, 255, 255, 0.5) !important;
-                box-shadow: 0 0 10px rgba(168, 85, 247, 0.8), 0 4px 12px rgba(0,0,0,0.4) !important;
-            }
-
-            #${FLOATING_ORB_ID} {
-                width: 36px;
-                height: 36px;
-                border-radius: 50%;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                cursor: grab;
-                user-select: none;
-                z-index: 2147483640;
-                position: fixed;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                font-size: 11px;
-                font-weight: bold;
-                color: #ffffff;
-                text-shadow: 0 1px 2px rgba(0,0,0,0.8);
-                border: 1.5px solid rgba(255, 255, 255, 0.8);
-                transition: transform 0.2s ease, box-shadow 0.2s ease;
-            }
-            #${FLOATING_ORB_ID}:hover {
-                transform: scale(1.08);
-            }
-            #${FLOATING_ORB_ID}:active {
-                cursor: grabbing;
-            }
-
-            .ai-copy-btn-bar {
-                display: flex;
-                flex-direction: column;
-                align-items: flex-end;
-                gap: 6px;
-            }
-
-            .ai-copy-btn-bar-staircase {
-                display: flex;
-                flex-direction: row;
-                align-items: flex-start;
-                gap: 8px;
-            }
-
-            .ai-copy-drag-handle {
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                width: 18px;
-                height: 26px;
-                color: #9ca3af;
-                font-size: 14px;
-                cursor: grab;
-                user-select: none;
-                transition: color 0.15s ease;
-            }
-            .ai-copy-drag-handle:hover {
-                color: #f3f4f6;
-            }
-            .ai-copy-drag-handle:active {
-                cursor: grabbing;
-            }
-
-            .ai-copy-left-col {
-                display: flex;
-                flex-direction: column;
-                gap: 6px;
-                align-items: flex-end;
-            }
-            .ai-copy-right-col {
-                display: flex;
-                flex-direction: column;
-                gap: 6px;
-                align-items: flex-start;
-            }
-
-            .ai-copy-main-row {
-                display: flex;
-                gap: 8px;
-                align-items: center;
-            }
-
-            .ai-copy-sub-row {
-                display: flex;
-                flex-wrap: wrap;
-                justify-content: flex-end;
-                gap: 6px;
-                max-width: 420px;
-            }
-            .ai-copy-sub-row-single {
-                display: flex;
-                flex-direction: row;
-                flex-wrap: nowrap;
-                justify-content: flex-end;
-                gap: 6px;
-            }
-            .ai-copy-sub-row-grid {
-                display: flex;
-                flex-direction: column;
-                align-items: flex-end;
-                gap: 6px;
-            }
-            .ai-copy-grid-row {
-                display: flex;
-                flex-direction: row;
-                gap: 6px;
-                justify-content: flex-end;
-            }
-
-            .ai-copy-btn {
-                background: #2563eb;
-                color: #ffffff;
-                border: none;
-                padding: 8px 14px;
-                border-radius: 20px;
-                font-size: 13px;
-                font-weight: 600;
-                cursor: pointer;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-                transition: background 0.2s ease, opacity 0.2s ease, filter 0.2s ease;
-                user-select: none;
-                white-space: nowrap;
-            }
-            .ai-copy-btn:hover { background: #1d4ed8; }
-
-            .ai-copy-btn-docx {
-                background: #10b981 !important;
-                color: #ffffff !important;
-                border: none;
-                padding: 8px 14px;
-                border-radius: 20px;
-                font-size: 13px;
-                font-weight: 600;
-                cursor: pointer;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-                transition: background 0.2s ease, opacity 0.2s ease, filter 0.2s ease;
-                user-select: none;
-                white-space: nowrap;
-                opacity: 1 !important;
-                filter: none !important;
-            }
-            .ai-copy-btn-docx:hover { background: #059669 !important; }
-            .ai-copy-btn-docx:active { background: #047857 !important; }
-
-            .ai-copy-btn-purple {
-                background: #7c3aed;
-                color: #ffffff;
-                border: none;
-                padding: 7px 13px;
-                border-radius: 20px;
-                font-size: 12px;
-                font-weight: 600;
-                cursor: pointer;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-                transition: background 0.2s ease;
-                user-select: none;
-                white-space: nowrap;
-            }
-            .ai-copy-btn-purple:hover { background: #6d28d9; }
-
-            .ai-copy-capsule-btn {
-                border: 1px solid rgba(255,255,255,0.3);
-                padding: 4px 10px;
-                height: 26px;
-                border-radius: 13px;
-                font-size: 12px;
-                font-weight: bold;
-                color: #ffffff;
-                cursor: pointer;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-                transition: transform 0.15s ease, filter 0.15s ease;
-                user-select: none;
-                white-space: nowrap;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-            }
-            .ai-copy-capsule-btn:hover {
-                filter: brightness(1.15);
-                transform: translateY(-1px);
-            }
-
-            .ai-copy-icon-btn {
-                background: #374151;
-                color: #ffffff;
-                border: none;
-                height: 28px;
-                padding: 0 9px;
-                border-radius: 14px;
-                font-size: 13px;
-                cursor: pointer;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-                transition: background 0.2s ease, box-shadow 0.2s ease;
-                user-select: none;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-            }
-            .ai-copy-icon-btn:hover { background: #4b5563; }
-
-            .ai-copy-btn-slice {
-                border: none;
-                padding: 7px 12px;
-                border-radius: 20px;
-                font-size: 12px;
-                font-weight: 600;
-                color: #ffffff;
-                cursor: pointer;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-                transition: background 0.2s ease;
-                user-select: none;
-                white-space: nowrap;
-            }
-            .ai-copy-slice-0 { background: #059669; }
-            .ai-copy-slice-0:hover { background: #047857; }
-            .ai-copy-slice-1 { background: #d97706; }
-            .ai-copy-slice-1:hover { background: #b45309; }
-            .ai-copy-slice-2 { background: #0891b2; }
-            .ai-copy-slice-2:hover { background: #0e7490; }
-            .ai-copy-slice-3 { background: #e11d48; }
-            .ai-copy-slice-3:hover { background: #be123c; }
-            .ai-copy-slice-4 { background: #4f46e5; }
-            .ai-copy-slice-4:hover { background: #4338ca; }
-
-            .ai-copy-toast-node {
-                position: fixed;
-                bottom: 80px;
-                right: 24px;
-                background: linear-gradient(135deg, rgba(88, 28, 135, 0.95), rgba(124, 58, 237, 0.92));
-                color: #ffffff !important;
-                padding: 10px 18px;
-                border-radius: 8px;
-                box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4), 0 0 12px rgba(124, 58, 237, 0.3) !important;
-                font-size: 18px;
-                font-weight: 600;
-                z-index: 2147483647;
-                opacity: 0;
-                transition: opacity 0.3s ease, transform 0.3s ease;
-                transform: translate(-50%, 10px);
-                pointer-events: none;
-                user-select: none;
-                white-space: nowrap;
-            }
-
-            .ai-copy-toast-node.ai-copy-toast-active {
-                pointer-events: auto !important;
-                cursor: grab !important;
-                transition: none !important;
-            }
-            .ai-copy-toast-node.ai-copy-toast-active:active {
-                cursor: grabbing !important;
-            }
-
-            /* Modal 彈窗樣式 */
-            #${MODAL_OVERLAY_ID} {
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100vw;
-                height: 100vh;
-                background: rgba(0, 0, 0, 0.75);
-                z-index: 2147483647;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            }
-
-            #ai-copy-modal {
-                width: 820px;
-                max-width: 95vw;
-                height: 620px;
-                max-height: 90vh;
-                background: #202124;
-                color: #e8eaed;
-                border: 1px solid #5f6368;
-                border-radius: 8px;
-                display: flex;
-                flex-direction: column;
-                box-shadow: 0 12px 24px rgba(0,0,0,0.6);
-                overflow: hidden;
-            }
-
-            .ai-copy-modal-header {
-                padding: 14px 16px;
-                border-bottom: 1px solid #5f6368;
-                font-size: 15px;
-                font-weight: bold;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                background: #1e1f20;
-            }
-            .ai-copy-close-x {
-                background: none;
-                border: none;
-                color: #9aa0a6;
-                font-size: 20px;
-                cursor: pointer;
-                line-height: 1;
-            }
-            .ai-copy-close-x:hover { color: #fff; }
-
-            .ai-copy-modal-body {
-                display: flex;
-                flex: 1;
-                overflow: hidden;
-            }
-
-            .ai-copy-modal-sidebar-tabs {
-                width: 165px;
-                min-width: 155px;
-                background: #1e1f20;
-                border-right: 1px solid #5f6368;
-                display: flex;
-                flex-direction: column;
-                gap: 4px;
-                padding: 10px 0;
-                flex-shrink: 0;
-            }
-            .ai-copy-side-tab {
-                background: transparent;
-                border: none;
-                color: #9aa0a6;
-                text-align: left;
-                padding: 11px 16px;
-                font-size: 13px;
-                cursor: pointer;
-                border-left: 3px solid transparent;
-                transition: all 0.2s;
-                font-weight: bold;
-                outline: none;
-                white-space: nowrap;
-            }
-            .ai-copy-side-tab:hover {
-                background: rgba(255, 255, 255, 0.04);
-                color: #fff;
-            }
-            .ai-copy-side-tab.active {
-                color: #8ab4f8;
-                background: rgba(138, 180, 248, 0.08);
-                border-left-color: #8ab4f8;
-            }
-
-            .ai-copy-modal-content-pane {
-                flex: 1;
-                padding: 16px;
-                overflow-y: auto;
-                background: #202124;
-                color: #e8eaed;
-                display: flex;
-                flex-direction: column;
-                gap: 12px;
-                box-sizing: border-box;
-            }
-            .ai-copy-modal-content-pane::-webkit-scrollbar { width: 6px; }
-            .ai-copy-modal-content-pane::-webkit-scrollbar-thumb {
-                background: #4b5563;
-                border-radius: 3px;
-            }
-
-            .ai-copy-modal-footer {
-                padding: 10px 16px;
-                border-top: 1px solid #5f6368;
-                display: flex;
-                justify-content: flex-end;
-                background: #1e1f20;
-            }
-
-            .ai-copy-btn-primary {
-                background: #8ab4f8;
-                color: #202124;
-                border: none;
-                padding: 6px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-                font-size: 13px;
-                cursor: pointer;
-                transition: background 0.2s;
-            }
-            .ai-copy-btn-primary:hover { background: #aecbfa; }
-
-            .ai-copy-btn-secondary {
-                background: #3c4043;
-                color: #e8eaed;
-                border: 1px solid #5f6368;
-                padding: 6px 12px;
-                border-radius: 4px;
-                font-size: 12px;
-                cursor: pointer;
-                transition: background 0.2s;
-            }
-            .ai-copy-btn-secondary:hover { background: #4b5563; }
-
-            .ai-copy-card-subtabs {
-                display: flex;
-                gap: 4px;
-                align-items: center;
-            }
-            .ai-copy-card-subtab-btn {
-                height: 24px;
-                border-radius: 4px;
-                font-size: 11px;
-                font-weight: bold;
-                padding: 0 8px;
-                cursor: pointer;
-                transition: all 0.2s;
-                white-space: nowrap;
-                user-select: none;
-                background: transparent;
-                color: #9aa0a6;
-                border: 1px solid #5f6368;
-            }
-            .ai-copy-card-subtab-btn:hover {
-                color: #ffffff;
-                background: rgba(255, 255, 255, 0.05);
-            }
-            .ai-copy-card-subtab-btn.active {
-                background: rgba(138, 180, 248, 0.15);
-                color: #8ab4f8;
-                border-color: #8ab4f8;
-            }
+                    <details id="acc-etf" ${ACC_STATE['acc-etf'] ? 'open' : ''}>
+                        <summary>ETF 專區</summary>
+                        <div class="cm-checkbox-grid">
+                            <label class="cm-cb-label"><input type="checkbox" class="cm-cb-input cm-module-cb" value="constituent"> ETF 成分股</label>
+                            <label class="cm-cb-label"><input type="checkbox" class="cm-cb-input cm-module-cb" value="discount"> 折溢價</label>
+                            <label class="cm-cb-label"><input type="checkbox" class="cm-cb-input cm-module-cb" value="div_comp"> 股利組成</label>
+                            <label class="cm-cb-label"><input type="checkbox" class="cm-cb-input cm-module-cb" value="trading-fee"> 交易費用</label>
+                            <label class="cm-cb-label"><input type="checkbox" class="cm-cb-input cm-module-cb" value="risk"> 風險指標</label>
+                            <label class="cm-cb-label"><input type="checkbox" class="cm-cb-input cm-module-cb" value="drawdown"> 歷史回撤</label>
+                        </div>
+                    </details>
+                </div>
+            </div>
         `;
 
 
-        if (typeof GM_addStyle !== 'undefined') {
-            GM_addStyle(css);
-        } else {
-            const style = document.createElement('style');
-            style.textContent = css;
-            (document.head || document.documentElement).appendChild(style);
+        panel.innerHTML = `
+            <div id="cm-panel-head">
+                <button id="cm-toggle-left" class="cm-toggle-btn">◀ 設定</button>
+                <span>數據助手 v3.9.0</span>
+                <button id="cm-toggle-right" class="cm-toggle-btn">參數 ▶</button>
+            </div>
+
+            <div class="cc-drawer-row">
+                <!-- 左抽屜：系統與全域設定 -->
+                <div id="drawer-left" class="cc-drawer">
+                    <div class="cc-drawer-content">
+                        <div class="cm-json-title" style="margin-top:0;">⚙️ 系統設定</div>
+                        <div class="cm-conf-row">字體縮放偏移: <input type="number" id="cfg-font" class="cm-conf-input" value="${CONFIG.font_offset}"></div>
+                        <div class="cm-conf-row">表格強制展開: <select id="cfg-expanded" class="cm-conf-select"><option value="true" ${isExpanded ? 'selected' : ''}>ON</option><option value="false" ${!isExpanded ? 'selected' : ''}>OFF</option></select></div>
+                        <div class="cm-conf-row">側邊吸附位置: <select id="cfg-drawer-side" class="cm-conf-select"><option value="left" ${CONFIG.drawer_side === 'left' ? 'selected' : ''}>左側</option><option value="right" ${CONFIG.drawer_side === 'right' ? 'selected' : ''}>右側</option></select></div>
+                        <div class="cm-conf-row">K線數據排序: <select id="cfg-kline-sort" class="cm-conf-select"><option value="desc" ${CONFIG.kline_sort === 'desc' ? 'selected' : ''}>倒序(新➔舊)</option><option value="asc" ${CONFIG.kline_sort === 'asc' ? 'selected' : ''}>正序(舊➔新)</option></select></div>
+
+                        <div class="cm-json-title">🎯 智慧路由預設組合</div>
+                        <div class="cm-conf-row">個股預設組合: <select id="cfg-def-stock-prof" class="cm-conf-select"></select></div>
+                        <div class="cm-conf-row">ETF 預設組合: <select id="cfg-def-etf-prof" class="cm-conf-select"></select></div>
+
+                        <div class="cm-json-title">☁️ 雲端名單同步</div>
+                        <div style="font-size: ${ui.f12}px; color: #aaa;">Google 試算表位址 (CSV):</div>
+                        <input type="text" id="cfg-sync-sheet-url" class="cm-conf-input" style="width: 100%; text-align: left; margin-top: 3px; box-sizing: border-box;" value="${escapeHtml(CONFIG.sync_sheet_url)}">
+                        <button id="cm-btn-sync-sheet" class="cm-btn" style="background: #17a2b8; color: #fff; margin-top: 6px;">🔄 立即同步雲端名單</button>
+
+                        <div style="font-size: ${ui.f12}px; color: #aaa; margin: 12px 0 2px 0;">熱鍵組合：^=Ctrl, +=Shift, !=Alt</div>
+                        <div class="cm-conf-row">單頁抓取熱鍵: <input type="text" id="cfg-hk-single" class="cm-conf-input" style="width: 80px;" value="${escapeHtml(CONFIG.hotkey_single)}"></div>
+                        <div class="cm-conf-row">批量彙整熱鍵: <input type="text" id="cfg-hk-batch" class="cm-conf-input" style="width: 80px;" value="${escapeHtml(CONFIG.hotkey_batch)}"></div>
+                        <div class="cm-conf-row">重新複製熱鍵: <input type="text" id="cfg-hk-recopy" class="cm-conf-input" style="width: 80px;" value="${escapeHtml(CONFIG.hotkey_recopy)}"></div>
+
+                        <button id="cm-cfg-save-sys" class="cm-btn cm-btn-save" style="margin-top: 12px;">💾 儲存系統設定並重整</button>
+
+                        <div class="cm-json-title">🔄 雙腳本共用互通</div>
+                        <textarea id="cm-json-io-shared" class="cm-list-area" placeholder="貼上共用 JSON..."></textarea>
+                        <div class="cm-json-btn-grid">
+                            <button id="cm-btn-exp-sh" class="cm-json-btn">匯出</button>
+                            <button id="cm-btn-imp-sh" class="cm-json-btn">匯入</button>
+                            <button id="cm-btn-exp-cp-sh" class="cm-json-btn">匯出並複製</button>
+                            <button id="cm-btn-imp-ap-sh" class="cm-json-btn">匯入並重整</button>
+                        </div>
+
+                        <div class="cm-json-title">💾 數據助手全設定備份</div>
+                        <textarea id="cm-json-io-full" class="cm-list-area" placeholder="貼上完整備份 JSON..."></textarea>
+                        <div class="cm-json-btn-grid">
+                            <button id="cm-btn-exp-fl" class="cm-json-btn">匯出完整</button>
+                            <button id="cm-btn-imp-fl" class="cm-json-btn">匯入</button>
+                            <button id="cm-btn-exp-cp-fl" class="cm-json-btn">匯出並複製</button>
+                            <button id="cm-btn-imp-ap-fl" class="cm-json-btn">匯入並重整</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 中央舞台 -->
+                <div class="cc-center-stage">
+                    <div class="cm-profile-area">
+                        <div class="cm-profile-header">
+                            <div class="cm-header-row">
+                                <select id="cm-cat-select"></select>
+                                <button id="cm-btn-rename-cat" class="cm-btn-rename">✏️ 重新命名</button>
+                            </div>
+                            <div class="cm-header-row">
+                                <select id="cm-profile-select"></select>
+                                <button id="cm-btn-rename-prof" class="cm-btn-rename">✏️ 重新命名</button>
+                            </div>
+                        </div>
+                        <div class="cm-checkbox-area" style="margin-bottom: 10px;">${cbHtml}</div>
+                        <button id="cm-btn-save-profile" class="cm-btn cm-btn-save" style="margin-bottom:0;">💾 儲存組合勾選狀態</button>
+                    </div>
+
+                    <button id="cm-btn-batch-exec" class="cm-btn cm-btn-batch">⚡ 自動開頁彙整勾選資料</button>
+                    <button id="cm-btn-recopy" class="cm-btn" style="background: #17a2b8; color: #fff; margin-bottom: 8px;">📋 重新複製上次數據</button>
+
+                    <hr style="border: 0.5px solid #444; margin: 5px 0 10px 0; width:100%;">
+                    <div id="cm-smart-info" style="color: #00ff00; font-size: ${ui.f12}px; text-align: center; margin-bottom: 8px;"></div>
+
+                    <div id="cm-single-wrapper" style="display: flex; gap: 8px; margin-bottom: 8px;">
+                        <input type="number" id="cm-override-limit" placeholder="自訂筆數" style="width: 80px; background:#444; color:#fff; border:1px solid #666; border-radius:4px; text-align:center; font-size: ${ui.f13}px;">
+                        <button id="cm-btn-single-exec" class="cm-btn cm-btn-single" style="margin-bottom:0; flex:1;">🎯 抓取當前單一頁面</button>
+                    </div>
+
+                    <button id="cm-panel-close-btn" class="cm-btn" style="background:#444; color:#fff;">✖ 隱藏助手面板</button>
+                    <div id="cm-status-bar">Ready</div>
+                </div>
+
+                <!-- 右抽屜：抓取筆數與名單參數 (徹底解耦左抽屜 Storage Key) -->
+                <div id="drawer-right" class="cc-drawer">
+                    <div class="cc-drawer-content">
+                        <div class="cm-json-title" style="margin-top:0;">📊 抓取筆數限制</div>
+                        <details id="acc-cfg-fin" ${ACC_STATE['acc-cfg-fin'] ? 'open' : ''}>
+                            <summary>財報與營收限制</summary>
+                            <div>
+                                <div class="cm-conf-row">EPS 季/年: <input type="number" id="cfg-eps" class="cm-conf-input" value="${CONFIG.eps}"></div>
+                                <div class="cm-conf-row">營收月數: <input type="number" id="cfg-rev" class="cm-conf-input" value="${CONFIG.revenue}"></div>
+                                <div class="cm-conf-row">損益表季數: <input type="number" id="cfg-income" class="cm-conf-input" value="${CONFIG.income}"></div>
+                                <div class="cm-conf-row">資產負債季數: <input type="number" id="cfg-balance" class="cm-conf-input" value="${CONFIG.balance}"></div>
+                                <div class="cm-conf-row">現金流季數: <input type="number" id="cfg-cashflow" class="cm-conf-input" value="${CONFIG.cashflow}"></div>
+                                <div class="cm-conf-row">三率趨勢: <input type="number" id="cfg-fin" class="cm-conf-input" value="${CONFIG.stockfindetail}"></div>
+                            </div>
+                        </details>
+                        <details id="acc-cfg-etf" ${ACC_STATE['acc-cfg-etf'] ? 'open' : ''}>
+                            <summary>股利與 ETF 限制</summary>
+                            <div>
+                                <div class="cm-conf-row">股利(年配): <input type="number" id="cfg-div-s" class="cm-conf-input" value="${CONFIG.div_stock}"></div>
+                                <div class="cm-conf-row">股利(季月): <input type="number" id="cfg-div-e" class="cm-conf-input" value="${CONFIG.div_etf}"></div>
+                                <div class="cm-conf-row">ETF持股(Top): <input type="number" id="cfg-const" class="cm-conf-input" value="${CONFIG.constituents}"></div>
+                                <div class="cm-conf-row">股利組成: <input type="number" id="cfg-divcomp" class="cm-conf-input" value="${CONFIG.div_comp}"></div>
+                                <div class="cm-conf-row">折溢價天數: <input type="number" id="cfg-disc" class="cm-conf-input" value="${CONFIG.discount}"></div>
+                                <div class="cm-conf-row">回撤天數: <input type="number" id="cfg-drawdown" class="cm-conf-input" value="${CONFIG.drawdown}"></div>
+                            </div>
+                        </details>
+                        <details id="acc-cfg-chip" ${ACC_STATE['acc-cfg-chip'] ? 'open' : ''}>
+                            <summary>籌碼與評價限制</summary>
+                            <div>
+                                <div class="cm-conf-row">PE/PB 河流圖: <input type="number" id="cfg-pepb" class="cm-conf-input" value="${CONFIG.pepb}"></div>
+                                <div class="cm-conf-row">大戶散戶: <input type="number" id="cfg-share" class="cm-conf-input" value="${CONFIG.shareholding}"></div>
+                            </div>
+                        </details>
+
+                        <div class="cm-json-title">📋 股利頻率名單</div>
+                        <div style="font-size: ${ui.f12}px; color: #aaa;">季/月配白名單 (ETF預設為此):</div><textarea id="cfg-white" class="cm-list-area">${escapeHtml(CONFIG.white_list)}</textarea>
+                        <div style="font-size: ${ui.f12}px; color: #aaa; margin-top: 5px;">年配黑名單:</div><textarea id="cfg-black" class="cm-list-area">${escapeHtml(CONFIG.black_list)}</textarea>
+
+                        <button id="cm-cfg-save" class="cm-btn cm-btn-save" style="margin-top: 12px;">💾 儲存抓取參數並重整</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(panel);
+
+
+        document.getElementById('cm-toggle-left').onclick = () => toggleSideDrawer('left');
+        document.getElementById('cm-toggle-right').onclick = () => toggleSideDrawer('right');
+
+
+        if(CONFIG.left_open) toggleSideDrawer('left');
+        if(CONFIG.right_open) toggleSideDrawer('right');
+
+
+        setupDrawerLogic(btnFloat, panel);
+        makeDraggable(panel, document.getElementById('cm-panel-head'));
+
+
+        document.getElementById('cm-panel-close-btn').onclick = () => { panel.style.display = 'none'; btnFloat.style.display = 'flex'; GM_setValue("is_panel_open", false); };
+
+
+        const selCat = document.getElementById('cm-cat-select');
+        const selProf = document.getElementById('cm-profile-select');
+        const checkboxes = document.querySelectorAll('.cm-module-cb');
+        const defStockProfEl = document.getElementById('cfg-def-stock-prof');
+        const defEtfProfEl = document.getElementById('cfg-def-etf-prof');
+
+
+        function populateDefaultProfileOptions() {
+            if (defStockProfEl) {
+                const stockCat = CATEGORIES.find(c => c.catId === 0) || CATEGORIES[0];
+                defStockProfEl.innerHTML = stockCat.profiles.map(p => `<option value="${p.id}" ${p.id === CONFIG.default_stock_prof ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('');
+            }
+            if (defEtfProfEl) {
+                const etfCat = CATEGORIES.find(c => c.catId === 2) || CATEGORIES[CATEGORIES.length - 1];
+                defEtfProfEl.innerHTML = etfCat.profiles.map(p => `<option value="${p.id}" ${p.id === CONFIG.default_etf_prof ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('');
+            }
         }
-    }
 
 
-    // ==========================================
-    // 10. 座標管理、視窗邊界限制與 5px 動靜分離
-    // ==========================================
-    function clampContainerToViewport(container) {
-        if (!container) return;
-        const rect = container.getBoundingClientRect();
-        const vw = window.innerWidth;
-        const vh = window.innerHeight;
-
-
-        let currentLeft = rect.left;
-        let currentTop = rect.top;
-
-
-        if (rect.bottom > vh - 10) {
-            currentTop = Math.max(10, vh - rect.height - 10);
-        }
-        if (currentTop < 10) {
-            currentTop = 10;
-        }
-        if (rect.right > vw - 10) {
-            currentLeft = Math.max(10, vw - rect.width - 10);
-        }
-        if (currentLeft < 10) {
-            currentLeft = 10;
+        function loadCategories() {
+            selCat.innerHTML = CATEGORIES.map(c => `<option value="${c.catId}">${escapeHtml(c.catName)}</option>`).join('');
+            const validCat = CATEGORIES.find(c => c.catId === CONFIG.current_cat_id) ? CONFIG.current_cat_id : CATEGORIES[0].catId;
+            selCat.value = validCat;
+            loadProfilesList(validCat, CONFIG.current_profile_id);
+            populateDefaultProfileOptions();
         }
 
 
-        container.style.left = `${currentLeft}px`;
-        container.style.top = `${currentTop}px`;
-        container.style.right = 'auto';
-        container.style.bottom = 'auto';
-    }
+        function loadProfilesList(catId, profIdToSelect) {
+            const targetCatId = safeInt(catId, 0);
+            const cat = CATEGORIES.find(c => c.catId === targetCatId) || CATEGORIES[0];
+            selProf.innerHTML = cat.profiles.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+            
+            const profExists = cat.profiles.find(p => p.id === profIdToSelect);
+            const activeProfId = profExists ? profIdToSelect : cat.profiles[0].id;
+            selProf.value = activeProfId;
+            
+            loadProfileData(cat.catId, activeProfId);
+        }
 
 
-    function applySavedPosition(container, adapter, isOrb = false) {
-        const savedPos = isOrb ? globalConfig.orbPosition : globalConfig.uiPosition;
-        if (savedPos && savedPos.left && savedPos.top) {
-            Object.assign(container.style, {
-                position: 'fixed',
-                left: savedPos.left,
-                top: savedPos.top,
-                right: 'auto',
-                bottom: 'auto'
+        function loadProfileData(catId, profId) {
+            const cId = safeInt(catId, 0);
+            const pId = safeInt(profId, 0);
+            const cat = CATEGORIES.find(c => c.catId === cId) || CATEGORIES[0];
+            const prof = cat.profiles.find(p => p.id === pId) || cat.profiles[0];
+            
+            checkboxes.forEach(cb => { cb.checked = (prof.modules || []).includes(cb.value); });
+            
+            const kcfg = prof.kline_cfg || { stock_type: "week", stock_limit: 60, market_type: "week", market_limit: 60 };
+            const sType = document.getElementById('cfg-prof-stock-ktype');
+            const sDays = document.getElementById('cfg-prof-stock-kdays');
+            const mType = document.getElementById('cfg-prof-market-ktype');
+            const mDays = document.getElementById('cfg-prof-market-kdays');
+
+
+            if (sType) sType.value = kcfg.stock_type || "week";
+            if (sDays) sDays.value = kcfg.stock_limit || 60;
+            if (mType) mType.value = kcfg.market_type || "week";
+            if (mDays) mDays.value = kcfg.market_limit || 60;
+
+
+            // UI-02: 個股 / ETF 情境感知互斥動態遮罩
+            const accEtf = document.getElementById('acc-etf');
+            const accFinance = document.getElementById('acc-finance');
+            const stockOnlyLabels = document.querySelectorAll('.cm-stock-only-cb');
+
+
+            if (cId === 2) {
+                // ETF 情境
+                if (accEtf) accEtf.style.display = 'block';
+                if (accFinance) accFinance.style.display = 'none';
+                stockOnlyLabels.forEach(el => el.style.display = 'none');
+            } else {
+                // 個股情境
+                if (accEtf) accEtf.style.display = 'none';
+                if (accFinance) accFinance.style.display = 'block';
+                stockOnlyLabels.forEach(el => el.style.display = 'flex');
+            }
+
+
+            CONFIG.current_cat_id = cat.catId; 
+            CONFIG.current_profile_id = prof.id;
+            GM_setValue("cm_current_cat_id", cat.catId); 
+            GM_setValue("cm_current_profile_id", prof.id);
+        }
+
+
+        selCat.onchange = (e) => {
+            userManuallySelectedProfile = true;
+            const nextCatId = safeInt(e.target.value, 0);
+            loadProfilesList(nextCatId, -1);
+        };
+        selProf.onchange = (e) => {
+            userManuallySelectedProfile = true;
+            const cId = safeInt(selCat.value, 0);
+            const pId = safeInt(e.target.value, 0);
+            loadProfileData(cId, pId);
+        };
+
+
+        document.getElementById('cm-btn-rename-cat').onclick = () => {
+            const catId = parseInt(selCat.value, 10);
+            const cat = CATEGORIES.find(c => c.catId === catId);
+            if (cat) {
+                const newName = prompt("請輸入新的大分類名稱：", cat.catName);
+                if (newName && newName.trim() !== "") {
+                    saveCategories((cats) => {
+                        const target = cats.find(c => c.catId === catId);
+                        if (target) target.catName = newName.trim();
+                    });
+                    selCat.options[selCat.selectedIndex].text = newName.trim();
+                    showToast("✅ 名稱已修改");
+                }
+            }
+        };
+
+
+        document.getElementById('cm-btn-rename-prof').onclick = () => {
+            const catId = parseInt(selCat.value, 10);
+            const profId = parseInt(selProf.value, 10);
+            const cat = CATEGORIES.find(c => c.catId === catId);
+            if (cat) {
+                const p = cat.profiles.find(x => x.id === profId);
+                if (p) {
+                    const newName = prompt("請輸入新的群組名稱：", p.name);
+                    if (newName && newName.trim() !== "") {
+                        saveCategories((cats) => {
+                            const c = cats.find(x => x.catId === catId);
+                            const item = c ? c.profiles.find(x => x.id === profId) : null;
+                            if (item) item.name = newName.trim();
+                        });
+                        selProf.options[selProf.selectedIndex].text = newName.trim();
+                        populateDefaultProfileOptions();
+                        showToast("✅ 名稱已修改");
+                    }
+                }
+            }
+        };
+
+
+        document.getElementById('cm-btn-save-profile').onclick = () => {
+            const catId = parseInt(selCat.value, 10); 
+            const profId = parseInt(selProf.value, 10);
+            
+            saveCategories((cats) => {
+                const cat = cats.find(c => c.catId === catId);
+                if (cat) {
+                    const p = cat.profiles.find(x => x.id === profId);
+                    if (p) {
+                        const visibleChecked = Array.from(document.querySelectorAll('.cm-module-cb'))
+                            .filter(cb => cb.offsetParent !== null && cb.checked)
+                            .map(cb => cb.value);
+
+
+                        // 防抹殺規範：保留被遮罩隱藏的原生記憶 (聯集合併)
+                        const hiddenExisting = (p.modules || []).filter(modKey => {
+                            const cb = document.querySelector(`.cm-module-cb[value="${modKey}"]`);
+                            return cb && cb.offsetParent === null;
+                        });
+
+
+                        p.modules = Array.from(new Set([...visibleChecked, ...hiddenExisting]));
+                        p.kline_cfg = {
+                            stock_type: document.getElementById('cfg-prof-stock-ktype')?.value || "week",
+                            stock_limit: safeInt(document.getElementById('cfg-prof-stock-kdays')?.value, 60),
+                            market_type: document.getElementById('cfg-prof-market-ktype')?.value || "week",
+                            market_limit: safeInt(document.getElementById('cfg-prof-market-kdays')?.value, 60)
+                        };
+                    }
+                }
             });
-            requestAnimationFrame(() => clampContainerToViewport(container));
-        } else {
-            const isAiStudio = adapter && adapter.id === 'aistudio';
-            const isMistral = adapter && adapter.id === 'mistral';
+            showToast("✅ 組合設定與 K 線配置已儲存");
+        };
 
 
-            let defaultBottom = '24px';
-            let defaultRight = '24px';
+        loadCategories();
 
 
-            if (isAiStudio) {
-                defaultBottom = '80px';
-                defaultRight = '24px';
-            } else if (isMistral) {
-                defaultBottom = '90px';
-                defaultRight = '28px';
-            }
-
-
-            Object.assign(container.style, {
-                position: 'fixed',
-                bottom: defaultBottom,
-                right: defaultRight,
-                left: 'auto',
-                top: 'auto'
+        document.querySelectorAll('details[id^="acc-"]').forEach(det => {
+            det.addEventListener('toggle', (e) => {
+                const currentState = GM_getValue("cm_acc_state", DEFAULT_ACC_STATE);
+                currentState[e.target.id] = e.target.open;
+                GM_setValue("cm_acc_state", currentState);
             });
+        });
+
+
+        const overrideInput = document.getElementById('cm-override-limit');
+        if (overrideInput) {
+            overrideInput.addEventListener('input', updateVisibility);
         }
+
+
+        document.getElementById('cm-btn-batch-exec').onclick = startRelayBatchScrape;
+        document.getElementById('cm-btn-single-exec').onclick = () => {
+            const modKey = getCurrentPageModule();
+            if (modKey) executeSinglePageScrape(modKey); else showToast("⚠️ 此頁面目前不支援單頁抓取");
+        };
+
+
+        document.getElementById('cm-btn-recopy').onclick = () => {
+            const recopyBtn = document.getElementById('cm-btn-recopy');
+            if (recopyBtn) recopyBtn.classList.remove('cm-btn-pulse');
+
+
+            const lastData = GM_getValue("cm_last_scraped_data", "");
+            if (!lastData) {
+                showToast("⚠️ 尚無暫存的歷史數據");
+                return;
+            }
+
+
+            const lastStockId = GM_getValue("cm_last_scraped_stock_id", "");
+            const currentStockMatch = window.location.pathname.match(/\/stock\/([A-Za-z0-9]+)(?:[\/\?#]|$)/);
+            const currentStockId = currentStockMatch ? currentStockMatch[1].toUpperCase() : "";
+
+
+            GM_setClipboard(lastData);
+            if (navigator.clipboard?.writeText) {
+                navigator.clipboard.writeText(lastData).catch(() => {});
+            }
+
+
+            if (currentStockId && lastStockId && currentStockId !== lastStockId) {
+                showToast(`⚠️ 注意：正在重新複製不同標的 (${lastStockId}) 之數據`);
+            } else {
+                showToast("✅ 已重新複製上次數據");
+            }
+        };
+
+
+        document.getElementById('cm-btn-sync-sheet').onclick = () => {
+            const urlInput = document.getElementById('cfg-sync-sheet-url');
+            const targetUrl = urlInput ? urlInput.value.trim() : CONFIG.sync_sheet_url;
+            if (targetUrl) {
+                GM_setValue("cm_sync_sheet_url", targetUrl);
+                CONFIG.sync_sheet_url = targetUrl;
+            }
+            syncGoogleSheetLists(targetUrl);
+        };
+
+
+        // 左抽屜獨立系統設定儲存入口 (儲存全域外觀、熱鍵、預設組合與試算表網址)
+        document.getElementById('cm-cfg-save-sys').onclick = () => {
+            GM_setValue("font_offset", safeInt(document.getElementById('cfg-font').value, 0));
+            GM_setValue("isExpanded", document.getElementById('cfg-expanded').value === 'true');
+            GM_setValue("cm_drawer_side", document.getElementById('cfg-drawer-side').value);
+            GM_setValue("cm_kline_sort", document.getElementById('cfg-kline-sort').value);
+            GM_setValue("cm_hk_single", document.getElementById('cfg-hk-single').value.trim());
+            GM_setValue("cm_hk_batch", document.getElementById('cfg-hk-batch').value.trim());
+            GM_setValue("cm_hk_recopy", document.getElementById('cfg-hk-recopy').value.trim());
+            
+            const sheetUrlVal = document.getElementById('cfg-sync-sheet-url')?.value.trim() || DEFAULT_SHEET_URL;
+            GM_setValue("cm_sync_sheet_url", sheetUrlVal);
+
+
+            const defStockVal = safeInt(document.getElementById('cfg-def-stock-prof')?.value, 4);
+            const defEtfVal = safeInt(document.getElementById('cfg-def-etf-prof')?.value, 10);
+            GM_setValue("cm_default_stock_prof", defStockVal);
+            GM_setValue("cm_default_etf_prof", defEtfVal);
+
+
+            GM_setValue("is_panel_open", true);
+            location.reload();
+        };
+
+
+        // 右抽屜抓取筆數與名單儲存 (徹底解耦，絕不覆蓋左抽屜鍵值)
+        document.getElementById('cm-cfg-save').onclick = () => {
+            GM_setValue("limit_eps", safeInt(document.getElementById('cfg-eps').value, 12));
+            GM_setValue("limit_rev", safeInt(document.getElementById('cfg-rev').value, 12));
+            GM_setValue("limit_income", safeInt(document.getElementById('cfg-income').value, 8));
+            GM_setValue("limit_balance", safeInt(document.getElementById('cfg-balance').value, 8));
+            GM_setValue("limit_cashflow", safeInt(document.getElementById('cfg-cashflow').value, 12));
+            GM_setValue("limit_div_stock", safeInt(document.getElementById('cfg-div-s').value, 7));
+            GM_setValue("limit_div_etf", safeInt(document.getElementById('cfg-div-e').value, 24));
+            GM_setValue("limit_pepb", safeInt(document.getElementById('cfg-pepb').value, 60));
+            GM_setValue("limit_share", safeInt(document.getElementById('cfg-share').value, 20));
+            GM_setValue("limit_fin", safeInt(document.getElementById('cfg-fin').value, 12));
+            GM_setValue("limit_divcomp", safeInt(document.getElementById('cfg-divcomp').value, 12));
+            GM_setValue("limit_const", safeInt(document.getElementById('cfg-const').value, 10));
+            GM_setValue("limit_discount", safeInt(document.getElementById('cfg-disc').value, 10));
+            GM_setValue("limit_drawdown", safeInt(document.getElementById('cfg-drawdown').value, 10));
+            GM_setValue("white_list", document.getElementById('cfg-white').value.trim());
+            GM_setValue("black_list", document.getElementById('cfg-black').value.trim());
+
+
+            GM_setValue("is_panel_open", true);
+            location.reload();
+        };
+
+
+        const getSharedJson = () => ({
+            limit_div_stock: safeInt(document.getElementById('cfg-div-s').value, 7),
+            limit_div_etf: safeInt(document.getElementById('cfg-div-e').value, 24),
+            white_list: document.getElementById('cfg-white').value.trim(),
+            black_list: document.getElementById('cfg-black').value.trim()
+        });
+
+
+        const getFullJson = () => ({
+            font_offset: safeInt(document.getElementById('cfg-font').value, 0),
+            kline_sort: document.getElementById('cfg-kline-sort').value,
+            sync_sheet_url: document.getElementById('cfg-sync-sheet-url')?.value.trim() || CONFIG.sync_sheet_url,
+            default_stock_prof: safeInt(document.getElementById('cfg-def-stock-prof')?.value, 4),
+            default_etf_prof: safeInt(document.getElementById('cfg-def-etf-prof')?.value, 10),
+            limit_eps: safeInt(document.getElementById('cfg-eps').value, 12),
+            limit_rev: safeInt(document.getElementById('cfg-rev').value, 12),
+            limit_income: safeInt(document.getElementById('cfg-income').value, 8),
+            limit_balance: safeInt(document.getElementById('cfg-balance').value, 8),
+            limit_cashflow: safeInt(document.getElementById('cfg-cashflow').value, 12),
+            limit_div_stock: safeInt(document.getElementById('cfg-div-s').value, 7),
+            limit_div_etf: safeInt(document.getElementById('cfg-div-e').value, 24),
+            limit_pepb: safeInt(document.getElementById('cfg-pepb').value, 60),
+            limit_share: safeInt(document.getElementById('cfg-share').value, 20),
+            limit_fin: safeInt(document.getElementById('cfg-fin').value, 12),
+            limit_divcomp: safeInt(document.getElementById('cfg-divcomp').value, 12),
+            limit_const: safeInt(document.getElementById('cfg-const').value, 10),
+            limit_discount: safeInt(document.getElementById('cfg-disc').value, 10),
+            limit_drawdown: safeInt(document.getElementById('cfg-drawdown').value, 10),
+            white_list: document.getElementById('cfg-white').value.trim(),
+            black_list: document.getElementById('cfg-black').value.trim(),
+            hotkey_single: document.getElementById('cfg-hk-single').value.trim(),
+            hotkey_batch: document.getElementById('cfg-hk-batch').value.trim(),
+            hotkey_recopy: document.getElementById('cfg-hk-recopy').value.trim(),
+            categories: CATEGORIES
+        });
+
+
+        const applyJsonData = (data, isFull = false) => {
+            if (data.limit_div_stock !== undefined) { const val = safeInt(data.limit_div_stock, 7); GM_setValue("limit_div_stock", val); document.getElementById('cfg-div-s').value = val; }
+            if (data.limit_div_etf !== undefined) { const val = safeInt(data.limit_div_etf, 24); GM_setValue("limit_div_etf", val); document.getElementById('cfg-div-e').value = val; }
+            if (data.white_list !== undefined) { const val = data.white_list.trim(); GM_setValue("white_list", val); document.getElementById('cfg-white').value = val; }
+            if (data.black_list !== undefined) { const val = data.black_list.trim(); GM_setValue("black_list", val); document.getElementById('cfg-black').value = val; }
+
+
+            if (isFull) {
+                if (data.font_offset !== undefined) { const val = safeInt(data.font_offset, 0); GM_setValue("font_offset", val); document.getElementById('cfg-font').value = val; }
+                if (data.kline_sort !== undefined) { GM_setValue("cm_kline_sort", data.kline_sort); document.getElementById('cfg-kline-sort').value = data.kline_sort; }
+                if (data.sync_sheet_url !== undefined) { GM_setValue("cm_sync_sheet_url", data.sync_sheet_url); if (document.getElementById('cfg-sync-sheet-url')) document.getElementById('cfg-sync-sheet-url').value = data.sync_sheet_url; }
+                if (data.default_stock_prof !== undefined) { GM_setValue("cm_default_stock_prof", safeInt(data.default_stock_prof, 4)); if (document.getElementById('cfg-def-stock-prof')) document.getElementById('cfg-def-stock-prof').value = data.default_stock_prof; }
+                if (data.default_etf_prof !== undefined) { GM_setValue("cm_default_etf_prof", safeInt(data.default_etf_prof, 10)); if (document.getElementById('cfg-def-etf-prof')) document.getElementById('cfg-def-etf-prof').value = data.default_etf_prof; }
+                if (data.limit_eps !== undefined) { const val = safeInt(data.limit_eps, 12); GM_setValue("limit_eps", val); document.getElementById('cfg-eps').value = val; }
+                if (data.limit_rev !== undefined) { const val = safeInt(data.limit_rev, 12); GM_setValue("limit_rev", val); document.getElementById('cfg-rev').value = val; }
+                if (data.limit_income !== undefined) { const val = safeInt(data.limit_income, 8); GM_setValue("limit_income", val); if (document.getElementById('cfg-income')) document.getElementById('cfg-income').value = val; }
+                if (data.limit_balance !== undefined) { const val = safeInt(data.limit_balance, 8); GM_setValue("limit_balance", val); if (document.getElementById('cfg-balance')) document.getElementById('cfg-balance').value = val; }
+                if (data.limit_cashflow !== undefined) { const val = safeInt(data.limit_cashflow, 12); GM_setValue("limit_cashflow", val); document.getElementById('cfg-cashflow').value = val; }
+                if (data.limit_pepb !== undefined) { const val = safeInt(data.limit_pepb, 60); GM_setValue("limit_pepb", val); document.getElementById('cfg-pepb').value = val; }
+                if (data.limit_share !== undefined) { const val = safeInt(data.limit_share, 20); GM_setValue("limit_share", val); document.getElementById('cfg-share').value = val; }
+                if (data.limit_fin !== undefined) { const val = safeInt(data.limit_fin, 12); GM_setValue("limit_fin", val); document.getElementById('cfg-fin').value = val; }
+                if (data.limit_divcomp !== undefined) { const val = safeInt(data.limit_divcomp, 12); GM_setValue("limit_divcomp", val); document.getElementById('cfg-divcomp').value = val; }
+                if (data.limit_const !== undefined) { const val = safeInt(data.limit_const, 10); GM_setValue("limit_const", val); document.getElementById('cfg-const').value = val; }
+                if (data.limit_discount !== undefined) { const val = safeInt(data.limit_discount, 10); GM_setValue("limit_discount", val); document.getElementById('cfg-disc').value = val; }
+                if (data.limit_drawdown !== undefined) { const val = safeInt(data.limit_drawdown, 10); GM_setValue("limit_drawdown", val); if (document.getElementById('cfg-drawdown')) document.getElementById('cfg-drawdown').value = val; }
+                if (data.hotkey_single !== undefined) { const val = data.hotkey_single.trim(); GM_setValue("cm_hk_single", val); document.getElementById('cfg-hk-single').value = val; }
+                if (data.hotkey_batch !== undefined) { const val = data.hotkey_batch.trim(); GM_setValue("cm_hk_batch", val); document.getElementById('cfg-hk-batch').value = val; }
+                if (data.hotkey_recopy !== undefined) { const val = data.hotkey_recopy.trim(); GM_setValue("cm_hk_recopy", val); document.getElementById('cfg-hk-recopy').value = val; }
+
+
+                if (data.categories !== undefined && Array.isArray(data.categories)) { 
+                    saveCategories(() => { CATEGORIES = data.categories; });
+                    loadCategories(); 
+                }
+            }
+        };
+
+
+        document.getElementById('cm-btn-exp-sh').onclick = () => { const str = JSON.stringify(getSharedJson(), null, 2); document.getElementById('cm-json-io-shared').value = str; showToast("✅ 共用設定已匯出"); };
+        document.getElementById('cm-btn-exp-cp-sh').onclick = () => { const str = JSON.stringify(getSharedJson(), null, 2); document.getElementById('cm-json-io-shared').value = str; GM_setClipboard(str); showToast("✅ 共用設定已匯出並複製"); };
+        document.getElementById('cm-btn-imp-sh').onclick = () => { try { const str = document.getElementById('cm-json-io-shared').value; if(!str) return showToast("⚠️ 請先貼上 JSON"); applyJsonData(JSON.parse(str), false); showToast("✅ 匯入成功"); } catch(e) { showToast("⚠️ 格式錯誤"); } };
+        document.getElementById('cm-btn-imp-ap-sh').onclick = () => { try { const str = document.getElementById('cm-json-io-shared').value; if(!str) return showToast("⚠️ 請先貼上 JSON"); applyJsonData(JSON.parse(str), false); setTimeout(()=>location.reload(), 500); } catch(e) { showToast("⚠️ 格式錯誤"); } };
+
+
+        document.getElementById('cm-btn-exp-fl').onclick = () => { const str = JSON.stringify(getFullJson(), null, 2); document.getElementById('cm-json-io-full').value = str; showToast("✅ 完整設定已匯出"); };
+        document.getElementById('cm-btn-exp-cp-fl').onclick = () => { const str = JSON.stringify(getFullJson(), null, 2); document.getElementById('cm-json-io-full').value = str; GM_setClipboard(str); showToast("✅ 完整設定已匯出並複製"); };
+        document.getElementById('cm-btn-imp-fl').onclick = () => { try { const str = document.getElementById('cm-json-io-full').value; if(!str) return showToast("⚠️ 請先貼上 JSON"); applyJsonData(JSON.parse(str), true); showToast("✅ 匯入成功"); } catch(e) { showToast("⚠️ 格式錯誤"); } };
+        document.getElementById('cm-btn-imp-ap-fl').onclick = () => { try { const str = document.getElementById('cm-json-io-full').value; if(!str) return showToast("⚠️ 請先貼上 JSON"); applyJsonData(JSON.parse(str), true); setTimeout(()=>location.reload(), 500); } catch(e) { showToast("⚠️ 格式錯誤"); } };
     }
 
 
-    function resetUiPosition() {
-        delete globalConfig.uiPosition;
-        delete globalConfig.orbPosition;
-        delete globalConfig.toastPosition;
-        Storage.set(globalConfig);
-
-
-        const container = document.getElementById(UI_CONTAINER_ID);
-        const orb = document.getElementById(FLOATING_ORB_ID);
-        const toast = document.getElementById('ai-copy-toast');
-        const adapter = getCurrentAdapter();
-
-
-        if (container) applySavedPosition(container, adapter, false);
-        if (orb) applySavedPosition(orb, adapter, true);
-        if (toast) {
-            applyToastPosition(toast);
-            toast.style.transform = 'none';
-        }
-
-
-        showToast('📍 浮動列、小光球與 Toast 位置已完全重置！');
+    function setupDrawerLogic(btn, panel) {
+        let startY = 0, startTop = 0, hasMoved = false;
+        btn.onmousedown = (e) => { e.preventDefault(); hasMoved = false; startY = e.clientY; startTop = btn.offsetTop; document.onmousemove = (ev) => { hasMoved = true; btn.style.top = Math.max(0, Math.min(startTop + (ev.clientY - startY), window.innerHeight - 55)) + 'px'; }; document.onmouseup = () => { document.onmousemove = null; document.onmouseup = null; GM_setValue("drawer_top", btn.offsetTop); }; };
+        btn.onclick = () => { if (!hasMoved) { btn.style.display = 'none'; panel.style.display = 'flex'; GM_setValue("is_panel_open", true); } };
     }
 
 
-    let isPointerDragging = false;
+    function makeDraggable(element, handle) {
+        let p1=0, p2=0, p3=0, p4=0;
+        handle.onmousedown = (e) => {
+            if(e.target.tagName.toLowerCase() === 'button') return;
+            e.preventDefault(); p3 = e.clientX; p4 = e.clientY;
+            document.onmouseup = () => { 
+                document.onmousemove = null; 
+                document.onmouseup = null; 
+                // FIX-02: 嚴格數值兜底
+                const curTop = Number.isFinite(parseFloat(element.style.top)) ? parseFloat(element.style.top) : 150;
+                const curLeft = Number.isFinite(parseFloat(element.style.left)) ? parseFloat(element.style.left) : 200;
+                GM_setValue("panel_pos", {top: curTop, left: curLeft}); 
+            };
+            document.onmousemove = (ev) => {
+                p1 = p3 - ev.clientX; p2 = p4 - ev.clientY; p3 = ev.clientX; p4 = ev.clientY;
+                let newTop = element.offsetTop - p2;
+                let newLeft = element.offsetLeft - p1;
+                
+                // 限制 Y 軸與 X 軸夾緊防禦
+                const maxTop = window.innerHeight - 40;
+                const maxLeft = window.innerWidth - element.offsetWidth;
+                element.style.top = Math.max(0, Math.min(newTop, maxTop)) + "px";
+                element.style.left = Math.max(0, Math.min(newLeft, Math.max(0, maxLeft))) + "px";
+            };
+        };
+    }
 
 
-    function setupDraggableUI(container, dragHandle, isOrb = false, onClickCallback = null, isToast = false) {
-        let isMoving = false;
-        let startX = 0, startY = 0;
-        let initialLeft = 0, initialTop = 0;
+    // [ROUTE-01] URL 智慧嗅探與零點擊自動路由
+    function applyAutoRoute() {
+        const pathname = window.location.pathname;
+        if (pathname.includes('/watchlist') || pathname.includes('/market')) return;
 
 
-        function onMouseMove(moveEvent) {
-            const dx = moveEvent.clientX - startX;
-            const dy = moveEvent.clientY - startY;
+        const stockMatch = pathname.match(/\/stock\/([A-Za-z0-9]+)(?:[\/\?#]|$)/);
+        const stockId = stockMatch ? stockMatch[1].toUpperCase() : "";
+        if (!stockId) return;
 
 
-            if (!isMoving && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
-                isMoving = true;
-                isPointerDragging = true;
-                container.classList.add('ai-copy-is-dragging');
-            }
+        // 若使用者在同頁面手動點選 Profile 下拉選單，手動優先
+        if (stockId === lastSniffedStockId && userManuallySelectedProfile) return;
 
 
-            if (isMoving) {
-                let newLeft = initialLeft + dx;
-                let newTop = initialTop + dy;
+        if (stockId !== lastSniffedStockId) {
+            lastSniffedStockId = stockId;
+            userManuallySelectedProfile = false;
 
 
-                container.style.left = `${newLeft}px`;
-                container.style.top = `${newTop}px`;
-                container.style.right = 'auto';
-                container.style.bottom = 'auto';
+            let targetCatId = 0;
+            let targetProfId = safeInt(GM_getValue("cm_default_stock_prof", 4), 4);
 
 
-                clampContainerToViewport(container);
-            }
-        }
+            if (stockId.startsWith("00")) {
+                targetCatId = 2; // ETF專區
+                const defaultEtfProf = safeInt(GM_getValue("cm_default_etf_prof", 10), 10);
 
 
-        function onMouseUp() {
-            if (!isToast) {
-                container.classList.remove('ai-copy-is-dragging');
-            }
-
-
-            window.removeEventListener('mousemove', onMouseMove);
-            window.removeEventListener('mouseup', onMouseUp);
-
-
-            setTimeout(() => { isPointerDragging = false; }, 50);
-
-
-            if (isMoving) {
-                const preventClickOnce = (clickEvent) => {
-                    clickEvent.stopPropagation();
-                    clickEvent.preventDefault();
-                };
-                window.addEventListener('click', preventClickOnce, { capture: true, once: true });
-
-
-                clampContainerToViewport(container);
-
-
-                const finalRect = container.getBoundingClientRect();
-                const newPos = {
-                    left: `${finalRect.left}px`,
-                    top: `${finalRect.top}px`
-                };
-
-
-                if (isOrb) {
-                    globalConfig.orbPosition = newPos;
-                } else if (isToast) {
-                    globalConfig.toastPosition = newPos;
+                if (stockId.endsWith('B') || stockId.endsWith('D') || stockId.endsWith('T')) {
+                    targetProfId = 12; // 債券型 ETF 分析
+                } else if (stockId.endsWith('A')) {
+                    targetProfId = 13; // 主動式 / 產業 ETF
                 } else {
-                    globalConfig.uiPosition = newPos;
+                    const highDivList = GM_getValue("cm_etf_high_dividend_list", ["0056", "00878", "00919"]);
+                    const marketCapList = GM_getValue("cm_etf_market_cap_list", ["0050", "006208", "009810"]);
+
+
+                    if (Array.isArray(highDivList) && highDivList.includes(stockId)) {
+                        targetProfId = 11; // 高股息 ETF 分析
+                    } else if (Array.isArray(marketCapList) && marketCapList.includes(stockId)) {
+                        targetProfId = 10; // 市值型 ETF 分析
+                    } else {
+                        targetProfId = defaultEtfProf;
+                    }
                 }
-                Storage.set(globalConfig);
-                if (!isToast) showToast('📍 位置已儲存！');
             } else {
-                if (typeof onClickCallback === 'function' && isOrb) {
-                    onClickCallback();
-                }
-            }
-        }
-
-
-        dragHandle.addEventListener('mousedown', (e) => {
-            if (['INPUT', 'TEXTAREA', 'SELECT', 'OPTION'].includes(e.target.tagName)) return;
-            if (e.button !== 0) return;
-
-
-            window.removeEventListener('mousemove', onMouseMove);
-            window.removeEventListener('mouseup', onMouseUp);
-
-
-            isMoving = false;
-            isPointerDragging = false;
-            startX = e.clientX;
-            startY = e.clientY;
-
-
-            // 若為 Toast 拖曳，前置清除 transform 避免與 left/top 雙重疊加卡死
-            if (isToast) {
-                container.style.transform = 'none';
+                targetCatId = 0; // 存股
+                targetProfId = safeInt(GM_getValue("cm_default_stock_prof", 4), 4);
             }
 
 
-            const rect = container.getBoundingClientRect();
-            initialLeft = rect.left;
-            initialTop = rect.top;
-
-
-            container.style.left = `${initialLeft}px`;
-            container.style.top = `${initialTop}px`;
-            container.style.right = 'auto';
-            container.style.bottom = 'auto';
-
-
-            window.addEventListener('mousemove', onMouseMove);
-            window.addEventListener('mouseup', onMouseUp);
-        });
-    }
-
-
-    // ==========================================
-    // 11. 自包含居中 7 分頁雙欄 Modal 管理器
-    // ==========================================
-    let currentPrefixTab = 'aistudio';
-    let currentSuffixTab = 'aistudio';
-    let currentModuleTab = 'module_1';
-
-
-    function openManager() {
-        if (document.getElementById(MODAL_OVERLAY_ID)) return;
-
-
-        const overlay = document.createElement('div');
-        overlay.id = MODAL_OVERLAY_ID;
-
-
-        const modal = document.createElement('div');
-        modal.id = 'ai-copy-modal';
-
-
-        // 1. Header
-        const header = document.createElement('div');
-        header.className = 'ai-copy-modal-header';
-
-
-        const title = document.createElement('span');
-        title.textContent = '⚙️ AI 雙模式乾淨複製器 - 參數設定管理器 v4.3.4';
-
-
-        const btnCloseX = document.createElement('button');
-        btnCloseX.className = 'ai-copy-close-x';
-        btnCloseX.textContent = '✕';
-        btnCloseX.title = '關閉';
-        btnCloseX.onclick = () => overlay.remove();
-
-
-        header.appendChild(title);
-        header.appendChild(btnCloseX);
-
-
-        // 2. Body (雙欄)
-        const body = document.createElement('div');
-        body.className = 'ai-copy-modal-body';
-
-
-        const sidebar = document.createElement('div');
-        sidebar.className = 'ai-copy-modal-sidebar-tabs';
-
-
-        const contentPane = document.createElement('div');
-        contentPane.className = 'ai-copy-modal-content-pane';
-
-
-        const menuTabs = [
-            { id: 'pane_prefix', label: '🏷️ 前綴設定' },
-            { id: 'pane_suffix', label: '🔚 後綴封尾' },
-            { id: 'pane_reorder', label: '🔢 站點排序' },
-            { id: 'pane_rules', label: '🧹 排除規則' },
-            { id: 'pane_ui', label: '🎨 介面排版' },
-            { id: 'pane_aistudio', label: '⚡ AI Studio 專用' },
-            { id: 'pane_cloud', label: '🌐 雲端匯出' }
-        ];
-
-
-        let activePaneId = 'pane_prefix';
-        const sideTabBtns = {};
-
-
-        function renderActivePane() {
-            menuTabs.forEach(t => {
-                if (sideTabBtns[t.id]) {
-                    if (t.id === activePaneId) sideTabBtns[t.id].classList.add('active');
-                    else sideTabBtns[t.id].classList.remove('active');
-                }
-            });
-
-
-            while (contentPane.firstChild) contentPane.removeChild(contentPane.firstChild);
-
-
-            if (activePaneId === 'pane_prefix') renderPanePrefix(contentPane);
-            else if (activePaneId === 'pane_suffix') renderPaneSuffix(contentPane);
-            else if (activePaneId === 'pane_reorder') renderPaneReorder(contentPane);
-            else if (activePaneId === 'pane_rules') renderPaneRules(contentPane);
-            else if (activePaneId === 'pane_ui') renderPaneUI(contentPane);
-            else if (activePaneId === 'pane_aistudio') renderPaneAiStudio(contentPane);
-            else if (activePaneId === 'pane_cloud') renderPaneCloud(contentPane);
-        }
-
-
-        menuTabs.forEach(t => {
-            const btn = document.createElement('button');
-            btn.className = 'ai-copy-side-tab';
-            btn.textContent = t.label;
-            btn.onclick = () => {
-                activePaneId = t.id;
-                renderActivePane();
-            };
-            sideTabBtns[t.id] = btn;
-            sidebar.appendChild(btn);
-        });
-
-
-        // 3. Footer
-        const footer = document.createElement('div');
-        footer.className = 'ai-copy-modal-footer';
-
-
-        const btnDone = document.createElement('button');
-        btnDone.className = 'ai-copy-btn-primary';
-        btnDone.textContent = '完成並關閉';
-        btnDone.onclick = () => overlay.remove();
-
-
-        footer.appendChild(btnDone);
-
-
-        body.appendChild(sidebar);
-        body.appendChild(contentPane);
-        modal.appendChild(header);
-        modal.appendChild(body);
-        modal.appendChild(footer);
-        overlay.appendChild(modal);
-        document.body.appendChild(overlay);
-
-
-        overlay.onclick = (e) => {
-            if (e.target === overlay) overlay.remove();
-        };
-
-
-        renderActivePane();
-    }
-
-
-    function createProfileSelectorRow(onProfileChangeCallback) {
-        const row = document.createElement('div');
-        row.style.cssText = 'display: flex; gap: 8px; align-items: center; justify-content: space-between;';
-
-
-        const select = document.createElement('select');
-        Object.assign(select.style, {
-            flex: '1',
-            backgroundColor: '#2d2f31',
-            color: '#8ab4f8',
-            border: '1px solid #5f6368',
-            borderRadius: '4px',
-            padding: '6px 8px',
-            fontSize: '13px',
-            fontWeight: '600',
-            cursor: 'pointer'
-        });
-
-
-        function populateOptions() {
-            while (select.firstChild) select.removeChild(select.firstChild);
-            Object.values(globalConfig.profiles || {}).forEach(p => {
-                if (!p) return;
-                const opt = document.createElement('option');
-                opt.value = p.id;
-                opt.textContent = p.name || p.id;
-                if (p.id === globalConfig.activeProfileId) opt.selected = true;
-                select.appendChild(opt);
-            });
-        }
-        populateOptions();
-
-
-        select.onchange = () => {
-            globalConfig.activeProfileId = select.value;
-            Storage.set(globalConfig);
-            if (typeof onProfileChangeCallback === 'function') onProfileChangeCallback();
-        };
-
-
-        const btnRename = document.createElement('button');
-        btnRename.textContent = '✏️ 重命名';
-        btnRename.className = 'ai-copy-btn-secondary';
-        btnRename.onclick = () => {
-            const activeP = globalConfig.profiles?.[globalConfig.activeProfileId];
-            if (!activeP) return;
-            const newName = prompt('請輸入此模式的新名稱：', activeP.name);
-            if (newName && newName.trim()) {
-                activeP.name = newName.trim();
-                Storage.set(globalConfig);
-                populateOptions();
-                showToast('✅ 模式名稱已更新！');
-            }
-        };
-
-
-        row.appendChild(select);
-        row.appendChild(btnRename);
-        return row;
-    }
-
-
-    function renderPanePrefix(container) {
-        const profileRow = createProfileSelectorRow(() => renderPanePrefix(container));
-        container.appendChild(profileRow);
-
-
-        const curP = globalConfig.profiles[globalConfig.activeProfileId];
-
-
-        const enableLabel = document.createElement('label');
-        enableLabel.style.cssText = 'display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; font-size: 13px; color: #e8eaed;';
-        const enableCheck = document.createElement('input');
-        enableCheck.type = 'checkbox';
-        enableCheck.checked = curP.enablePrefix !== false;
-        enableCheck.onchange = () => {
-            curP.enablePrefix = enableCheck.checked;
-            Storage.set(globalConfig);
-            showToast(enableCheck.checked ? '✅ 已啟用前綴功能' : '⏸️ 已停用前綴功能');
-        };
-        const enableTxt = document.createElement('span');
-        enableTxt.textContent = '啟用此模式之前綴 (Prefix)';
-        enableLabel.appendChild(enableCheck);
-        enableLabel.appendChild(enableTxt);
-        container.appendChild(enableLabel);
-
-
-        const tabsRow = document.createElement('div');
-        tabsRow.style.cssText = 'display: flex; flex-wrap: wrap; gap: 4px; background: #1e1f20; padding: 6px; border-radius: 6px; border: 1px solid #5f6368; box-sizing: border-box;';
-
-
-        const tabBtns = {};
-        const siteOrder = globalConfig.siteTabOrder || ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'claude', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
-        if (!siteOrder.includes(currentPrefixTab)) currentPrefixTab = siteOrder[0];
-
-
-        const textarea = document.createElement('textarea');
-        textarea.rows = 4;
-        textarea.placeholder = '請輸入前綴字串，支援換行 (如: 1st)';
-        Object.assign(textarea.style, {
-            width: '100%',
-            backgroundColor: '#2d2f31',
-            color: '#f9fafb',
-            border: '1px solid #5f6368',
-            borderRadius: '4px',
-            padding: '8px',
-            fontSize: '12px',
-            resize: 'vertical',
-            boxSizing: 'border-box',
-            fontFamily: 'monospace'
-        });
-
-
-        function refreshActiveSiteData() {
-            textarea.value = (curP.prefixes && curP.prefixes[currentPrefixTab]) || '';
-            siteOrder.forEach(siteId => {
-                const btn = tabBtns[siteId];
-                if (btn) {
-                    if (siteId === currentPrefixTab) {
-                        btn.style.background = '#8ab4f8';
-                        btn.style.color = '#202124';
+            const selCat = document.getElementById('cm-cat-select');
+            if (selCat) {
+                selCat.value = targetCatId;
+                const cat = CATEGORIES.find(c => c.catId === targetCatId) || CATEGORIES[0];
+                const selProf = document.getElementById('cm-profile-select');
+                if (selProf) {
+                    selProf.innerHTML = cat.profiles.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+                    const profExists = cat.profiles.find(p => p.id === targetProfId);
+                    const activeProfId = profExists ? targetProfId : cat.profiles[0].id;
+                    selProf.value = activeProfId;
+                    
+                    // 執行切換並同步遮罩
+                    const checkboxes = document.querySelectorAll('.cm-module-cb');
+                    const prof = cat.profiles.find(p => p.id === activeProfId) || cat.profiles[0];
+                    checkboxes.forEach(cb => { cb.checked = (prof.modules || []).includes(cb.value); });
+                    
+                    const kcfg = prof.kline_cfg || { stock_type: "week", stock_limit: 60, market_type: "week", market_limit: 60 };
+                    const sType = document.getElementById('cfg-prof-stock-ktype');
+                    const sDays = document.getElementById('cfg-prof-stock-kdays');
+                    const mType = document.getElementById('cfg-prof-market-ktype');
+                    const mDays = document.getElementById('cfg-prof-market-kdays');
+
+
+                    if (sType) sType.value = kcfg.stock_type || "week";
+                    if (sDays) sDays.value = kcfg.stock_limit || 60;
+                    if (mType) mType.value = kcfg.market_type || "week";
+                    if (mDays) mDays.value = kcfg.market_limit || 60;
+
+
+                    const accEtf = document.getElementById('acc-etf');
+                    const accFinance = document.getElementById('acc-finance');
+                    const stockOnlyLabels = document.querySelectorAll('.cm-stock-only-cb');
+
+
+                    if (targetCatId === 2) {
+                        if (accEtf) accEtf.style.display = 'block';
+                        if (accFinance) accFinance.style.display = 'none';
+                        stockOnlyLabels.forEach(el => el.style.display = 'none');
                     } else {
-                        btn.style.background = 'transparent';
-                        btn.style.color = '#9aa0a6';
+                        if (accEtf) accEtf.style.display = 'none';
+                        if (accFinance) accFinance.style.display = 'block';
+                        stockOnlyLabels.forEach(el => el.style.display = 'flex');
                     }
+
+
+                    CONFIG.current_cat_id = cat.catId; 
+                    CONFIG.current_profile_id = prof.id;
+                    GM_setValue("cm_current_cat_id", cat.catId); 
+                    GM_setValue("cm_current_profile_id", prof.id);
                 }
-            });
+            }
         }
-
-
-        siteOrder.forEach(siteId => {
-            const def = ALL_SITE_DEFS[siteId] || { id: siteId, label: siteId };
-            const btn = document.createElement('button');
-            btn.textContent = def.label;
-            btn.style.cssText = 'flex: 1 1 calc(20% - 4px); min-width: 68px; height: 28px; border: none; padding: 0 4px; font-size: 11px; font-weight: bold; border-radius: 4px; cursor: pointer; transition: all 0.2s; white-space: nowrap; text-align: center;';
-            btn.onclick = () => {
-                currentPrefixTab = siteId;
-                refreshActiveSiteData();
-            };
-            tabBtns[siteId] = btn;
-            tabsRow.appendChild(btn);
-        });
-
-
-        textarea.oninput = () => {
-            if (!curP.prefixes) curP.prefixes = {};
-            curP.prefixes[currentPrefixTab] = textarea.value;
-            Storage.set(globalConfig);
-        };
-
-
-        refreshActiveSiteData();
-        container.appendChild(tabsRow);
-        container.appendChild(textarea);
     }
 
 
-    function renderPaneSuffix(container) {
-        const profileRow = createProfileSelectorRow(() => renderPaneSuffix(container));
-        container.appendChild(profileRow);
+    function updateVisibility() {
+        const modKey = getCurrentPageModule();
+        const singleWrapper = document.getElementById('cm-single-wrapper');
+        const singleBtn = document.getElementById('cm-btn-single-exec');
+        const batchBtn = document.getElementById('cm-btn-batch-exec');
+        const info = document.getElementById('cm-smart-info');
 
 
-        const curP = globalConfig.profiles[globalConfig.activeProfileId];
+        applyAutoRoute();
 
 
-        const enableLabel = document.createElement('label');
-        enableLabel.style.cssText = 'display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; font-size: 13px; color: #e8eaed;';
-        const enableCheck = document.createElement('input');
-        enableCheck.type = 'checkbox';
-        enableCheck.checked = curP.enableSuffix !== false;
-        enableCheck.onchange = () => {
-            curP.enableSuffix = enableCheck.checked;
-            Storage.set(globalConfig);
-            showToast(enableCheck.checked ? '✅ 已啟用後綴功能' : '⏸️ 已停用後綴功能');
-        };
-        const enableTxt = document.createElement('span');
-        enableTxt.textContent = '啟用此模式之後綴 (Suffix - 預設雙換行防粘黏)';
-        enableLabel.appendChild(enableCheck);
-        enableLabel.appendChild(enableTxt);
-        container.appendChild(enableLabel);
+        if (singleWrapper && singleBtn) {
+            if (modKey) {
+                singleWrapper.style.display = 'flex';
+                singleBtn.innerText = `🎯 抓取單頁：${MODULE_REGISTRY[modKey].label}`;
 
 
-        const tabsRow = document.createElement('div');
-        tabsRow.style.cssText = 'display: flex; flex-wrap: wrap; gap: 4px; background: #1e1f20; padding: 6px; border-radius: 6px; border: 1px solid #5f6368; box-sizing: border-box;';
-
-
-        const tabBtns = {};
-        const siteOrder = globalConfig.siteTabOrder || ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'claude', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
-        if (!siteOrder.includes(currentSuffixTab)) currentSuffixTab = siteOrder[0];
-
-
-        const textarea = document.createElement('textarea');
-        textarea.rows = 4;
-        textarea.placeholder = '請輸入後綴字串，支援換行 (預設為 \\n\\n)';
-        Object.assign(textarea.style, {
-            width: '100%',
-            backgroundColor: '#2d2f31',
-            color: '#f9fafb',
-            border: '1px solid #5f6368',
-            borderRadius: '4px',
-            padding: '8px',
-            fontSize: '12px',
-            resize: 'vertical',
-            boxSizing: 'border-box',
-            fontFamily: 'monospace'
-        });
-
-
-        function refreshActiveSiteData() {
-            textarea.value = (curP.suffixes && curP.suffixes[currentSuffixTab]) ?? '\n\n';
-            siteOrder.forEach(siteId => {
-                const btn = tabBtns[siteId];
-                if (btn) {
-                    if (siteId === currentSuffixTab) {
-                        btn.style.background = '#8ab4f8';
-                        btn.style.color = '#202124';
+                if (info && MODULE_REGISTRY[modKey].requiresExpand) {
+                    const overrideInput = document.getElementById('cm-override-limit');
+                    if (overrideInput && overrideInput.value && parseInt(overrideInput.value, 10) > 0) {
+                        info.innerText = `(自訂覆蓋) 單頁將展開抓取：${getAutoLimit(modKey)} 筆`;
+                        info.style.color = '#fcc111';
                     } else {
-                        btn.style.background = 'transparent';
-                        btn.style.color = '#9aa0a6';
+                        info.innerText = `單頁預計展開抓取：${getAutoLimit(modKey)} 筆`;
+                        info.style.color = '#00ff00';
                     }
+                } else if (info) {
+                    info.innerText = "";
                 }
-            });
-        }
-
-
-        siteOrder.forEach(siteId => {
-            const def = ALL_SITE_DEFS[siteId] || { id: siteId, label: siteId };
-            const btn = document.createElement('button');
-            btn.textContent = def.label;
-            btn.style.cssText = 'flex: 1 1 calc(20% - 4px); min-width: 68px; height: 28px; border: none; padding: 0 4px; font-size: 11px; font-weight: bold; border-radius: 4px; cursor: pointer; transition: all 0.2s; white-space: nowrap; text-align: center;';
-            btn.onclick = () => {
-                currentSuffixTab = siteId;
-                refreshActiveSiteData();
-            };
-            tabBtns[siteId] = btn;
-            tabsRow.appendChild(btn);
-        });
-
-
-        textarea.oninput = () => {
-            if (!curP.suffixes) curP.suffixes = {};
-            curP.suffixes[currentSuffixTab] = textarea.value;
-            Storage.set(globalConfig);
-        };
-
-
-        refreshActiveSiteData();
-        container.appendChild(tabsRow);
-        container.appendChild(textarea);
-    }
-
-
-    function renderPaneReorder(container) {
-        const desc = document.createElement('div');
-        desc.style.cssText = 'font-size: 12px; color: #9aa0a6; line-height: 1.4;';
-        const capKey = globalConfig.qaQueueSettings?.captureHotkey || 'F4';
-        desc.textContent = `請設定 11 大站點之權重序號與【${capKey} 快捷採集模式】。點擊下方按鈕後，前後綴與總結匯出順序將依序號嚴格排列：`;
-        container.appendChild(desc);
-
-
-        const listContainer = document.createElement('div');
-        listContainer.style.cssText = 'display: flex; flex-direction: column; gap: 8px; margin-top: 4px;';
-
-
-        const inputsMap = [];
-        const siteOrder = globalConfig.siteTabOrder || ['aistudio', 'deepseek', 'qwen', 'kimi', 'chatgpt', 'claude', 'perplexity', 'zhipu', 'zai', 'mistral', 'minimax'];
-        const siteActions = globalConfig.qaQueueSettings?.siteActions || {};
-
-
-        siteOrder.forEach((siteId, index) => {
-            const def = ALL_SITE_DEFS[siteId] || { id: siteId, label: siteId };
-            const row = document.createElement('div');
-            row.style.cssText = 'display: flex; align-items: center; justify-content: space-between; background: #1e1f20; padding: 6px 12px; border-radius: 6px; border: 1px solid #3c4043; gap: 8px;';
-
-
-            const label = document.createElement('span');
-            label.style.cssText = 'font-weight: 600; font-size: 13px; min-width: 110px;';
-            label.textContent = `${def.label} (${siteId})`;
-
-
-            // 4 態採集動作下拉選單
-            const actionSelect = document.createElement('select');
-            actionSelect.style.cssText = 'height: 26px; font-size: 11px; background: #2d2f31; color: #8ab4f8; border: 1px solid #5f6368; border-radius: 4px; padding: 2px 6px; cursor: pointer; flex: 1;';
-
-
-            const optSingle = document.createElement('option');
-            optSingle.value = 'SINGLE';
-            optSingle.textContent = '📋 複製最後回覆 (含前後綴)';
-            const optClean = document.createElement('option');
-            optClean.value = 'SINGLE_CLEAN';
-            optClean.textContent = '🧹 乾淨最後回覆 (無前後綴)';
-            const optPreview = document.createElement('option');
-            optPreview.value = 'PREVIEW';
-            optPreview.textContent = '📄 複製右側預覽 (含前後綴)';
-            const optPreviewClean = document.createElement('option');
-            optPreviewClean.value = 'PREVIEW_CLEAN';
-            optPreviewClean.textContent = '📄 乾淨右側預覽 (無前後綴)';
-
-
-            actionSelect.appendChild(optSingle);
-            actionSelect.appendChild(optClean);
-            actionSelect.appendChild(optPreview);
-            actionSelect.appendChild(optPreviewClean);
-
-
-            const curAct = siteActions[siteId] || 'SINGLE';
-            actionSelect.value = curAct;
-
-
-            actionSelect.onchange = () => {
-                if (!globalConfig.qaQueueSettings) globalConfig.qaQueueSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.qaQueueSettings));
-                if (!globalConfig.qaQueueSettings.siteActions) globalConfig.qaQueueSettings.siteActions = {};
-                globalConfig.qaQueueSettings.siteActions[siteId] = actionSelect.value;
-                Storage.set(globalConfig);
-            };
-
-
-            const input = document.createElement('input');
-            input.type = 'number';
-            input.value = index + 1;
-            input.min = '1';
-            input.max = '99';
-            Object.assign(input.style, {
-                width: '50px',
-                backgroundColor: '#2d2f31',
-                color: '#8ab4f8',
-                border: '1px solid #5f6368',
-                borderRadius: '4px',
-                padding: '4px 6px',
-                textAlign: 'center',
-                fontWeight: 'bold'
-            });
-
-
-            inputsMap.push({ siteId, inputEl: input, originalIndex: index });
-
-
-            row.appendChild(label);
-            row.appendChild(actionSelect);
-            row.appendChild(input);
-            listContainer.appendChild(row);
-        });
-
-
-        container.appendChild(listContainer);
-
-
-        const btnReorder = document.createElement('button');
-        btnReorder.className = 'ai-copy-btn-primary';
-        btnReorder.textContent = '🔢 依照數值重排';
-        btnReorder.style.cssText = 'margin-top: 8px; padding: 8px; width: 100%;';
-        btnReorder.onclick = () => {
-            const sortedData = inputsMap.map(item => {
-                const valStr = item.inputEl.value.trim();
-                let parsedVal = parseInt(valStr, 10);
-                if (isNaN(parsedVal)) parsedVal = 999;
-                return {
-                    siteId: item.siteId,
-                    typedValue: parsedVal,
-                    originalIndex: item.originalIndex
-                };
-            });
-
-
-            sortedData.sort((a, b) => {
-                if (a.typedValue !== b.typedValue) return a.typedValue - b.typedValue;
-                return a.originalIndex - b.originalIndex;
-            });
-
-
-            globalConfig.siteTabOrder = sortedData.map(d => d.siteId);
-            Storage.set(globalConfig);
-            renderPaneReorder(container);
-            showToast('🔢 站點頁籤與總結匯出順序已成功重排！');
-        };
-
-
-        container.appendChild(btnReorder);
-    }
-
-
-    function renderPaneRules(container) {
-        if (!globalConfig.noiseSettings) {
-            globalConfig.noiseSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.noiseSettings));
-        }
-
-
-        const orderRow = document.createElement('div');
-        orderRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #1e1f20; padding: 8px 12px; border-radius: 6px; border: 1px solid #3c4043;';
-
-
-        const orderLabel = document.createElement('span');
-        orderLabel.style.cssText = 'font-weight: 600; font-size: 13px; color: #8ab4f8;';
-        orderLabel.textContent = '⚙️ 清洗執行順序：';
-
-
-        const orderSelect = document.createElement('select');
-        Object.assign(orderSelect.style, {
-            backgroundColor: '#2d2f31',
-            color: '#e8eaed',
-            border: '1px solid #5f6368',
-            borderRadius: '4px',
-            padding: '4px 8px',
-            fontSize: '12px',
-            fontWeight: '600',
-            cursor: 'pointer'
-        });
-
-
-        const optStrFirst = document.createElement('option');
-        optStrFirst.value = 'string_first';
-        optStrFirst.textContent = '字串清洗優先 ➔ 正則清洗 (預設推薦)';
-        if (globalConfig.noiseSettings.pipelineOrder === 'string_first') optStrFirst.selected = true;
-
-
-        const optRegFirst = document.createElement('option');
-        optRegFirst.value = 'regex_first';
-        optRegFirst.textContent = '正則清洗優先 ➔ 字串清洗';
-        if (globalConfig.noiseSettings.pipelineOrder === 'regex_first') optRegFirst.selected = true;
-
-
-        orderSelect.appendChild(optStrFirst);
-        orderSelect.appendChild(optRegFirst);
-
-
-        orderSelect.onchange = () => {
-            globalConfig.noiseSettings.pipelineOrder = orderSelect.value;
-            Storage.set(globalConfig);
-            showToast('⚙️ 已更新清洗執行順序！');
-        };
-
-
-        orderRow.appendChild(orderLabel);
-        orderRow.appendChild(orderSelect);
-        container.appendChild(orderRow);
-
-
-        const strTitle = document.createElement('div');
-        strTitle.style.cssText = 'font-weight: 600; color: #9aa0a6; font-size: 12px; margin-top: 4px;';
-        strTitle.textContent = '🔤 免轉義純字串排除清單 (每行一條，精確消除)：';
-
-
-        const strTextarea = document.createElement('textarea');
-        strTextarea.rows = 5;
-        strTextarea.placeholder = '\n# 支援 # 與 // 註解';
-        strTextarea.value = globalConfig.noiseSettings.customNoiseStrings || '';
-        Object.assign(strTextarea.style, {
-            width: '100%',
-            backgroundColor: '#2d2f31',
-            color: '#f9fafb',
-            border: '1px solid #5f6368',
-            borderRadius: '4px',
-            padding: '8px',
-            fontSize: '12px',
-            resize: 'vertical',
-            boxSizing: 'border-box',
-            fontFamily: 'monospace'
-        });
-
-
-        strTextarea.oninput = () => {
-            globalConfig.noiseSettings.customNoiseStrings = strTextarea.value;
-            Storage.set(globalConfig);
-        };
-
-
-        container.appendChild(strTitle);
-        container.appendChild(strTextarea);
-
-
-        const regTitle = document.createElement('div');
-        regTitle.style.cssText = 'font-weight: 600; color: #9aa0a6; font-size: 12px; margin-top: 4px;';
-        regTitle.textContent = '⚡ 高階正則表達式清單 (每行一條 /pattern/flags)：';
-
-
-        const regTextarea = document.createElement('textarea');
-        regTextarea.rows = 5;
-        regTextarea.placeholder = '/[^\\n]*尖峰時段使用量較高[，,][^\\n]*(?:升級即可使用|思考|快速|請稍後再試)[^\\n]*\\n?/gi\n/(?:試算表|表格)\\s*(?:複製|下載)/gi\n# 支援 # 與 // 註解';
-        regTextarea.value = globalConfig.noiseSettings.customNoiseRegexes || '';
-        Object.assign(regTextarea.style, {
-            width: '100%',
-            backgroundColor: '#2d2f31',
-            color: '#f9fafb',
-            border: '1px solid #5f6368',
-            borderRadius: '4px',
-            padding: '8px',
-            fontSize: '12px',
-            resize: 'vertical',
-            boxSizing: 'border-box',
-            fontFamily: 'monospace'
-        });
-
-
-        regTextarea.oninput = () => {
-            globalConfig.noiseSettings.customNoiseRegexes = regTextarea.value;
-            Storage.set(globalConfig);
-        };
-
-
-        container.appendChild(regTitle);
-        container.appendChild(regTextarea);
-    }
-
-
-    function renderPaneUI(container) {
-        const title = document.createElement('div');
-        title.style.cssText = 'font-weight: 600; color: #9aa0a6; font-size: 12px;';
-        title.textContent = '按鈕顯示與佈局設定 (全域)：';
-
-
-        const showCleanLabel = document.createElement('label');
-        showCleanLabel.style.cssText = 'display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; font-size: 13px;';
-        const showCleanCheck = document.createElement('input');
-        showCleanCheck.type = 'checkbox';
-        showCleanCheck.checked = globalConfig.uiSettings.showCleanSingle;
-        showCleanCheck.onchange = () => {
-            globalConfig.uiSettings.showCleanSingle = showCleanCheck.checked;
-            Storage.set(globalConfig);
-            mountUI(true);
-        };
-        const showCleanText = document.createElement('span');
-        showCleanText.textContent = '顯示「乾淨最後回覆 (紫)」';
-        showCleanLabel.appendChild(showCleanCheck);
-        showCleanLabel.appendChild(showCleanText);
-
-
-        const showFullLabel = document.createElement('label');
-        showFullLabel.style.cssText = 'display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; font-size: 13px;';
-        const showFullCheck = document.createElement('input');
-        showFullCheck.type = 'checkbox';
-        showFullCheck.checked = globalConfig.uiSettings.showFullThread;
-        showFullCheck.onchange = () => {
-            globalConfig.uiSettings.showFullThread = showFullCheck.checked;
-            Storage.set(globalConfig);
-            mountUI(true);
-        };
-        const showFullText = document.createElement('span');
-        showFullText.textContent = '顯示「複製全對話串 (藍)」';
-        showFullLabel.appendChild(showFullCheck);
-        showFullLabel.appendChild(showFullText);
-
-
-        const purplePosRow = document.createElement('div');
-        purplePosRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px;';
-        const purplePosLabel = document.createElement('span');
-        purplePosLabel.textContent = '全域紫鍵排列位置：';
-        purplePosLabel.style.fontSize = '13px';
-        const purplePosSelect = document.createElement('select');
-        Object.assign(purplePosSelect.style, {
-            backgroundColor: '#2d2f31',
-            color: '#e8eaed',
-            border: '1px solid #5f6368',
-            borderRadius: '4px',
-            padding: '4px 8px',
-            fontSize: '12px',
-            cursor: 'pointer'
-        });
-
-
-        const optBottom = document.createElement('option');
-        optBottom.value = 'bottom';
-        optBottom.textContent = '置底換行 (2行 - 預設推薦)';
-        if (globalConfig.uiSettings.purplePosition === 'bottom') optBottom.selected = true;
-
-
-        const optRight = document.createElement('option');
-        optRight.value = 'right';
-        optRight.textContent = '靠右橫排 (1行)';
-        if (globalConfig.uiSettings.purplePosition === 'right') optRight.selected = true;
-
-
-        purplePosSelect.appendChild(optBottom);
-        purplePosSelect.appendChild(optRight);
-
-
-        purplePosSelect.onchange = () => {
-            globalConfig.uiSettings.purplePosition = purplePosSelect.value;
-            Storage.set(globalConfig);
-            mountUI(true);
-        };
-
-
-        purplePosRow.appendChild(purplePosLabel);
-        purplePosRow.appendChild(purplePosSelect);
-
-
-        container.appendChild(title);
-        container.appendChild(showCleanLabel);
-        container.appendChild(showFullLabel);
-        container.appendChild(purplePosRow);
-
-
-        // Toast 提示外觀設定 GroupBox
-        const toastGroup = document.createElement('div');
-        toastGroup.style.cssText = 'background: #1e1f20; padding: 10px 12px; border-radius: 6px; border: 1px solid #3c4043; display: flex; flex-direction: column; gap: 8px; margin-top: 6px;';
-
-
-        const toastTitle = document.createElement('div');
-        toastTitle.style.cssText = 'font-weight: 600; font-size: 13px; color: #c084fc;';
-        toastTitle.textContent = '🍞 Toast 提示通知外觀與位置設定：';
-
-
-        const toastSettingRow = document.createElement('div');
-        toastSettingRow.style.cssText = 'display: flex; gap: 12px; align-items: center; justify-content: space-between;';
-
-
-        // 1. 背景顏色自訂與原生拾色器
-        const colorBox = document.createElement('div');
-        colorBox.style.cssText = 'display: flex; align-items: center; gap: 8px;';
-
-
-        const colorLbl = document.createElement('span');
-        colorLbl.style.cssText = 'font-size: 12px; color: #e8eaed;';
-        colorLbl.textContent = '🎨 提示背景色：';
-
-
-        const colorPick = document.createElement('input');
-        colorPick.type = 'color';
-        const curBg = globalConfig.toastSettings?.background || '#7c3aed';
-        const hexMatch = curBg.match(/#([0-9a-f]{6}|[0-9a-f]{3})/i);
-        colorPick.value = hexMatch ? hexMatch[0] : '#7c3aed';
-        colorPick.style.cssText = 'width: 26px; height: 26px; border: none; padding: 0; background: transparent; cursor: pointer; border-radius: 4px;';
-        colorPick.title = '點擊選擇 Toast 背景色';
-
-
-        const btnDefaultGrad = document.createElement('button');
-        btnDefaultGrad.textContent = '經典淡紫';
-        btnDefaultGrad.className = 'ai-copy-btn-secondary';
-        btnDefaultGrad.style.cssText = 'padding: 2px 6px; font-size: 11px;';
-        btnDefaultGrad.onclick = () => {
-            if (!globalConfig.toastSettings) globalConfig.toastSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.toastSettings));
-            globalConfig.toastSettings.background = 'linear-gradient(135deg, rgba(88, 28, 135, 0.95), rgba(124, 58, 237, 0.92))';
-            Storage.set(globalConfig);
-            showToast('🎨 已恢復為經典淡紫漸變色！');
-        };
-
-
-        colorPick.onchange = (e) => {
-            if (!globalConfig.toastSettings) globalConfig.toastSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.toastSettings));
-            globalConfig.toastSettings.background = e.target.value;
-            Storage.set(globalConfig);
-            showToast('🎨 已更新 Toast 背景顏色！');
-        };
-
-
-        colorBox.appendChild(colorLbl);
-        colorBox.appendChild(colorPick);
-        colorBox.appendChild(btnDefaultGrad);
-
-
-        // 2. 字體大小
-        const fontBox = document.createElement('div');
-        fontBox.style.cssText = 'display: flex; align-items: center; gap: 6px;';
-        const fontLbl = document.createElement('span');
-        fontLbl.style.cssText = 'font-size: 12px; color: #e8eaed;';
-        fontLbl.textContent = '字體大小 (px)：';
-        const fontInput = document.createElement('input');
-        fontInput.type = 'number';
-        fontInput.min = '12';
-        fontInput.max = '24';
-        fontInput.value = globalConfig.toastSettings?.fontSize || 18;
-        fontInput.style.cssText = 'width: 48px; background: #2d2f31; color: #c084fc; border: 1px solid #5f6368; border-radius: 4px; padding: 3px 6px; font-size: 12px; text-align: center; font-weight: bold;';
-        fontInput.oninput = () => {
-            if (!globalConfig.toastSettings) globalConfig.toastSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.toastSettings));
-            const val = parseInt(fontInput.value, 10);
-            globalConfig.toastSettings.fontSize = isNaN(val) ? 18 : val;
-            Storage.set(globalConfig);
-        };
-        fontBox.appendChild(fontLbl);
-        fontBox.appendChild(fontInput);
-
-
-        toastSettingRow.appendChild(colorBox);
-        toastSettingRow.appendChild(fontBox);
-
-
-        const toastDragHint = document.createElement('div');
-        toastDragHint.style.cssText = 'font-size: 11px; color: #9aa0a6; line-height: 1.4;';
-        toastDragHint.textContent = '💡 提示：點擊主懸浮列工具列的 🍞 按鈕可進入自由拖曳模式，長亮調整視窗定位座標！';
-
-
-        toastGroup.appendChild(toastTitle);
-        toastGroup.appendChild(toastSettingRow);
-        toastGroup.appendChild(toastDragHint);
-        container.appendChild(toastGroup);
-
-
-        // QA 採集暫存雙熱鍵與滿額總結設定 GroupBox
-        const hotkeyGroup = document.createElement('div');
-        hotkeyGroup.style.cssText = 'background: #1e1f20; padding: 10px 12px; border-radius: 6px; border: 1px solid #3c4043; display: flex; flex-direction: column; gap: 8px; margin-top: 6px;';
-
-
-        const hotkeyTitle = document.createElement('div');
-        hotkeyTitle.style.cssText = 'font-weight: 600; font-size: 13px; color: #8ab4f8;';
-        hotkeyTitle.textContent = '⌨️ 跨站點 QA 採集、滿額自動總結與雙熱鍵：';
-
-
-        const hotkeysRow = document.createElement('div');
-        hotkeysRow.style.cssText = 'display: flex; gap: 12px; align-items: center; justify-content: space-between;';
-
-
-        // 採集熱鍵
-        const capBox = document.createElement('div');
-        capBox.style.cssText = 'display: flex; align-items: center; gap: 6px;';
-        const capLbl = document.createElement('span');
-        capLbl.style.cssText = 'font-size: 12px; color: #e8eaed;';
-        capLbl.textContent = '📥 採集熱鍵：';
-        const capInput = document.createElement('input');
-        capInput.type = 'text';
-        capInput.placeholder = '留空停用';
-        capInput.value = globalConfig.qaQueueSettings?.captureHotkey ?? 'F4';
-        capInput.style.cssText = 'width: 100px; background: #2d2f31; color: #8ab4f8; border: 1px solid #5f6368; border-radius: 4px; padding: 3px 6px; font-size: 12px; text-align: center; font-weight: bold;';
-
-
-        // 總結熱鍵
-        const sumBox = document.createElement('div');
-        sumBox.style.cssText = 'display: flex; align-items: center; gap: 6px;';
-        const sumLbl = document.createElement('span');
-        sumLbl.style.cssText = 'font-size: 12px; color: #e8eaed;';
-        sumLbl.textContent = '🎉 總結熱鍵：';
-        const sumInput = document.createElement('input');
-        sumInput.type = 'text';
-        sumInput.placeholder = '留空停用';
-        sumInput.value = globalConfig.qaQueueSettings?.summaryHotkey ?? 'F7';
-        sumInput.style.cssText = 'width: 100px; background: #2d2f31; color: #8ab4f8; border: 1px solid #5f6368; border-radius: 4px; padding: 3px 6px; font-size: 12px; text-align: center; font-weight: bold;';
-
-
-        function validateAndSaveHotkeys() {
-            const capVal = capInput.value.trim();
-            const sumVal = sumInput.value.trim();
-
-
-            if (capVal && sumVal && capVal.toUpperCase() === sumVal.toUpperCase()) {
-                capInput.style.borderColor = '#ef4444';
-                sumInput.style.borderColor = '#ef4444';
-                showToast('⚠️ 採集熱鍵與總結熱鍵不能相同！', true, 3000);
-                return;
-            }
-
-
-            capInput.style.borderColor = '#5f6368';
-            sumInput.style.borderColor = '#5f6368';
-
-
-            if (!globalConfig.qaQueueSettings) globalConfig.qaQueueSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.qaQueueSettings));
-            globalConfig.qaQueueSettings.captureHotkey = capVal;
-            globalConfig.qaQueueSettings.summaryHotkey = sumVal;
-            Storage.set(globalConfig);
-        }
-
-
-        capInput.oninput = validateAndSaveHotkeys;
-        sumInput.oninput = validateAndSaveHotkeys;
-
-
-        capBox.appendChild(capLbl);
-        capBox.appendChild(capInput);
-        sumBox.appendChild(sumLbl);
-        sumBox.appendChild(sumInput);
-
-
-        hotkeysRow.appendChild(capBox);
-        hotkeysRow.appendChild(sumBox);
-
-
-        // 滿額站點與滾動更新設定
-        const autoSummaryRow = document.createElement('div');
-        autoSummaryRow.style.cssText = 'display: flex; gap: 12px; align-items: center; justify-content: space-between; border-top: 1px dashed #3c4043; padding-top: 6px;';
-
-
-        const targetBox = document.createElement('div');
-        targetBox.style.cssText = 'display: flex; align-items: center; gap: 6px;';
-        const targetLbl = document.createElement('span');
-        targetLbl.style.cssText = 'font-size: 12px; color: #e8eaed;';
-        targetLbl.textContent = '滿額自動總結站數：';
-        const targetInput = document.createElement('input');
-        targetInput.type = 'number';
-        targetInput.min = '0';
-        targetInput.max = '11';
-        targetInput.value = globalConfig.qaQueueSettings?.targetCount ?? 6;
-        targetInput.style.cssText = 'width: 48px; background: #2d2f31; color: #8ab4f8; border: 1px solid #5f6368; border-radius: 4px; padding: 3px 6px; font-size: 12px; text-align: center; font-weight: bold;';
-        targetInput.oninput = () => {
-            if (!globalConfig.qaQueueSettings) globalConfig.qaQueueSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.qaQueueSettings));
-            const val = parseInt(targetInput.value, 10);
-            globalConfig.qaQueueSettings.targetCount = isNaN(val) ? 0 : val;
-            Storage.set(globalConfig);
-        };
-        targetBox.appendChild(targetLbl);
-        targetBox.appendChild(targetInput);
-
-
-        const keepQueueLabel = document.createElement('label');
-        keepQueueLabel.style.cssText = 'display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; font-size: 12px; color: #e8eaed;';
-        const keepQueueCheck = document.createElement('input');
-        keepQueueCheck.type = 'checkbox';
-        keepQueueCheck.checked = globalConfig.qaQueueSettings?.keepQueueOnAutoSummary ?? true;
-        keepQueueCheck.onchange = () => {
-            if (!globalConfig.qaQueueSettings) globalConfig.qaQueueSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.qaQueueSettings));
-            globalConfig.qaQueueSettings.keepQueueOnAutoSummary = keepQueueCheck.checked;
-            Storage.set(globalConfig);
-            showToast(keepQueueCheck.checked ? '✅ 已啟用滿額滾動更新模式 (保留佇列)' : '⏸️ 已切換為滿額放出即焚模式');
-        };
-        keepQueueLabel.appendChild(keepQueueCheck);
-        keepQueueLabel.appendChild(document.createTextNode('達標總結後保留佇列 (滾動更新)'));
-
-
-        autoSummaryRow.appendChild(targetBox);
-        autoSummaryRow.appendChild(keepQueueLabel);
-
-
-        // TTL 時長設定行
-        const ttlRow = document.createElement('div');
-        ttlRow.style.cssText = 'display: flex; gap: 12px; align-items: center; justify-content: space-between; border-top: 1px dashed #3c4043; padding-top: 6px;';
-        const ttlBox = document.createElement('div');
-        ttlBox.style.cssText = 'display: flex; align-items: center; gap: 6px;';
-        const ttlLbl = document.createElement('span');
-        ttlLbl.style.cssText = 'font-size: 12px; color: #e8eaed;';
-        ttlLbl.textContent = '⏳ 暫存池過期時長 (小時，0為永不)：';
-        const ttlInput = document.createElement('input');
-        ttlInput.type = 'number';
-        ttlInput.min = '0';
-        ttlInput.max = '72';
-        ttlInput.value = globalConfig.qaQueueSettings?.ttlHours ?? 2;
-        ttlInput.style.cssText = 'width: 48px; background: #2d2f31; color: #8ab4f8; border: 1px solid #5f6368; border-radius: 4px; padding: 3px 6px; font-size: 12px; text-align: center; font-weight: bold;';
-        ttlInput.oninput = () => {
-            if (!globalConfig.qaQueueSettings) globalConfig.qaQueueSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.qaQueueSettings));
-            const val = parseInt(ttlInput.value, 10);
-            globalConfig.qaQueueSettings.ttlHours = (isNaN(val) || val < 0) ? 2 : val;
-            Storage.set(globalConfig);
-        };
-        ttlBox.appendChild(ttlLbl);
-        ttlBox.appendChild(ttlInput);
-        ttlRow.appendChild(ttlBox);
-
-
-        const hotkeyHint = document.createElement('div');
-        hotkeyHint.style.cssText = 'font-size: 11px; color: #9aa0a6; line-height: 1.4;';
-        hotkeyHint.textContent = '💡 支援逗號分隔多熱鍵 (如: F4, ^F4)；支援輸入框全域穿透；若留空欄位則 100% 釋放攔截，交由桌面 AHK。';
-
-
-        hotkeyGroup.appendChild(hotkeyTitle);
-        hotkeyGroup.appendChild(hotkeysRow);
-        hotkeyGroup.appendChild(autoSummaryRow);
-        hotkeyGroup.appendChild(ttlRow);
-        hotkeyGroup.appendChild(hotkeyHint);
-
-
-        container.appendChild(hotkeyGroup);
-    }
-
-
-    function renderPaneAiStudio(container) {
-        while (container.firstChild) {
-            container.removeChild(container.firstChild);
-        }
-
-
-        if (!globalConfig.aiStudioSettings) {
-            globalConfig.aiStudioSettings = JSON.parse(JSON.stringify(DEFAULT_CONFIG.aiStudioSettings));
-        }
-        const settings = globalConfig.aiStudioSettings;
-
-
-        // 1. 首選引擎
-        const engineRow = document.createElement('div');
-        engineRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #1e1f20; padding: 8px 12px; border-radius: 6px; border: 1px solid #3c4043;';
-        const engineLabel = document.createElement('span');
-        engineLabel.style.cssText = 'font-weight: 600; font-size: 13px; color: #8ab4f8;';
-        engineLabel.textContent = '⚡ 首選提取引擎：';
-        const engineSelect = document.createElement('select');
-        Object.assign(engineSelect.style, {
-            backgroundColor: '#2d2f31', color: '#e8eaed', border: '1px solid #5f6368', borderRadius: '4px', padding: '4px 8px', fontSize: '12px', fontWeight: '600', cursor: 'pointer'
-        });
-        [
-            { id: 'native_menu', txt: '原生選單代理 (Copy as md ➔ 鉛筆 ➔ DOM)' },
-            { id: 'pencil_edit', txt: '鉛筆編輯模擬 (Pencil ➔ DOM)' },
-            { id: 'dom_parser', txt: '純 DOM 解析清洗' }
-        ].forEach(e => {
-            const opt = document.createElement('option');
-            opt.value = e.id;
-            opt.textContent = e.txt;
-            if (settings.primaryEngine === e.id) opt.selected = true;
-            engineSelect.appendChild(opt);
-        });
-        engineSelect.onchange = () => {
-            settings.primaryEngine = engineSelect.value;
-            Storage.set(globalConfig);
-            showToast('⚡ 已更新 AI Studio 首選引擎！');
-        };
-        engineRow.appendChild(engineLabel);
-        engineRow.appendChild(engineSelect);
-        container.appendChild(engineRow);
-
-
-        // 2. 佈局與排列
-        const layoutRow = document.createElement('div');
-        layoutRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #1e1f20; padding: 8px 12px; border-radius: 6px; border: 1px solid #3c4043;';
-        const layoutLabel = document.createElement('span');
-        layoutLabel.style.cssText = 'font-weight: 600; font-size: 13px; color: #8ab4f8;';
-        layoutLabel.textContent = '🎨 按鈕排列佈局：';
-        const layoutSelect = document.createElement('select');
-        Object.assign(layoutSelect.style, {
-            backgroundColor: '#2d2f31', color: '#e8eaed', border: '1px solid #5f6368', borderRadius: '4px', padding: '4px 8px', fontSize: '12px', fontWeight: '600', cursor: 'pointer'
-        });
-        [
-            { id: 'staircase', txt: '直排階梯雙欄 (預設推薦，適合寬螢幕)' },
-            { id: 'grid_3_2', txt: '3+2 雙排網格' },
-            { id: 'single_row', txt: '橫向單排展開 (緊湊單排)' }
-        ].forEach(l => {
-            const opt = document.createElement('option');
-            opt.value = l.id;
-            opt.textContent = l.txt;
-            if (settings.sliceLayout === l.id) opt.selected = true;
-            layoutSelect.appendChild(opt);
-        });
-        layoutSelect.onchange = () => {
-            settings.sliceLayout = layoutSelect.value;
-            Storage.set(globalConfig);
-            mountUI(true);
-            showToast('🎨 已更新排版佈局！');
-        };
-        layoutRow.appendChild(layoutLabel);
-        layoutRow.appendChild(layoutSelect);
-        container.appendChild(layoutRow);
-
-
-        // 2.1 紫鍵排列位置覆寫
-        const purplePosRow = document.createElement('div');
-        purplePosRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #1e1f20; padding: 8px 12px; border-radius: 6px; border: 1px solid #3c4043;';
-        const purplePosLabel = document.createElement('span');
-        purplePosLabel.style.cssText = 'font-weight: 600; font-size: 13px; color: #8ab4f8;';
-        purplePosLabel.textContent = '🟣 AI Studio 紫鍵位置覆寫：';
-        const purplePosSelect = document.createElement('select');
-        Object.assign(purplePosSelect.style, {
-            backgroundColor: '#2d2f31', color: '#e8eaed', border: '1px solid #5f6368', borderRadius: '4px', padding: '4px 8px', fontSize: '12px', fontWeight: '600', cursor: 'pointer'
-        });
-        [
-            { id: 'inherit', txt: '繼承全域設定 (預設推薦)' },
-            { id: 'bottom', txt: '置底換行 (2行)' },
-            { id: 'right', txt: '靠右橫排 (1行)' }
-        ].forEach(p => {
-            const opt = document.createElement('option');
-            opt.value = p.id;
-            opt.textContent = p.txt;
-            if (settings.purplePosition === p.id) opt.selected = true;
-            purplePosSelect.appendChild(opt);
-        });
-        purplePosSelect.onchange = () => {
-            settings.purplePosition = purplePosSelect.value;
-            Storage.set(globalConfig);
-            mountUI(true);
-            showToast('🟣 已更新 AI Studio 紫鍵位置！');
-        };
-        purplePosRow.appendChild(purplePosLabel);
-        purplePosRow.appendChild(purplePosSelect);
-        container.appendChild(purplePosRow);
-
-
-        // 3. 滾輪範圍與失敗處置
-        const controlRow = document.createElement('div');
-        controlRow.style.cssText = 'display: flex; gap: 12px;';
-
-
-        const wheelCol = document.createElement('div');
-        wheelCol.style.cssText = 'flex: 1; display: flex; flex-direction: column; gap: 4px; background: #1e1f20; padding: 8px 10px; border-radius: 6px; border: 1px solid #3c4043;';
-        const wheelLabel = document.createElement('span');
-        wheelLabel.style.cssText = 'font-size: 12px; color: #8ab4f8; font-weight: bold;';
-        wheelLabel.textContent = '🎡 滾輪切換區域：';
-        const wheelSelect = document.createElement('select');
-        Object.assign(wheelSelect.style, {
-            backgroundColor: '#2d2f31', color: '#e8eaed', border: '1px solid #5f6368', borderRadius: '4px', padding: '4px', fontSize: '11px'
-        });
-        [
-            { id: 'capsule_only', txt: '僅限模組色標膠囊 (預設推薦)' },
-            { id: 'control_group', txt: '控制群組 (齒輪+膠囊)' },
-            { id: 'entire_toolbar', txt: '整個懸浮工具列' }
-        ].forEach(w => {
-            const opt = document.createElement('option');
-            opt.value = w.id;
-            opt.textContent = w.txt;
-            if (settings.wheelSwitchScope === w.id) opt.selected = true;
-            wheelSelect.appendChild(opt);
-        });
-        wheelSelect.onchange = () => {
-            settings.wheelSwitchScope = wheelSelect.value;
-            Storage.set(globalConfig);
-            showToast('🎡 已更新滾輪觸發範圍！');
-        };
-        wheelCol.appendChild(wheelLabel);
-        wheelCol.appendChild(wheelSelect);
-
-
-        const fbCol = document.createElement('div');
-        fbCol.style.cssText = 'flex: 1; display: flex; flex-direction: column; gap: 4px; background: #1e1f20; padding: 8px 10px; border-radius: 6px; border: 1px solid #3c4043;';
-        const fbLabel = document.createElement('span');
-        fbLabel.style.cssText = 'font-size: 12px; color: #8ab4f8; font-weight: bold;';
-        fbLabel.textContent = '🛡️ 切片未命中處置：';
-        const fbSelect = document.createElement('select');
-        Object.assign(fbSelect.style, {
-            backgroundColor: '#2d2f31', color: '#e8eaed', border: '1px solid #5f6368', borderRadius: '4px', padding: '4px', fontSize: '11px'
-        });
-        [
-            { id: 'warn_block', txt: '🛑 嚴格阻斷並警報 (預設推薦)' },
-            { id: 'lenient_full', txt: '⚠️ 寬容降級複製全量' },
-            { id: 'custom_string', txt: '📝 填入自訂佔位字串' }
-        ].forEach(f => {
-            const opt = document.createElement('option');
-            opt.value = f.id;
-            opt.textContent = f.txt;
-            if (settings.fallbackAction === f.id) opt.selected = true;
-            fbSelect.appendChild(opt);
-        });
-        fbSelect.onchange = () => {
-            settings.fallbackAction = fbSelect.value;
-            Storage.set(globalConfig);
-            showToast('🛡️ 已更新切片未命中策略！');
-            renderPaneAiStudio(container);
-        };
-        fbCol.appendChild(fbLabel);
-        fbCol.appendChild(fbSelect);
-
-
-        controlRow.appendChild(wheelCol);
-        controlRow.appendChild(fbCol);
-        container.appendChild(controlRow);
-
-
-        if (settings.fallbackAction === 'custom_string') {
-            const customInput = document.createElement('input');
-            customInput.type = 'text';
-            customInput.placeholder = '自訂未命中時寫入剪貼簿之預覽字串';
-            customInput.value = settings.fallbackCustomText || '';
-            Object.assign(customInput.style, {
-                width: '100%', backgroundColor: '#2d2f31', color: '#f9fafb', border: '1px solid #5f6368', borderRadius: '4px', padding: '4px 8px', fontSize: '11px', boxSizing: 'border-box'
-            });
-            customInput.oninput = () => {
-                settings.fallbackCustomText = customInput.value;
-                Storage.set(globalConfig);
-            };
-            container.appendChild(customInput);
-        }
-
-
-        // 4. 中層：3 模組切換導覽條
-        const modNav = document.createElement('div');
-        modNav.style.cssText = 'display: flex; gap: 8px; margin-top: 4px;';
-
-
-        ['module_1', 'module_2', 'module_3'].forEach(mKey => {
-            const m = settings.modules[mKey];
-            const modCard = document.createElement('div');
-            modCard.style.cssText = `flex: 1; background: #1e1f20; border: 2px solid ${mKey === currentModuleTab ? '#8ab4f8' : '#3c4043'}; border-radius: 6px; padding: 6px 8px; cursor: pointer; display: flex; flex-direction: column; gap: 4px;`;
-
-
-            const headRow = document.createElement('div');
-            headRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between;';
-
-
-            const nameTxt = document.createElement('span');
-            nameTxt.style.cssText = 'font-size: 12px; font-weight: bold; color: #fff;';
-            nameTxt.textContent = m.name;
-
-
-            const colorPick = document.createElement('input');
-            colorPick.type = 'color';
-            colorPick.value = m.badgeColor;
-            colorPick.style.cssText = 'width: 22px; height: 22px; border: none; padding: 0; background: transparent; cursor: pointer;';
-            colorPick.onchange = (e) => {
-                m.badgeColor = e.target.value;
-                Storage.set(globalConfig);
-                mountUI(true);
-            };
-
-
-            headRow.appendChild(nameTxt);
-            headRow.appendChild(colorPick);
-
-
-            const subRow = document.createElement('div');
-            subRow.style.cssText = 'display: flex; align-items: center; gap: 6px;';
-
-
-            const badgeInput = document.createElement('input');
-            badgeInput.type = 'text';
-            badgeInput.maxLength = 4;
-            badgeInput.value = m.badgeText;
-            badgeInput.placeholder = '標籤';
-            badgeInput.style.cssText = 'width: 48px; background: #2d2f31; color: #8ab4f8; border: 1px solid #5f6368; border-radius: 4px; padding: 2px 4px; font-size: 11px; text-align: center; font-weight: bold;';
-            badgeInput.oninput = () => {
-                m.badgeText = badgeInput.value.trim() || '標籤';
-                Storage.set(globalConfig);
-                mountUI(true);
-            };
-
-
-            const hint = document.createElement('span');
-            hint.style.cssText = 'font-size: 11px; color: #9aa0a6;';
-            hint.textContent = (mKey === settings.activeModuleId) ? '🟢 當前啟用' : '點擊編輯';
-
-
-            subRow.appendChild(badgeInput);
-            subRow.appendChild(hint);
-
-
-            modCard.appendChild(headRow);
-            modCard.appendChild(subRow);
-
-
-            modCard.onclick = (e) => {
-                if (['INPUT', 'SELECT'].includes(e.target.tagName)) return;
-                currentModuleTab = mKey;
-                renderPaneAiStudio(container);
-            };
-
-
-            modNav.appendChild(modCard);
-        });
-        container.appendChild(modNav);
-
-
-        // 5. 下層：當前選取模組按鈕清單
-        const curModDef = settings.modules[currentModuleTab];
-        const btnListContainer = document.createElement('div');
-        btnListContainer.style.cssText = 'display: flex; flex-direction: column; gap: 8px; margin-top: 4px;';
-
-
-        curModDef.buttons.forEach((btnDef) => {
-            const card = document.createElement('div');
-            card.style.cssText = 'background: #1e1f20; border: 1px solid #3c4043; border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px;';
-
-
-            const headRow = document.createElement('div');
-            headRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 8px;';
-
-
-            const leftGroup = document.createElement('div');
-            leftGroup.style.cssText = 'display: flex; align-items: center; gap: 6px; flex: 1;';
-
-
-            const chk = document.createElement('input');
-            chk.type = 'checkbox';
-            chk.checked = btnDef.enabled;
-            chk.onchange = () => {
-                btnDef.enabled = chk.checked;
-                Storage.set(globalConfig);
-                mountUI(true);
-            };
-
-
-            const nameInput = document.createElement('input');
-            nameInput.type = 'text';
-            nameInput.value = btnDef.name;
-            nameInput.style.cssText = 'flex: 1; background: #2d2f31; color: #8ab4f8; border: 1px solid #5f6368; border-radius: 4px; padding: 3px 6px; font-size: 12px; font-weight: bold;';
-            nameInput.oninput = () => {
-                btnDef.name = nameInput.value.trim();
-                Storage.set(globalConfig);
-                mountUI(true);
-            };
-
-
-            const modeSel = document.createElement('select');
-            modeSel.style.cssText = 'background: #2d2f31; color: #e8eaed; border: 1px solid #5f6368; border-radius: 4px; padding: 2px 4px; font-size: 11px;';
-            const optMatch = document.createElement('option');
-            optMatch.value = 'match';
-            optMatch.textContent = '截取 (Match)';
-            if (btnDef.mode === 'match') optMatch.selected = true;
-            const optReplace = document.createElement('option');
-            optReplace.value = 'replace';
-            optReplace.textContent = '挖除 (Replace)';
-            if (btnDef.mode === 'replace') optReplace.selected = true;
-            modeSel.appendChild(optMatch);
-            modeSel.appendChild(optReplace);
-            modeSel.onchange = () => {
-                btnDef.mode = modeSel.value;
-                Storage.set(globalConfig);
-                renderPaneAiStudio(container);
-            };
-
-
-            leftGroup.appendChild(chk);
-            leftGroup.appendChild(nameInput);
-            leftGroup.appendChild(modeSel);
-
-
-            const rightTabsGroup = document.createElement('div');
-            rightTabsGroup.className = 'ai-copy-card-subtabs';
-
-
-            const subtabBtnRule = document.createElement('button');
-            subtabBtnRule.className = 'ai-copy-card-subtab-btn active';
-            subtabBtnRule.textContent = '🎯 正則規則';
-
-
-            const subtabBtnAffix = document.createElement('button');
-            subtabBtnAffix.className = 'ai-copy-card-subtab-btn';
-
-
-            function updateAffixTabHighlight() {
-                const hasAffix = Boolean((btnDef.prefix && btnDef.prefix.trim()) || (btnDef.suffix && btnDef.suffix.trim()));
-                subtabBtnAffix.textContent = hasAffix ? '🏷️ 專屬前後綴 (已設定)' : '🏷️ 專屬前後綴';
-                if (hasAffix && !subtabBtnAffix.classList.contains('active')) {
-                    subtabBtnAffix.style.borderColor = '#8ab4f8';
-                    subtabBtnAffix.style.color = '#8ab4f8';
-                    subtabBtnAffix.style.background = 'rgba(138, 180, 248, 0.08)';
-                } else if (!subtabBtnAffix.classList.contains('active')) {
-                    subtabBtnAffix.style.borderColor = '#5f6368';
-                    subtabBtnAffix.style.color = '#9aa0a6';
-                    subtabBtnAffix.style.background = 'transparent';
-                }
-            }
-            updateAffixTabHighlight();
-
-
-            rightTabsGroup.appendChild(subtabBtnRule);
-            rightTabsGroup.appendChild(subtabBtnAffix);
-
-
-            headRow.appendChild(leftGroup);
-            headRow.appendChild(rightTabsGroup);
-            card.appendChild(headRow);
-
-
-            // 子面板 1：正則規則
-            const paneViewRule = document.createElement('div');
-            paneViewRule.style.cssText = 'display: flex; flex-direction: column; gap: 6px;';
-
-
-            const patInput = document.createElement('input');
-            patInput.type = 'text';
-            patInput.value = btnDef.pattern || '';
-            patInput.placeholder = '正則表示式 (如: /pattern/flags)';
-            patInput.style.cssText = 'width: 100%; background: #2d2f31; color: #f9fafb; border: 1px solid #5f6368; border-radius: 4px; padding: 4px 6px; font-size: 11px; font-family: monospace; box-sizing: border-box;';
-            patInput.oninput = () => {
-                btnDef.pattern = patInput.value.trim();
-                Storage.set(globalConfig);
-            };
-            paneViewRule.appendChild(patInput);
-
-
-            if (btnDef.mode === 'match') {
-                const optionsRow = document.createElement('div');
-                optionsRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 8px;';
-
-
-                const leftOptionsGroup = document.createElement('div');
-                leftOptionsGroup.style.cssText = 'display: flex; align-items: center; gap: 12px;';
-
-
-                const maxBlockLabel = document.createElement('label');
-                maxBlockLabel.style.cssText = 'display: flex; align-items: center; gap: 4px; font-size: 11px; color: #9aa0a6; cursor: pointer; user-select: none;';
-                const maxBlockChk = document.createElement('input');
-                maxBlockChk.type = 'checkbox';
-                maxBlockChk.checked = !!btnDef.isCodeBlockTarget;
-                maxBlockChk.onchange = () => {
-                    btnDef.isCodeBlockTarget = maxBlockChk.checked;
-                    Storage.set(globalConfig);
-                };
-                maxBlockLabel.appendChild(maxBlockChk);
-                maxBlockLabel.appendChild(document.createTextNode('最長代碼塊最優'));
-                leftOptionsGroup.appendChild(maxBlockLabel);
-
-
-                optionsRow.appendChild(leftOptionsGroup);
-
-
-                const fallbackAccordionBox = document.createElement('div');
-                const hasFallbackValue = Boolean(btnDef.fallbackPattern && btnDef.fallbackPattern.trim());
-                fallbackAccordionBox.style.cssText = `display: ${hasFallbackValue ? 'flex' : 'none'}; flex-direction: column; gap: 4px; padding: 6px 8px; background: rgba(192, 132, 252, 0.05); border: 1px dashed rgba(192, 132, 252, 0.4); border-radius: 4px;`;
-
-
-                const fallbackTitle = document.createElement('div');
-                fallbackTitle.style.cssText = 'font-size: 11px; color: #c084fc; font-weight: bold;';
-                fallbackTitle.textContent = '🛟 備援正則 (支援換行多條探測，支援 # 與 // 註解行)：';
-
-
-                const fallbackPatTextarea = document.createElement('textarea');
-                fallbackPatTextarea.rows = 2;
-                fallbackPatTextarea.value = btnDef.fallbackPattern || '';
-                fallbackPatTextarea.placeholder = '備援正則 (支援換行多條探測，如: /```([\\s\\S]*)```/i)';
-                fallbackPatTextarea.style.cssText = 'width: 100%; background: #2d2f31; color: #c084fc; border: 1px solid #5f6368; border-radius: 4px; padding: 4px 6px; font-size: 11px; font-family: monospace; box-sizing: border-box; resize: vertical;';
-
-
-                const btnToggleFallback = document.createElement('button');
-                function refreshToggleGhostStyle() {
-                    const active = Boolean(btnDef.fallbackPattern && btnDef.fallbackPattern.trim());
-                    btnToggleFallback.textContent = active ? '🛟 備用 (已設定)' : '🛟 +備用';
-                    btnToggleFallback.style.cssText = `background: ${active ? 'rgba(138, 180, 248, 0.12)' : 'transparent'}; border: 1px solid ${active ? '#8ab4f8' : '#5f6368'}; color: ${active ? '#8ab4f8' : '#9aa0a6'}; padding: 2px 6px; font-size: 11px; border-radius: 4px; cursor: pointer; transition: all 0.2s; white-space: nowrap;`;
-                }
-                refreshToggleGhostStyle();
-
-
-                btnToggleFallback.onclick = () => {
-                    if (fallbackAccordionBox.style.display === 'none') {
-                        fallbackAccordionBox.style.display = 'flex';
-                        fallbackPatTextarea.focus();
-                    } else {
-                        fallbackAccordionBox.style.display = 'none';
-                    }
-                };
-
-
-                fallbackPatTextarea.oninput = () => {
-                    btnDef.fallbackPattern = fallbackPatTextarea.value.trim();
-                    Storage.set(globalConfig);
-                    refreshToggleGhostStyle();
-                };
-
-
-                fallbackAccordionBox.appendChild(fallbackTitle);
-                fallbackAccordionBox.appendChild(fallbackPatTextarea);
-
-
-                optionsRow.appendChild(btnToggleFallback);
-                paneViewRule.appendChild(optionsRow);
-                paneViewRule.appendChild(fallbackAccordionBox);
-            }
-
-
-            if (btnDef.mode === 'replace') {
-                const repInput = document.createElement('input');
-                repInput.type = 'text';
-                repInput.value = btnDef.replaceValue || '';
-                repInput.placeholder = '替換字串 (留空即完全挖除)';
-                repInput.style.cssText = 'width: 100%; background: #2d2f31; color: #a7f3d0; border: 1px solid #5f6368; border-radius: 4px; padding: 3px 6px; font-size: 11px; font-family: monospace; box-sizing: border-box;';
-                repInput.oninput = () => {
-                    btnDef.replaceValue = repInput.value;
-                    Storage.set(globalConfig);
-                };
-                paneViewRule.appendChild(repInput);
-            }
-            card.appendChild(paneViewRule);
-
-
-            // 子面板 2：專屬前後綴 (實裝 🔗 雲端直達 ↗ 動態跳轉按鈕)
-            const paneViewAffix = document.createElement('div');
-            paneViewAffix.style.cssText = 'display: none; flex-direction: column; gap: 6px;';
-
-
-            const prefixGroup = document.createElement('div');
-            prefixGroup.style.cssText = 'display: flex; flex-direction: column; gap: 4px;';
-
-
-            const prefixHeadRow = document.createElement('div');
-            prefixHeadRow.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
-
-
-            const prefixLeftBox = document.createElement('div');
-            prefixLeftBox.style.cssText = 'display: flex; align-items: center; gap: 8px;';
-
-
-            const prefixLbl = document.createElement('span');
-            prefixLbl.style.cssText = 'font-size: 11px; color: #8ab4f8; font-weight: bold;';
-            prefixLbl.textContent = '前綴 (支援字串文字或 Google Docs 雲端 URL)：';
-
-
-            const prefixDocLink = document.createElement('a');
-            prefixDocLink.textContent = '🔗 雲端直達 ↗';
-            prefixDocLink.target = '_blank';
-            prefixDocLink.rel = 'noopener noreferrer';
-            prefixDocLink.title = '點擊在新分頁開啟此前綴雲端文件';
-            prefixDocLink.style.cssText = 'color: #8ab4f8; text-decoration: none; font-size: 11px; font-weight: bold; background: #2d2f31; border: 1px solid #5f6368; padding: 1px 6px; border-radius: 4px; display: none; align-items: center; transition: all 0.2s;';
-            prefixDocLink.onmouseover = () => { prefixDocLink.style.borderColor = '#8ab4f8'; prefixDocLink.style.color = '#fff'; prefixDocLink.style.background = '#3c4043'; };
-            prefixDocLink.onmouseout = () => { prefixDocLink.style.borderColor = '#5f6368'; prefixDocLink.style.color = '#8ab4f8'; prefixDocLink.style.background = '#2d2f31'; };
-
-
-            prefixLeftBox.appendChild(prefixLbl);
-            prefixLeftBox.appendChild(prefixDocLink);
-
-
-            const autoDividerLabel = document.createElement('label');
-            autoDividerLabel.style.cssText = 'font-size: 11px; color: #9aa0a6; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 4px;';
-            const autoDividerChk = document.createElement('input');
-            autoDividerChk.type = 'checkbox';
-            autoDividerChk.checked = btnDef.autoDivider === true;
-            autoDividerChk.onchange = () => {
-                btnDef.autoDivider = autoDividerChk.checked;
-                Storage.set(globalConfig);
-            };
-            autoDividerLabel.appendChild(autoDividerChk);
-            autoDividerLabel.appendChild(document.createTextNode('補齊 --- 分割線'));
-
-
-            prefixHeadRow.appendChild(prefixLeftBox);
-            prefixHeadRow.appendChild(autoDividerLabel);
-
-
-            const prefixTextarea = document.createElement('textarea');
-            prefixTextarea.rows = 3;
-            prefixTextarea.value = btnDef.prefix || '';
-            prefixTextarea.placeholder = '自訂純文字前綴，或填入 Google Doc 網址實現動態拉取';
-            prefixTextarea.style.cssText = 'width: 100%; height: 80px; background: #2d2f31; color: #f9fafb; border: 1px solid #5f6368; border-radius: 4px; padding: 4px 6px; font-size: 11px; font-family: monospace; box-sizing: border-box; resize: vertical;';
-
-
-            function updatePrefixDocLink() {
-                const safeUrl = getSafeDocLinkUrl(prefixTextarea.value);
-                if (safeUrl !== '#') {
-                    prefixDocLink.href = safeUrl;
-                    prefixDocLink.style.display = 'inline-flex';
-                } else {
-                    prefixDocLink.style.display = 'none';
-                }
-            }
-            updatePrefixDocLink();
-
-
-            prefixTextarea.oninput = () => {
-                btnDef.prefix = prefixTextarea.value;
-                Storage.set(globalConfig);
-                updateAffixTabHighlight();
-                updatePrefixDocLink();
-            };
-            prefixGroup.appendChild(prefixHeadRow);
-            prefixGroup.appendChild(prefixTextarea);
-
-
-            const suffixGroup = document.createElement('div');
-            suffixGroup.style.cssText = 'display: flex; flex-direction: column; gap: 2px;';
-
-
-            const suffixHeadRow = document.createElement('div');
-            suffixHeadRow.style.cssText = 'display: flex; align-items: center; gap: 8px;';
-
-
-            const suffixLbl = document.createElement('span');
-            suffixLbl.style.cssText = 'font-size: 11px; color: #8ab4f8; font-weight: bold;';
-            suffixLbl.textContent = '後綴 (支援字串文字或 Google Docs 雲端 URL)：';
-
-
-            const suffixDocLink = document.createElement('a');
-            suffixDocLink.textContent = '🔗 雲端直達 ↗';
-            suffixDocLink.target = '_blank';
-            suffixDocLink.rel = 'noopener noreferrer';
-            suffixDocLink.title = '點擊在新分頁開啟此後綴雲端文件';
-            suffixDocLink.style.cssText = 'color: #8ab4f8; text-decoration: none; font-size: 11px; font-weight: bold; background: #2d2f31; border: 1px solid #5f6368; padding: 1px 6px; border-radius: 4px; display: none; align-items: center; transition: all 0.2s;';
-            suffixDocLink.onmouseover = () => { suffixDocLink.style.borderColor = '#8ab4f8'; suffixDocLink.style.color = '#fff'; suffixDocLink.style.background = '#3c4043'; };
-            suffixDocLink.onmouseout = () => { suffixDocLink.style.borderColor = '#5f6368'; suffixDocLink.style.color = '#8ab4f8'; suffixDocLink.style.background = '#2d2f31'; };
-
-
-            suffixHeadRow.appendChild(suffixLbl);
-            suffixHeadRow.appendChild(suffixDocLink);
-
-
-            const suffixTextarea = document.createElement('textarea');
-            suffixTextarea.rows = 2;
-            suffixTextarea.value = btnDef.suffix || '';
-            suffixTextarea.placeholder = '自訂純文字後綴，或填入 Google Doc 網址實現動態拉取';
-            suffixTextarea.style.cssText = 'width: 100%; height: 45px; background: #2d2f31; color: #f9fafb; border: 1px solid #5f6368; border-radius: 4px; padding: 4px 6px; font-size: 11px; font-family: monospace; box-sizing: border-box; resize: vertical;';
-
-
-            function updateSuffixDocLink() {
-                const safeUrl = getSafeDocLinkUrl(suffixTextarea.value);
-                if (safeUrl !== '#') {
-                    suffixDocLink.href = safeUrl;
-                    suffixDocLink.style.display = 'inline-flex';
-                } else {
-                    suffixDocLink.style.display = 'none';
-                }
-            }
-            updateSuffixDocLink();
-
-
-            suffixTextarea.oninput = () => {
-                btnDef.suffix = suffixTextarea.value;
-                Storage.set(globalConfig);
-                updateAffixTabHighlight();
-                updateSuffixDocLink();
-            };
-            suffixGroup.appendChild(suffixHeadRow);
-            suffixGroup.appendChild(suffixTextarea);
-
-
-            paneViewAffix.appendChild(prefixGroup);
-            paneViewAffix.appendChild(suffixGroup);
-            card.appendChild(paneViewAffix);
-
-
-            subtabBtnRule.onclick = () => {
-                subtabBtnRule.classList.add('active');
-                subtabBtnAffix.classList.remove('active');
-                paneViewRule.style.display = 'flex';
-                paneViewAffix.style.display = 'none';
-                updateAffixTabHighlight();
-            };
-
-
-            subtabBtnAffix.onclick = () => {
-                subtabBtnAffix.classList.add('active');
-                subtabBtnRule.classList.remove('active');
-                paneViewRule.style.display = 'none';
-                paneViewAffix.style.display = 'flex';
-                subtabBtnAffix.style.borderColor = '#8ab4f8';
-                subtabBtnAffix.style.color = '#8ab4f8';
-                subtabBtnAffix.style.background = 'rgba(138, 180, 248, 0.15)';
-            };
-
-
-            btnListContainer.appendChild(card);
-        });
-
-
-        container.appendChild(btnListContainer);
-    }
-
-
-    function renderPaneCloud(container) {
-        while (container.firstChild) container.removeChild(container.firstChild);
-
-
-        // 1. Google Docs 同步區
-        const cloudHeader = document.createElement('div');
-        cloudHeader.style.cssText = 'display: flex; justify-content: space-between; align-items: center; font-weight: 600; color: #9aa0a6; font-size: 12px;';
-        const cloudTitle = document.createElement('span');
-        cloudTitle.textContent = '🌐 雲端 JSON 配置同步 (Google Docs 純內容覆蓋)';
-        const cloudDocLink = document.createElement('a');
-        cloudDocLink.textContent = '🔗 開啟雲端文件↗';
-        cloudDocLink.href = getSafeDocLinkUrl(globalConfig.jsonSyncUrl);
-        cloudDocLink.target = '_blank';
-        cloudDocLink.rel = 'noopener noreferrer';
-        cloudDocLink.style.cssText = 'color: #8ab4f8; text-decoration: none; font-size: 12px;';
-
-
-        cloudHeader.appendChild(cloudTitle);
-        cloudHeader.appendChild(cloudDocLink);
-
-
-        const inputSyncUrl = document.createElement('input');
-        inputSyncUrl.type = 'text';
-        inputSyncUrl.placeholder = 'https://docs.google.com/document/d/.../edit';
-        inputSyncUrl.value = globalConfig.jsonSyncUrl || '';
-        Object.assign(inputSyncUrl.style, {
-            width: '100%', backgroundColor: '#2d2f31', color: '#f9fafb', border: '1px solid #5f6368', borderRadius: '4px', padding: '6px 8px', fontSize: '12px', boxSizing: 'border-box'
-        });
-
-
-        inputSyncUrl.oninput = () => {
-            globalConfig.jsonSyncUrl = inputSyncUrl.value.trim();
-            cloudDocLink.href = getSafeDocLinkUrl(globalConfig.jsonSyncUrl);
-            Storage.set(globalConfig);
-        };
-
-
-        const btnCloudSync = document.createElement('button');
-        btnCloudSync.textContent = '🔄 一鍵從雲端同步配置 (純內容覆蓋，隔離本機座標與熱鍵)';
-        btnCloudSync.className = 'ai-copy-btn-primary';
-        btnCloudSync.style.cssText = 'background: #047857; color: #ffffff; width: 100%; padding: 8px;';
-        btnCloudSync.onmouseover = () => btnCloudSync.style.background = '#059669';
-        btnCloudSync.onmouseout = () => btnCloudSync.style.background = '#047857';
-
-
-        btnCloudSync.onclick = () => {
-            syncFromJsonDoc(() => {
-                mountUI(true);
-                renderPaneCloud(container);
-            });
-        };
-
-
-        container.appendChild(cloudHeader);
-        container.appendChild(inputSyncUrl);
-        container.appendChild(btnCloudSync);
-
-
-        const divider = document.createElement('div');
-        divider.style.cssText = 'height: 1px; background: #3c4043; margin: 8px 0;';
-        container.appendChild(divider);
-
-
-        // 2. 模組化備份精靈 (接線持久化 exportScope)
-        const wizTitle = document.createElement('div');
-        wizTitle.style.cssText = 'font-weight: 600; color: #9aa0a6; font-size: 12px;';
-        wizTitle.textContent = '📦 模組化配置匯出精靈 (可自選導出範疇)：';
-        container.appendChild(wizTitle);
-
-
-        const wizBox = document.createElement('div');
-        wizBox.style.cssText = 'background: #1e1f20; border: 1px solid #3c4043; border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 6px;';
-
-
-        const exportScope = globalConfig.exportScope || { content: true, coords: false, layout: false };
-
-
-        const chkMod1 = document.createElement('input'); chkMod1.type = 'checkbox'; chkMod1.checked = exportScope.content !== false;
-        const lblMod1 = document.createElement('label'); lblMod1.style.cssText = 'font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 6px;';
-        lblMod1.appendChild(chkMod1); lblMod1.appendChild(document.createTextNode('模組一：前後綴、站點排序與採集動作、雜訊規則、15組切片正則及熱鍵偏好 (內容設定)'));
-
-
-        const chkMod2 = document.createElement('input'); chkMod2.type = 'checkbox'; chkMod2.checked = exportScope.coords === true;
-        const lblMod2 = document.createElement('label'); lblMod2.style.cssText = 'font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 6px;';
-        lblMod2.appendChild(chkMod2); lblMod2.appendChild(document.createTextNode('模組二：主卡片懸浮座標、小光球座標、Toast座標與收折狀態 (螢幕位置，遷移整機可選)'));
-
-
-        const chkMod3 = document.createElement('input'); chkMod3.type = 'checkbox'; chkMod3.checked = exportScope.layout === true;
-        const lblMod3 = document.createElement('label'); lblMod3.style.cssText = 'font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 6px;';
-        lblMod3.appendChild(chkMod3); lblMod3.appendChild(document.createTextNode('模組三：AI Studio 排版佈局 (3+2/階梯/單排) 與紫鍵獨立設定'));
-
-
-        function saveExportScope() {
-            if (!globalConfig.exportScope) globalConfig.exportScope = {};
-            globalConfig.exportScope.content = chkMod1.checked;
-            globalConfig.exportScope.coords = chkMod2.checked;
-            globalConfig.exportScope.layout = chkMod3.checked;
-            Storage.set(globalConfig);
-        }
-
-
-        chkMod1.onchange = saveExportScope;
-        chkMod2.onchange = saveExportScope;
-        chkMod3.onchange = saveExportScope;
-
-
-        wizBox.appendChild(lblMod1);
-        wizBox.appendChild(lblMod2);
-        wizBox.appendChild(lblMod3);
-        container.appendChild(wizBox);
-
-
-        function generateExportPayload() {
-            const payload = JSON.parse(JSON.stringify(globalConfig));
-            if (!chkMod1.checked) {
-                delete payload.profiles;
-                delete payload.siteTabOrder;
-                delete payload.qaQueueSettings;
-                delete payload.noiseSettings;
-                if (payload.aiStudioSettings && payload.aiStudioSettings.modules) {
-                    delete payload.aiStudioSettings.modules;
-                }
-            }
-            if (!chkMod2.checked) {
-                delete payload.uiPosition;
-                delete payload.orbPosition;
-                delete payload.toastPosition;
-                delete payload.isCollapsed;
-            }
-            if (!chkMod3.checked) {
-                if (payload.aiStudioSettings) {
-                    delete payload.aiStudioSettings.sliceLayout;
-                    delete payload.aiStudioSettings.purplePosition;
-                    delete payload.aiStudioSettings.activeModuleId;
-                }
-            }
-            return payload;
-        }
-
-
-        const ioRow = document.createElement('div');
-        ioRow.style.cssText = 'display: flex; gap: 8px;';
-
-
-        const btnCopyJson = document.createElement('button');
-        btnCopyJson.textContent = '📋 複製自訂 JSON';
-        btnCopyJson.className = 'ai-copy-btn-secondary';
-        btnCopyJson.style.flex = '1';
-        btnCopyJson.onclick = () => {
-            const data = generateExportPayload();
-            copyToClipboard(JSON.stringify(data, null, 2));
-            showToast('✅ JSON 設定檔已複製至剪貼簿！');
-        };
-
-
-        const btnExport = document.createElement('button');
-        btnExport.textContent = '💾 下載自訂 JSON';
-        btnExport.className = 'ai-copy-btn-secondary';
-        btnExport.style.flex = '1';
-        btnExport.onclick = () => {
-            const data = generateExportPayload();
-            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data, null, 2));
-            const dlAnchor = document.createElement('a');
-            dlAnchor.setAttribute('href', dataStr);
-            dlAnchor.setAttribute('download', 'ai_copy_config.json');
-            document.body.appendChild(dlAnchor);
-            dlAnchor.click();
-            dlAnchor.remove();
-            showToast('✅ JSON 配置文件已下載！');
-        };
-
-
-        ioRow.appendChild(btnCopyJson);
-        ioRow.appendChild(btnExport);
-        container.appendChild(ioRow);
-
-
-        const fileInput = document.createElement('input');
-        fileInput.type = 'file';
-        fileInput.accept = '.json';
-        fileInput.style.display = 'none';
-
-
-        fileInput.onchange = (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = (evt) => {
-                try {
-                    const parsed = JSON.parse(evt.target.result);
-                    if (parsed && typeof parsed === 'object') {
-                        const newConfig = sanitizeConfig(parsed);
-                        applyLocalOnlyOverrides(newConfig, globalConfig);
-                        globalConfig = newConfig;
-                        Storage.set(globalConfig);
-                        mountUI(true);
-                        renderPaneCloud(container);
-                        showToast('✅ JSON 設定檔匯入成功 (本機座標與排版已完好保全)！');
-                    } else {
-                        showToast('❌ JSON 格式不符合規範！', true);
-                    }
-                } catch (err) {
-                    showToast('❌ JSON 解析失敗！', true);
-                }
-            };
-            reader.readAsText(file, 'UTF-8');
-        };
-
-
-        const btnImport = document.createElement('button');
-        btnImport.textContent = '📤 匯入 JSON 檔案並自癒覆蓋';
-        btnImport.className = 'ai-copy-btn-secondary';
-        btnImport.style.width = '100%';
-        btnImport.onclick = () => fileInput.click();
-
-
-        container.appendChild(btnImport);
-        container.appendChild(fileInput);
-    }
-
-
-    // ==========================================
-    // 12. 懸浮按鈕列、小光球與滾輪雙向調度
-    // ==========================================
-    function resolvePurplePosition(adapter) {
-        if (adapter && adapter.id === 'aistudio') {
-            const aiSetting = globalConfig.aiStudioSettings?.purplePosition;
-            if (aiSetting === 'right' || aiSetting === 'bottom') return aiSetting;
-        }
-        return globalConfig.uiSettings?.purplePosition || 'bottom';
-    }
-
-
-    function createOrbElement(adapter) {
-        const orb = document.createElement('div');
-        orb.id = FLOATING_ORB_ID;
-
-
-        const curModId = globalConfig.aiStudioSettings?.activeModuleId || 'module_1';
-        const modDef = globalConfig.aiStudioSettings?.modules?.[curModId] || DEFAULT_CONFIG.aiStudioSettings.modules.module_1;
-
-
-        orb.style.backgroundColor = modDef.badgeColor || '#1E88E5';
-        orb.style.boxShadow = `0 0 12px ${modDef.badgeColor || '#1E88E5'}, 0 4px 10px rgba(0,0,0,0.5)`;
-        orb.textContent = modDef.badgeText || '發包';
-        orb.title = `【${modDef.badgeText}】${modDef.name} (單擊展開，按住可拖曳)`;
-
-
-        setupDraggableUI(orb, orb, true, () => {
-            globalConfig.isCollapsed = false;
-            Storage.set(globalConfig);
-            mountUI(true);
-        });
-
-
-        return orb;
-    }
-
-
-    function attachWheelSwitch(targetEl) {
-        if (!targetEl) return;
-        targetEl.addEventListener('wheel', (e) => {
-            if ((e.buttons & 1) || isPointerDragging) {
-                e.preventDefault();
-                return;
-            }
-
-
-            const now = Date.now();
-            if (now - lastWheelTimestamp < 150) {
-                e.preventDefault();
-                return;
-            }
-            lastWheelTimestamp = now;
-
-
-            e.preventDefault();
-            e.stopPropagation();
-
-
-            if (e.deltaY > 0) {
-                switchModule('next');
-            } else if (e.deltaY < 0) {
-                switchModule('prev');
-            }
-        }, { passive: false });
-    }
-
-
-    function createUIElement(adapter) {
-        const container = document.createElement('div');
-        container.id = UI_CONTAINER_ID;
-
-
-        const isAiStudio = adapter.id === 'aistudio';
-        const isMistral = adapter.id === 'mistral';
-        const isZai = adapter.id === 'zai';
-        const isMiniMax = adapter.id === 'minimax';
-        const isClaude = adapter.id === 'claude';
-        const settings = globalConfig.aiStudioSettings || DEFAULT_CONFIG.aiStudioSettings;
-        const curModId = settings.activeModuleId || 'module_1';
-        const curMod = settings.modules?.[curModId] || DEFAULT_CONFIG.aiStudioSettings.modules.module_1;
-        const layoutMode = (isAiStudio && settings.sliceLayout) ? settings.sliceLayout : 'staircase';
-
-
-        const showFull = globalConfig.uiSettings.showFullThread && !isAiStudio && !isMistral;
-        const showPurple = globalConfig.uiSettings.showCleanSingle;
-        const effectivePurplePos = resolvePurplePosition(adapter);
-        const isStacked = effectivePurplePos === 'bottom';
-
-
-        // 收集切片按鈕實體
-        const sliceButtonNodes = [];
-        if (isAiStudio && curMod.buttons && Array.isArray(curMod.buttons)) {
-            curMod.buttons.forEach((btnDef, idx) => {
-                if (btnDef.enabled && btnDef.name) {
-                    const sliceBtn = document.createElement('button');
-                    sliceBtn.textContent = btnDef.name;
-                    sliceBtn.className = `ai-copy-btn-slice ai-copy-slice-${idx % 5}`;
-                    const fbTip = btnDef.fallbackPattern ? ` | 備援: ${btnDef.fallbackPattern}` : '';
-                    const affixTip = (btnDef.prefix || btnDef.suffix) ? ` | 前後綴: 已裝備` : '';
-                    const divTip = btnDef.autoDivider ? ` | 分割線: 自動` : '';
-                    sliceBtn.title = `[模式: ${btnDef.mode === 'replace' ? '挖除' : '截取'}] 正則：${btnDef.pattern || '無'}${fbTip}${affixTip}${divTip}`;
-                    sliceBtn.onclick = () => handleSliceCopyAction(btnDef);
-                    sliceButtonNodes.push(sliceBtn);
-                }
-            });
-        }
-
-
-        // 控制按鈕群組
-        const dragHandle = document.createElement('span');
-        dragHandle.className = 'ai-copy-drag-handle';
-        dragHandle.textContent = '⠿';
-        dragHandle.title = '按住拖曳移動工具列';
-
-
-        const btnGear = document.createElement('button');
-        btnGear.textContent = '⚙️';
-        btnGear.className = 'ai-copy-icon-btn ai-copy-gear-btn';
-        btnGear.title = '開啟參數設定管理器 (右鍵可清空 QA 採集佇列)';
-        btnGear.onclick = () => openManager();
-        btnGear.oncontextmenu = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const queue = getQaQueue();
-            const count = Object.keys(queue.items || {}).length;
-            if (count === 0) {
-                showToast('ℹ️ QA 採集佇列目前為空。');
             } else {
-                clearQaQueue();
-                showToast(`🗑️ QA 採集佇列已手動清空 (釋放 ${count} 筆暫存)！`);
-            }
-        };
-
-
-        const btnCollapse = document.createElement('button');
-        btnCollapse.textContent = '🗕';
-        btnCollapse.className = 'ai-copy-icon-btn';
-        btnCollapse.style.cssText = 'height: 18px; padding: 0 6px; font-size: 11px; line-height: 1;';
-        btnCollapse.title = '收折為動態小光球';
-        btnCollapse.onclick = () => {
-            globalConfig.isCollapsed = true;
-            Storage.set(globalConfig);
-            mountUI(true);
-        };
-
-
-        const btnToastPos = document.createElement('button');
-        btnToastPos.textContent = '🍞';
-        btnToastPos.className = 'ai-copy-icon-btn ai-copy-toast-btn';
-        btnToastPos.style.cssText = 'height: 18px; padding: 0 5px; font-size: 11px; line-height: 1;';
-        if (isToastPositioningMode) btnToastPos.classList.add('ai-copy-toast-btn-active');
-        btnToastPos.title = 'Toast 提示位置設定 (點擊進入/退出拖曳定位模式)';
-        btnToastPos.onclick = () => toggleToastPositioningMode();
-
-
-        const collapseAndToastCol = document.createElement('div');
-        collapseAndToastCol.style.cssText = 'display: flex; flex-direction: column; gap: 2px; align-items: center; justify-content: center;';
-        collapseAndToastCol.appendChild(btnCollapse);
-        collapseAndToastCol.appendChild(btnToastPos);
-
-
-        const btnCapsule = document.createElement('button');
-        btnCapsule.className = 'ai-copy-capsule-btn';
-        btnCapsule.textContent = curMod.badgeText;
-        btnCapsule.style.backgroundColor = curMod.badgeColor;
-        btnCapsule.title = `當前武裝：【${curMod.badgeText}】${curMod.name}\n(左鍵順向輪播，右鍵反向回退，滾輪切換)`;
-
-
-        btnCapsule.onclick = () => switchModule('next');
-        btnCapsule.oncontextmenu = (e) => {
-            e.preventDefault();
-            switchModule('prev');
-        };
-
-
-        const controlGroup = document.createElement('div');
-        controlGroup.style.cssText = 'display: flex; align-items: center; gap: 4px;';
-        controlGroup.appendChild(dragHandle);
-        controlGroup.appendChild(btnGear);
-        controlGroup.appendChild(collapseAndToastCol);
-        if (isAiStudio) controlGroup.appendChild(btnCapsule);
-
-
-        if (isAiStudio) {
-            const scope = settings.wheelSwitchScope || 'capsule_only';
-            if (scope === 'capsule_only') {
-                attachWheelSwitch(btnCapsule);
-            } else if (scope === 'control_group') {
-                attachWheelSwitch(controlGroup);
-            } else if (scope === 'entire_toolbar') {
-                attachWheelSwitch(container);
+                singleWrapper.style.display = 'none';
+                if (info) info.innerText = "";
             }
         }
 
 
-        // 藍鍵 / 雙軌按鈕分裂機制 (納入 Claude)
-        let btnSingleBlue = null;
-        let btnPreviewGreen = null;
+        if (batchBtn && !GM_getValue("cm_batch_task")?.active) { batchBtn.disabled = (!location.pathname.includes('/stock/')); }
 
 
-        if (isZai || isMiniMax || isClaude) {
-            btnSingleBlue = document.createElement('button');
-            btnSingleBlue.textContent = (isZai || isClaude) ? '📋 複製最後對話' : '📋 複製最後回覆';
-            btnSingleBlue.className = 'ai-copy-btn';
-            btnSingleBlue.title = `${(isZai || isClaude) ? '複製左側最後回覆對話' : '複製最後回覆'} (Alt + C，按住可拖曳)`;
-            btnSingleBlue.onclick = () => handleCopyAction('SINGLE');
-
-
-            btnPreviewGreen = document.createElement('button');
-            btnPreviewGreen.textContent = '📄 複製右側預覽';
-            btnPreviewGreen.className = 'ai-copy-btn-docx';
-            btnPreviewGreen.title = isClaude ? '提取右側 Artifacts 成果物為 Markdown (按住可拖曳)' : (isZai ? '提取右側預覽內容為 Markdown (按住可拖曳)' : '提取右側成果物為 Markdown (按住可拖曳)');
-            btnPreviewGreen.onclick = () => {
-                if (isClaude) handleClaudePreviewAction();
-                else if (isZai) handleZaiPreviewAction();
-                else handleMiniMaxDeliverableCopyAction();
-            };
+        if (isExpanded && window.location.href.includes('/stock/') && modKey !== "realtime" && modKey !== null) {
+            document.body.classList.add('cm-liberator-active');
+            document.querySelectorAll('thead').forEach(h => { if (h.style.transform !== 'none') { h.style.transform = 'none'; h.style.top = '0'; } });
         } else {
-            btnSingleBlue = document.createElement('button');
-            btnSingleBlue.textContent = '📋 複製最後回覆';
-            btnSingleBlue.className = 'ai-copy-btn';
-            btnSingleBlue.title = '快捷鍵：Alt + C (按住可拖曳)';
-            btnSingleBlue.onclick = () => handleCopyAction('SINGLE');
-        }
-
-
-        let btnSinglePurple = null;
-        if (showPurple) {
-            btnSinglePurple = document.createElement('button');
-            btnSinglePurple.textContent = '🧹 乾淨最後回覆';
-            btnSinglePurple.className = 'ai-copy-btn-purple';
-            btnSinglePurple.title = '100% 原始純淨 Markdown (無前後綴，按住可拖曳)';
-            btnSinglePurple.onclick = () => handleCopyAction('SINGLE_CLEAN');
-        }
-
-
-        // 分流 1：AI Studio 直排階梯雙欄
-        if (isAiStudio && layoutMode === 'staircase') {
-            const btnBar = document.createElement('div');
-            btnBar.className = 'ai-copy-btn-bar-staircase';
-
-
-            const leftCol = document.createElement('div');
-            leftCol.className = 'ai-copy-left-col';
-
-
-            const gearRow = document.createElement('div');
-            gearRow.style.cssText = 'display: flex; gap: 6px; align-items: center;';
-            gearRow.appendChild(controlGroup);
-            gearRow.appendChild(btnSingleBlue);
-
-
-            leftCol.appendChild(gearRow);
-            if (btnSinglePurple) leftCol.appendChild(btnSinglePurple);
-
-
-            const rightCol = document.createElement('div');
-            rightCol.className = 'ai-copy-right-col';
-            sliceButtonNodes.forEach(b => rightCol.appendChild(b));
-
-
-            btnBar.appendChild(leftCol);
-            if (sliceButtonNodes.length > 0) btnBar.appendChild(rightCol);
-
-
-            container.appendChild(btnBar);
-            setupDraggableUI(container, container, false);
-            updateGearIndicator();
-            return container;
-        }
-
-
-        // 分流 2：標準橫排主列
-        const btnBar = document.createElement('div');
-        btnBar.className = 'ai-copy-btn-bar';
-
-
-        const mainRow = document.createElement('div');
-        mainRow.className = 'ai-copy-main-row';
-
-
-        mainRow.appendChild(controlGroup);
-        mainRow.appendChild(btnSingleBlue);
-        if (btnPreviewGreen) mainRow.appendChild(btnPreviewGreen);
-
-
-        if (showFull) {
-            const btnFullBlue = document.createElement('button');
-            btnFullBlue.textContent = '📚 複製全對話串';
-            btnFullBlue.className = 'ai-copy-btn';
-            btnFullBlue.title = '快捷鍵：Alt + Shift + C (按住可拖曳)';
-            btnFullBlue.onclick = () => handleCopyAction('FULL_THREAD');
-            mainRow.appendChild(btnFullBlue);
-        }
-
-
-        if (btnSinglePurple && !isStacked) {
-            mainRow.appendChild(btnSinglePurple);
-        }
-
-
-        btnBar.appendChild(mainRow);
-
-
-        // 分流 3：次級列按鈕分流
-        if (isAiStudio && layoutMode === 'single_row') {
-            const subRow = document.createElement('div');
-            subRow.className = 'ai-copy-sub-row-single';
-
-
-            if (btnSinglePurple && isStacked) subRow.appendChild(btnSinglePurple);
-            sliceButtonNodes.forEach(b => subRow.appendChild(b));
-
-
-            if (subRow.children.length > 0) btnBar.appendChild(subRow);
-        } else if (isAiStudio && layoutMode === 'grid_3_2') {
-            const subRowGrid = document.createElement('div');
-            subRowGrid.className = 'ai-copy-sub-row-grid';
-
-
-            const gridRow1 = document.createElement('div');
-            gridRow1.className = 'ai-copy-grid-row';
-            const gridRow2 = document.createElement('div');
-            gridRow2.className = 'ai-copy-grid-row';
-
-
-            let r1Limit = 3;
-            if (btnSinglePurple && isStacked) {
-                gridRow1.appendChild(btnSinglePurple);
-                r1Limit = 2;
-            }
-
-
-            sliceButtonNodes.forEach((b, idx) => {
-                if (idx < r1Limit) gridRow1.appendChild(b);
-                else gridRow2.appendChild(b);
-            });
-
-
-            if (gridRow1.children.length > 0) subRowGrid.appendChild(gridRow1);
-            if (gridRow2.children.length > 0) subRowGrid.appendChild(gridRow2);
-
-
-            if (subRowGrid.children.length > 0) btnBar.appendChild(subRowGrid);
-        } else {
-            const subRow = document.createElement('div');
-            subRow.className = 'ai-copy-sub-row';
-
-
-            if (btnSinglePurple && isStacked) subRow.appendChild(btnSinglePurple);
-            sliceButtonNodes.forEach(b => subRow.appendChild(b));
-
-
-            if (subRow.children.length > 0) btnBar.appendChild(subRow);
-        }
-
-
-        container.appendChild(btnBar);
-        setupDraggableUI(container, container, false);
-        updateGearIndicator();
-        return container;
-    }
-
-
-    function mountUI(forceRemount = false) {
-        try {
-            const adapter = getCurrentAdapter();
-            if (!adapter) return;
-
-
-            let container = document.getElementById(UI_CONTAINER_ID);
-            let orb = document.getElementById(FLOATING_ORB_ID);
-
-
-            if (forceRemount) {
-                if (container) { container.remove(); container = null; }
-                if (orb) { orb.remove(); orb = null; }
-            }
-
-
-            if (globalConfig.isCollapsed) {
-                if (container) { container.remove(); container = null; }
-                if (!orb || !orb.isConnected || orb.parentNode !== document.body) {
-                    if (orb) { try { orb.remove(); } catch (e) {} }
-                    orb = createOrbElement(adapter);
-                    applySavedPosition(orb, adapter, true);
-                    document.body.appendChild(orb);
-                }
-            } else {
-                if (orb) { orb.remove(); orb = null; }
-                if (!container || !container.isConnected || container.parentNode !== document.body) {
-                    if (container) { try { container.remove(); } catch (e) {} }
-                    container = createUIElement(adapter);
-                    applySavedPosition(container, adapter, false);
-                    document.body.appendChild(container);
-                }
-            }
-            updateGearIndicator();
-        } catch (err) {
-            console.error('❌ [AI Copy] mountUI 掛載異常:', err);
+            document.body.classList.remove('cm-liberator-active');
         }
     }
 
 
-    // ==========================================
-    // 13. 熱鍵調度矩陣：多熱鍵別名陣列解析、輸入框全域穿透與 Caret 阻斷
-    // ==========================================
-    function isSingleHotkeyMatch(event, rawStr) {
-        if (!rawStr) return false;
-        let str = rawStr.trim().toUpperCase();
-        if (!str) return false;
-
-
-        let needCtrl = false;
-        let needAlt = false;
-        let needShift = false;
-
-
-        // 1. AHK 符號前綴循環剝離 (^ = Ctrl, ! = Alt, + = Shift)
-        let parsed = true;
-        while (parsed && str.length > 1) {
-            if (str.startsWith('^')) {
-                needCtrl = true;
-                str = str.substring(1).trim();
-            } else if (str.startsWith('!')) {
-                needAlt = true;
-                str = str.substring(1).trim();
-            } else if (str.startsWith('+')) {
-                needShift = true;
-                str = str.substring(1).trim();
-            } else {
-                parsed = false;
-            }
-        }
-
-
-        // 2. 傳統文字組合鍵解析 (如 Ctrl+Alt+F4)
-        const parts = str.split('+').map(p => p.trim());
-        const targetKey = parts[parts.length - 1];
-
-
-        if (parts.includes('CTRL')) needCtrl = true;
-        if (parts.includes('ALT')) needAlt = true;
-        if (parts.includes('SHIFT')) needShift = true;
-
-
-        if (event.ctrlKey !== needCtrl) return false;
-        if (event.altKey !== needAlt) return false;
-        if (event.shiftKey !== needShift) return false;
-
-
-        const currentKey = event.key.toUpperCase();
-        return currentKey === targetKey || event.code.toUpperCase() === targetKey;
-    }
-
-
-    function isHotkeyMatch(event, hotkeyStr) {
-        if (typeof hotkeyStr !== 'string' || !hotkeyStr.trim()) return false;
-        const candidates = hotkeyStr.split(',').map(s => s.trim()).filter(Boolean);
-        if (candidates.length === 0) return false;
-
-
-        for (const cand of candidates) {
-            if (isSingleHotkeyMatch(event, cand)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-
-    function setupHotkeys() {
-        window.addEventListener('keydown', (e) => {
-            const summaryKeyStr = globalConfig.qaQueueSettings?.summaryHotkey || '';
-            const captureKeyStr = globalConfig.qaQueueSettings?.captureHotkey || '';
-
-
-            // 1. 強制阻斷 Caret Browsing 原生彈窗 (在 Capture 階段最前端優先攔截)
-            if (isHotkeyMatch(e, summaryKeyStr)) {
-                e.preventDefault();
-                e.stopPropagation();
-            }
-
-
-            // 2. 滿額/總結匯出熱鍵判定 (穿透豁免輸入框阻斷)
-            if (isHotkeyMatch(e, summaryKeyStr)) {
-                handleSummaryAction();
+    function setupHotkeySystem() {
+        document.addEventListener('keydown', function(e) {
+            const tag = e.target.tagName.toLowerCase();
+            if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) {
                 return;
             }
 
 
-            // 3. 採集暫存熱鍵判定 (穿透豁免輸入框阻斷)
-            if (isHotkeyMatch(e, captureKeyStr)) {
+            const matchHotkey = (hkString, ev) => {
+                if (!hkString) return false;
+                const s = hkString.toUpperCase();
+                const requireCtrl = s.includes('^');
+                const requireShift = s.includes('+');
+                const requireAlt = s.includes('!');
+                const targetKey = s.replace(/[\^\+\!]/g, '');
+
+
+                return (ev.ctrlKey === requireCtrl) && (ev.shiftKey === requireShift) && (ev.altKey === requireAlt) && (!ev.metaKey) && (ev.key.toUpperCase() === targetKey);
+            };
+
+
+            if (matchHotkey(CONFIG.hotkey_single, e)) {
                 e.preventDefault();
-                e.stopPropagation();
-                handleCaptureAction();
-                return;
+                const modKey = getCurrentPageModule();
+                if (modKey) executeSinglePageScrape(modKey);
+                else showToast("⚠️ 此頁面目前不支援單頁抓取");
+            } else if (matchHotkey(CONFIG.hotkey_batch, e)) {
+                e.preventDefault();
+                const btn = document.getElementById('cm-btn-batch-exec');
+                if(btn && !btn.disabled) btn.click();
+            } else if (matchHotkey(CONFIG.hotkey_recopy, e)) {
+                e.preventDefault();
+                document.getElementById('cm-btn-recopy')?.click();
             }
-
-
-            // 4. 文字輸入性按鍵與 Alt+C 複製按鍵維持輸入框阻斷，防打字衝突
-            if (['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
-
-
-            // 既有複製快捷鍵
-            if (e.altKey && !e.shiftKey && (e.key === 'c' || e.key === 'C')) {
-                e.preventDefault();
-                handleCopyAction('SINGLE');
-            } else if (e.altKey && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
-                e.preventDefault();
-                handleCopyAction('FULL_THREAD');
-            }
-        }, true);
-    }
-
-
-    function setupMenuCommands() {
-        if (typeof GM_registerMenuCommand !== 'undefined') {
-            GM_registerMenuCommand('⚙️ 📍 僅重置浮動按鈕與小光球位置', resetUiPosition);
-            GM_registerMenuCommand('⚙️ 🛠️ 開啟參數設定管理器', openManager);
-            GM_registerMenuCommand('🗑️ 物理清空 QA 採集暫存池', () => {
-                clearQaQueue();
-                showToast('🗑️ QA 採集暫存佇列已清空！');
-            });
-        }
-    }
-
-
-    let mountDebounceTimer = null;
-
-
-    function init() {
-        injectStyles();
-        mountUI();
-        setupHotkeys();
-        setupMenuCommands();
-
-
-        setInterval(mountUI, 500);
-
-
-        const observer = new MutationObserver(() => {
-            if (mountDebounceTimer) clearTimeout(mountDebounceTimer);
-            mountDebounceTimer = setTimeout(() => {
-                mountUI();
-            }, 200);
-        });
-        observer.observe(document.body, { childList: true, subtree: true });
-
-
-        window.addEventListener('resize', () => {
-            const container = document.getElementById(UI_CONTAINER_ID);
-            if (container) clampContainerToViewport(container);
-            const orb = document.getElementById(FLOATING_ORB_ID);
-            if (orb) clampContainerToViewport(orb);
-            const toast = document.getElementById('ai-copy-toast');
-            if (toast && isToastPositioningMode) clampContainerToViewport(toast);
         });
     }
 
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
-})();
+    checkAndExecuteWorkerTask();
+    injectStyles();
+    createUI();
+    setupHotkeySystem();
+
+
+    let timer = null;
+    const observer = new MutationObserver(() => { if (timer) clearTimeout(timer); timer = setTimeout(updateVisibility, 600); });
+    observer.observe(document.body, { childList: true, subtree: true });
+    
+    setInterval(() => { 
+        if (lastUrl !== location.href) { 
+            lastUrl = location.href; 
+            updateVisibility(); 
+        } 
+    }, 1000);
+    setTimeout(updateVisibility, 1500);
+}
+
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initMainApp);
+} else {
+    initMainApp();
+}
