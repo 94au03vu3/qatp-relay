@@ -2647,8 +2647,18 @@ function initMainApp() {
 
 
                 if (data.categories !== undefined && Array.isArray(data.categories)) { 
-                    saveCategories(() => { CATEGORIES = data.categories; });
-                    loadCategories(); 
+                    // 🛡️ 增加 categories 陣列深度校驗，防止殘缺 JSON 注入引發 AST 拋錯
+                    const isValidStructure = data.categories.length > 0 && data.categories.every(c => c && Array.isArray(c.profiles));
+                    if (isValidStructure) {
+                        saveCategories((cats) => {
+                            // 就地替換 currentCats 內容，確保寫回 Storage 的是新資料
+                            cats.length = 0;
+                            cats.push(...JSON.parse(JSON.stringify(data.categories)));
+                        });
+                        loadCategories(); 
+                    } else {
+                        console.warn("CM Scraper: 匯入之 categories 結構異常，已略過分類還原");
+                    }
                 }
             }
         };
