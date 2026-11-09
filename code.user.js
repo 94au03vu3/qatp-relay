@@ -2296,17 +2296,17 @@ function initMainApp() {
         function populateDefaultProfileOptions() {
             if (defStockProfEl) {
                 const stockCat = CATEGORIES.find(c => c.catId === 0) || CATEGORIES[0];
-                defStockProfEl.innerHTML = stockCat.profiles.map(p => `<option value="${p.id}" ${p.id === CONFIG.default_stock_prof ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('');
+                defStockProfEl.innerHTML = stockCat.profiles.map(p => `<option value="${escapeHtml(p.id)}" ${p.id === CONFIG.default_stock_prof ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('');
             }
             if (defEtfProfEl) {
                 const etfCat = CATEGORIES.find(c => c.catId === 2) || CATEGORIES[CATEGORIES.length - 1];
-                defEtfProfEl.innerHTML = etfCat.profiles.map(p => `<option value="${p.id}" ${p.id === CONFIG.default_etf_prof ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('');
+                defEtfProfEl.innerHTML = etfCat.profiles.map(p => `<option value="${escapeHtml(p.id)}" ${p.id === CONFIG.default_etf_prof ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('');
             }
         }
 
 
         function loadCategories() {
-            selCat.innerHTML = CATEGORIES.map(c => `<option value="${c.catId}">${escapeHtml(c.catName)}</option>`).join('');
+            selCat.innerHTML = CATEGORIES.map(c => `<option value="${escapeHtml(c.catId)}">${escapeHtml(c.catName)}</option>`).join('');
             const validCat = CATEGORIES.find(c => c.catId === CONFIG.current_cat_id) ? CONFIG.current_cat_id : CATEGORIES[0].catId;
             selCat.value = validCat;
             loadProfilesList(validCat, CONFIG.current_profile_id);
@@ -2317,10 +2317,12 @@ function initMainApp() {
         function loadProfilesList(catId, profIdToSelect) {
             const targetCatId = safeInt(catId, 0);
             const cat = CATEGORIES.find(c => c.catId === targetCatId) || CATEGORIES[0];
-            selProf.innerHTML = cat.profiles.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+            const safeProfiles = (cat && Array.isArray(cat.profiles) && cat.profiles.length > 0) ? cat.profiles : (DEFAULT_CATEGORIES[0].profiles);
             
-            const profExists = cat.profiles.find(p => p.id === profIdToSelect);
-            const activeProfId = profExists ? profIdToSelect : cat.profiles[0].id;
+            selProf.innerHTML = safeProfiles.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join('');
+            
+            const profExists = safeProfiles.find(p => p && p.id === profIdToSelect);
+            const activeProfId = profExists ? profIdToSelect : safeProfiles[0].id;
             selProf.value = activeProfId;
             
             loadProfileData(cat.catId, activeProfId);
@@ -2647,8 +2649,12 @@ function initMainApp() {
 
 
                 if (data.categories !== undefined && Array.isArray(data.categories)) { 
-                    // 🛡️ 增加 categories 陣列深度校驗，防止殘缺 JSON 注入引發 AST 拋錯
-                    const isValidStructure = data.categories.length > 0 && data.categories.every(c => c && Array.isArray(c.profiles));
+                    // 🛡️ 加固：必須非空陣列、每項必須有 profiles 且 profiles 必須非空陣列、每個 profile 必須是物件且含有效 id
+                    const isValidStructure = data.categories.length > 0 && data.categories.every(c => 
+                        c && typeof c === 'object' && 
+                        Array.isArray(c.profiles) && c.profiles.length > 0 && 
+                        c.profiles.every(p => p && typeof p === 'object' && p.id !== undefined && p.id !== null)
+                    );
                     if (isValidStructure) {
                         saveCategories((cats) => {
                             // 就地替換 currentCats 內容，確保寫回 Storage 的是新資料
@@ -2658,6 +2664,7 @@ function initMainApp() {
                         loadCategories(); 
                     } else {
                         console.warn("CM Scraper: 匯入之 categories 結構異常，已略過分類還原");
+                        showToast("⚠️ 分類群組結構異常，已略過分類還原", "error");
                     }
                 }
             }
@@ -2770,7 +2777,7 @@ function initMainApp() {
                 const cat = CATEGORIES.find(c => c.catId === targetCatId) || CATEGORIES[0];
                 const selProf = document.getElementById('cm-profile-select');
                 if (selProf) {
-                    selProf.innerHTML = cat.profiles.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+                    selProf.innerHTML = cat.profiles.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join('');
                     const profExists = cat.profiles.find(p => p.id === targetProfId);
                     const activeProfId = profExists ? targetProfId : cat.profiles[0].id;
                     selProf.value = activeProfId;
