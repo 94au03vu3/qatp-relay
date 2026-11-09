@@ -79,175 +79,173 @@
 
 ## 【貳、 QA 測試驗證任務書 (QATP)】
 
-> **1. 目標版本號**：`4.3.4` ｜ **2. 目標語系**：`JavaScript (ES6+ Userscript)` ｜ **3. By-Design 豁免清單**：`見下方第 1 小節清單` ｜ **4. Profile**：`Profile-WebScript`
+> 🔒 **規格預設值顯式定錨**：  
+> **1. 目標版本號**：`3.9.0` ｜ **2. 目標語系**：`zh-TW` ｜ **3. By-Design 豁免清單**：`見下方第 1 小節` ｜ **4. Profile**：`Profile-WebScript`
 
 ---
 
-### 0. 🧬 【強制優先】Phase 0：獨立白箱代碼靜態風險排查 (Static Code Audit)
+### 0. 🧬 Phase 0：獨立白箱代碼靜態風險排查 (Static Code Audit)
 
 * **0.1 【Shell / CLI / 外部進程與路徑轉義漏洞排查】**：  
-  本腳本為純瀏覽器油猴腳本，無 Node.js `child_process` 或 Shell 命令調用。外部請求僅透過 `fetch` 與 `GM_xmlhttpRequest` 存取 Google Docs 匯出端點，URL 經過正則驗證與 `encodeURIComponent`，無注入風險。`[PASS]`
+  `[PASS]` 本專案為前端 Userscript，未調用外部 Shell/CLI 命令。URL 參數建構採專屬正則提取與字串拼接，無命令注入途徑。
 * **0.2 【字串與正則邊界吞噬排查】**：  
-  審查 `sanitizeMarkdownArtifacts`、`applyNoiseRegexes` 與 `executeSingleMatchSlice`。正則閉合斜線透過 `findRegexClosingSlash` 反向計數跳脫斜線（反斜線奇偶校驗），有效防範 `\/` 逃逸；代碼塊正則強制解耦 `i` 並補齊 `g` 旗標；無失控 dotAll 跨行無界限吞噬。`[PASS]`
+  `[PASS]` 核心標的提取正則 `/\/stock\/([A-Za-z0-9]+)(?:[\/\?#]|$)/` 採用非捕獲群組邊界，無萬用字元跨行吞噬風險；Google 試算表正規提取採 `[a-zA-Z0-9-_]+` 明確字元集，換行存活性經推演完整。
 * **0.3 【系統資源競爭、死鎖、洩漏與跨執行緒 GUI 讀寫排查】**：  
-  MutationObserver 具備 `mountDebounceTimer`（200ms 防抖）；Toast 具備定時器主動清理（`clearTimeout(toast._timer)`）；window 級拖曳監聽在 `mouseup` 時 100% 顯式登出（`removeEventListener`）。`[PASS]`
+  `[PASS]` 批次接力計時器 `batchMonitorTimer` 與輪詢計時器 `singleScrapePoller` 於啟動與終止分支均落實 `clearInterval` 與顯式重置；`singleScrapePoller` 設有 50 次 (25 秒) 硬性截止上限。
 * **0.4 🚨 【全域頂層範圍語法崩潰與入口盲區排查 (Zero-Meltdown Audit)】**：  
-  IIFE 閉包封裝完整，未污染全域 `window` 命名空間（除 MiniMax Fiber 橋接所需之自定義事件外）。頂層無未捕獲之同步連網拋錯。`[PASS]`
+  `[PASS]` 頂層 IIFE `setupNetworkInterceptor` 於 `unsafeWindow` 具備三元運算子降級；主程式入口 `initMainApp` 採 `document.readyState` 監聽保護；前置版本號宣告於第 5 行符合規格；`GM_registerMenuCommand` 無條件掛載，頂層範圍無未防護之死區存取。
 * **0.5 🛡️ 【災難救援與脫困指令執行環境能力邊界排查 (Runtime Context Feasibility)】**：  
-  選單命令 `resetUiPosition` 與 `clearQaQueue` 不依賴頁面 DOM，直接操作 `GM_setValue` 與內部 `globalConfig`，並具備 `localStorage` 降級容錯，符合瀏覽器沙盒邊界契約。`[PASS]`
+  `[PASS]` 原生註冊之選單指令「🔄 重置面板位置 (尋回 UI)」直接調用原生 `GM_setValue` 與 DOM 修改，無需依賴內部非同步閉包，具備沙盒內獨立脫困可行性。
 
 ---
 
-### 1. 🛡️ 【強制】架構妥協與驗收豁免須知 (By-Design Exceptions)
+### 1. 🛡️ 架構妥協與驗收豁免須知 (By-Design Exceptions)
 
-1. **[BY-DESIGN-01] 剪貼簿讀取權限阻斷降級 (Clipboard Permission Denial)**：  
-   *說明*：在無使用者主動聚焦手勢或瀏覽器隱私安全策略限制下，`navigator.clipboard.readText()` 可能拋出 `NotAllowedError`。  
-   *妥協處理*：代碼已實裝 `try-catch` 捕獲，並平滑降級至 DOM 轉譯提取（如 Claude 與 Z.AI 適配器），不視為提取失敗。  
-   *不可豁免鐵律自查*：無衝突（未引發崩潰，未破壞資料完整性）。
-2. **[BY-DESIGN-02] 非目標語系或純文字對話預設無成果物 (No Deliverable in Text Chat)**：  
-   *說明*：若對話輪次僅為純文字對話（無代碼塊、無 Artifacts、無預覽抽屜），綠色「📄 複製右側預覽」按鈕點擊後將提示並自動降級複製最後回覆。  
-   *妥協處理*：此屬預期降級機制，保障使用者至少獲取對話文字。  
-   *不可豁免鐵律自查*：無衝突。
+1. **自選股與大盤頁面排除自動路由【By-Design / 預期行為】**：  
+   `/watchlist` 與 `/market` 頁面無單一標的代碼，自動路由邏輯主動略過，維持使用者當前選擇。  
+   *不可豁免鐵律自查：無衝突（核心資料無損壞，載入無崩潰）。*
+2. **失焦狀態下 `navigator.clipboard.writeText` 拋出例外【By-Design / 預期行為】**：  
+   瀏覽器沙盒限制背景分頁調用 Clipboard API，腳本以 `.catch(() => {})` 靜默吞除，並改由 `GM_setClipboard` 雙軌寫入及 UI 呼吸燈引導，屬安全降級策略。  
+   *不可豁免鐵律自查：無衝突。*
+3. **大盤技術分析輸出剝離流水帳【By-Design / 預期行為】**：  
+   大盤 K 線僅保留雷達摘要，不輸出逐筆 OHLCV，以節省上下文視窗空間。  
+   *不可豁免鐵律自查：無衝突。*
 
 ---
 
 ### 2. 四大維度測試案例清單 (Test Cases)
 
-#### 🌟 維度一：新功能驗收 (TC-NEW-xx)
+#### 🌟 維度一：新功能驗收 (TC-NEW)
 
-* **TC-NEW-01: Claude 雙軌 Artifacts 抽屜成果物複製與降級**  
-  - *測試情境*：驗證 Claude 頁面右側存在 Artifacts 時能正確提取，若無或剪貼簿讀取受阻時能平滑降級。  
-  - *操作步驟*：於 Claude 頁面點擊 `📄 複製右側預覽`。  
-  - *預期結果*：優先提取右側 Artifacts；若讀取失敗則自動降級至 Artifacts DOM 轉譯，無內容時降級為對話純文字複製。  
-  - *AST 語意錨點推演*：`handleClaudePreviewAction` 函式內呼叫 `getClaudeDeliverableText()`，以 `try-catch` 包覆 `navigator.clipboard.readText()`，失敗時回退至 `domToMarkdown(artifactRegion, Adapters.Claude.cleanNode)`。  
-  - *終審標籤*：`[PASS]`
+* **TC-NEW-01：URL 標的代碼嗅探與個股/ETF 零點擊自動路由**
+  * **測試情境**：驗證標的變更時自動切換 Profile。
+  * **操作步驟**：分別跳轉至 `stock/2330`、`stock/00878`、`stock/009813`、`stock/00679B`。
+  * **預期結果**：`2330` 自動載入存股分類 (catId: 0)；`00878` 命中高股息載入 Profile 11；`009813` 命中市值型載入 Profile 10；`00679B` 命中債券特徵載入 Profile 12。
+  * **語意錨點推演**：`initMainApp` 內 `applyAutoRoute` 緊鄰 `stockId.startsWith("00")` 處，依字尾特徵與 Storage 名單精確分流。  
+  * **結論標籤**：`[PASS]`
 
-* **TC-NEW-02: MiniMax 成果物抽屜水合煞車與長度下放 (Hotfix-03)**  
-  - *測試情境*：驗證 MiniMax 抽屜開啟後，短文本或單行文本能正常通過煞車檢測，不再發生逾時誤判。  
-  - *操作步驟*：觸發 MiniMax 成果物複製，觀察輪詢流程。  
-  - *預期結果*：文字長度 `> 0` 且連續 400ms 穩定即判定就緒，逾時但非空時啟動兜底放行。  
-  - *AST 語意錨點推演*：`getMiniMaxDeliverableText` 函式內 `txt.length > 0` 作為穩定性計數條件，並在迴圈結束後設置 `if (!isReady && lastObservedText.length > 0) isReady = true;`。  
-  - *終審標籤*：`[PASS]`
+* **TC-NEW-02：URL 自動路由去抖動與同頁面手動選擇優先鎖**
+  * **測試情境**：驗證同標的頁面手動切換選單後不被定時器逆向覆蓋。
+  * **操作步驟**：進入 `stock/2330`，手動切換至 Profile 1，等待 3 秒定時器輪詢。
+  * **預期結果**：選單與勾選維持 Profile 1，未被強制作動重設回 Profile 4。
+  * **語意錨點推演**：`selCat.onchange` 與 `selProf.onchange` 內設定 `userManuallySelectedProfile = true`，且 `applyAutoRoute` 頂部具備 `stockId === lastSniffedStockId && userManuallySelectedProfile` 中斷保護。  
+  * **結論標籤**：`[PASS]`
 
-* **TC-NEW-03: 跨站點 QA 採集隊列 TTL 自動過期與手動右鍵清空**  
-  - *測試情境*：驗證暫存池在超過 `ttlHours` 後自動清空，且齒輪按鈕右鍵可強制清除。  
-  - *操作步驟*：加入採集項目，右鍵點擊懸浮列齒輪按鈕 `⚙️`。  
-  - *預期結果*：右鍵點擊攔截預設選單，佇列清空，齒輪動態發光動畫類別 `.ai-copy-gear-active` 立即移除。  
-  - *AST 語意錨點推演*：`getQaQueue` 內 `Date.now() - raw.lastUpdated > ttlMs` 判斷自滅；`btnGear.oncontextmenu` 呼叫 `clearQaQueue()` 並 `e.preventDefault()`。  
-  - *終審標籤*：`[PASS]`
+* **TC-NEW-03：Google 試算表 CSV 雲端三向同步、萬能補零與防空熔斷**
+  * **測試情境**：驗證 CSV 轉譯、HTML 守衛、補零與空內容保護。
+  * **操作步驟**：配置合法試算表網址並點擊同步；模擬未公開試算表 HTML 內容；模擬全空 CSV。
+  * **預期結果**：合法 CSV 解析後 A/B 欄純數字補前綴 `00`，C 欄不補 `00`，去重後寫入 Storage；HTML 響應與空內容觸發警告並中止落地，本機現有名單無損。
+  * **語意錨點推演**：`syncGoogleSheetLists` 內調用 `getGoogleSheetsCsvUrl` 與 `isHtmlResponse`，並於解析末端檢查陣列長度後落地。  
+  * **結論標籤**：`[PASS]`
 
-#### 🔄 維度二：關鍵防禦機制實體存活審查 (TC-REG-xx)
+* **TC-NEW-04：中央舞台 460px 雙欄佈局拓寬與 Accordion 分流**
+  * **測試情境**：驗證 CSS Grid 雙欄佈局於 1080p 螢幕之呈現。
+  * **操作步驟**：展開主面板，全開所有 Accordion。
+  * **預期結果**：即時五檔置頂通欄 (`cm-grid-full`)，技術/財務分析佔據左欄，基本/籌碼/ETF 佔據右欄，舞台寬度動態自適應為 460px，按鈕常駐可見。
+  * **語意錨點推演**：`getDynamicUIParams` 內 `centerW: 460 + (off * 16)`，且 `createUI` 內容器採用 `.cm-checkbox-area-grid`。  
+  * **結論標籤**：`[PASS]`
 
-* **TC-REG-01: 雲端同步本地座標與熱鍵防抹殺隔離 (Hotfix-02)**  
-  - *測試情境*：驗證自 Google Docs 同步雲端 JSON 時，本機座標與自訂熱鍵不被覆蓋。  
-  - *操作步驟*：執行 `syncFromJsonDoc` 覆蓋設定。  
-  - *預期結果*：內容屬性被更新，但 `uiPosition`、`orbPosition`、`toastPosition` 與 `qaQueueSettings.captureHotkey/summaryHotkey` 100% 完整保留。  
-  - *AST 語意錨點推演*：`syncFromJsonDoc` 內使用 `typeof preservedHotkeys.captureHotkey !== 'undefined'` 進行嚴格型別校驗與回填；`applyLocalOnlyOverrides` 鎖定座標結構。  
-  - *終審標籤*：`[PASS]`
+* **TC-NEW-05：情境感知互斥遮罩與遮罩狀態防抹殺**
+  * **測試情境**：驗證個股與 ETF 切換時面板控制項之隱藏，以及儲存時對隱藏模組記憶之保全。
+  * **操作步驟**：切換至 ETF 專區，確認財務分析區塊隱藏；點擊儲存組合勾選狀態。
+  * **預期結果**：`#acc-finance` 設為 `display: none`；被遮罩之財務分析模組勾選狀態不被清空。
+  * **語意錨點推演**：`cm-btn-save-profile.onclick` 內分別採集 `visibleChecked` 與 `hiddenExisting` 進行 Set 聯集合併。  
+  * **結論標籤**：`[PASS]`
 
-* **TC-REG-02: 綠色成果物按鈕雙軌永駐與點擊穿透契約**  
-  - *測試情境*：驗證在 Claude、Z.AI 與 MiniMax 站點上，綠色按鈕 `📄 複製右側預覽` 始終可見且不被 CSS 穿透契約誤殺。  
-  - *操作步驟*：檢查掛載之 DOM 樹結構與 CSS 屬性。  
-  - *預期結果*：按鈕具備 `.ai-copy-btn-docx` 類別，CSS 宣告 `pointer-events: auto !important;`，容器層具備 `pointer-events: none !important;`。  
-  - *AST 語意錨點推演*：`createUIElement` 內 `if (isZai || isMiniMax || isClaude)` 分支同時生成 `btnSingleBlue` 與 `btnPreviewGreen`；`injectStyles` 內顯式指定穿透與互動權限。  
-  - *終審標籤*：`[PASS]`
+* **TC-NEW-06：剪貼簿失焦靜默遺失防禦與呼吸燈動畫**
+  * **測試情境**：驗證背景分頁完成批次抓取時之防禦機制。
+  * **操作步驟**：於未聚焦主視窗情境下完成批次抓取。
+  * **預期結果**：`document.hasFocus()` 為 `false` 時，Toast 提示手動按鍵，重新複製按鈕套用 `.cm-btn-pulse` 呼吸燈類別；手動複製時若跨標的則彈出代碼差異警告。
+  * **語意錨點推演**：`finishScrape` 內檢測 `!document.hasFocus()`，並於 `#cm-btn-recopy.onclick` 內比較 `lastStockId !== currentStockId`。  
+  * **結論標籤**：`[PASS]`
 
-* **TC-REG-03: AI Studio 切片雙引擎與防吞噬正則健全性**  
-  - *測試情境*：驗證切片正則執行期間，不因單引號、雙引號或轉義斜線導致例外中斷。  
-  - *操作步驟*：觸發 5 組切片按鈕。  
-  - *預期結果*：`findRegexClosingSlash` 精確切分 Pattern 與 Flags，代碼塊目標強制附加 `g` 旗標提取最長區塊。  
-  - *AST 語意錨點推演*：`executeSingleMatchSlice` 內 `regex.global` 分支遍歷 `matchAll` 並比對 `candidate.length > maxLen`。  
-  - *終審標籤*：`[PASS]`
+#### 🔄 維度二：關鍵防禦機制實體存活審查 (TC-REG)
 
-#### ⚠️ 維度三：架構風險與極端情境識別 (TC-RISK-xx)
+* **TC-REG-01：批次接力任務唯一指紋與雙 Worker 防踩踏 (`FIX-01`)**
+  * **測試情境**：驗證多視窗發起任務時佇列保護與停滯復原。
+  * **操作步驟**：檢查任務資料結構指紋與 Worker 視窗名稱驗證。
+  * **預期結果**：任務具備隨機 `taskId`；Worker 僅在 `window.name === 'CMScrapeWorker'` 下執行；監控計時器具備 180 秒無進度停滯中斷保護。
+  * **語意錨點推演**：`startRelayBatchScrape` 生成 `taskId`，Worker 內部驗證 `latestTask.id !== task.id`，監控定時器內置停滯超時偵測。  
+  * **結論標籤**：`[PASS]`
 
-* **TC-RISK-01: 滿額自動總結與滾動更新佇列競爭**  
-  - *測試情境*：驗證當站點達到 `targetCount` 門檻時，自動觸發合併複製，且依據 `keepQueueOnAutoSummary` 決定是否保留隊列。  
-  - *操作步驟*：連續採集達 6 站。  
-  - *預期結果*：觸發合併寫入剪貼簿，若開啟保留佇列則不調用 `clearQaQueue()`，後續採集可繼續增量覆蓋。  
-  - *AST 語意錨點推演*：`handleCaptureAction` 內 `if (targetCount > 0 && count >= targetCount)` 區塊執行合併，依據 `keepQueue` 旗標分支處置。  
-  - *終審標籤*：`[PASS]`
+* **TC-REG-02：面板座標與拖曳夾緊 `panel_pos` 之 NaN 數值防禦 (`FIX-02`)**
+  * **測試情境**：驗證初次載入未拖曳或展開抽屜時面板座標計算。
+  * **操作步驟**：檢查寫入 `panel_pos` 之數值型態校驗。
+  * **預期結果**：寫入前均經 `Number.isFinite` 兜底，防止 `parseFloat("")` 產生 `NaN` 污染本機儲存。
+  * **語意錨點推演**：`toggleSideDrawer` 與 `makeDraggable.onmouseup` 處顯式使用 `Number.isFinite(curTop) ? curTop : 150`。  
+  * **結論標籤**：`[PASS]`
 
-* **TC-RISK-02: 雙熱鍵與 Caret Browsing 原生彈窗衝突阻斷**  
-  - *測試情境*：驗證按下 F7 或 F4 時，瀏覽器原生鍵盤瀏覽 (Caret Browsing) 詢問彈窗被徹底抑制。  
-  - *操作步驟*：於頁面按下 F7 總結熱鍵。  
-  - *預期結果*：原生彈窗不出現，腳本成功執行總結複製。  
-  - *AST 語意錨點推演*：`setupHotkeys` 內 `window.addEventListener('keydown', ..., true)` 於捕獲階段首行執行 `e.preventDefault()` 與 `e.stopPropagation()`。  
-  - *終審標籤*：`[PASS]`
+* **TC-REG-03：雙抽屜 Storage Key 徹底隔離 (`UI-03`)**
+  * **測試情境**：驗證右抽屜儲存不反向覆蓋左抽屜系統設定。
+  * **操作步驟**：檢視 `#cm-cfg-save` 點擊回呼所寫入之 Storage Key 清單。
+  * **預期結果**：右抽屜僅寫入 `limit_*` 與黑白名單，徹底剔除 `font_offset`、`isExpanded`、`cm_drawer_side`、`cm_kline_sort` 及熱鍵配置。
+  * **語意錨點推演**：`#cm-cfg-save.onclick` 內不含任何左抽屜配置變數之 `GM_setValue` 調用。  
+  * **結論標籤**：`[PASS]`
 
-* **TC-RISK-03: Toast 長亮定位與動態拖曳防死鎖**  
-  - *測試情境*：驗證進入 Toast 拖曳定位模式時，不會因過渡動畫或 transform 累積產生座標飄移。  
-  - *操作步驟*：點擊 `🍞` 進入長亮模式，拖曳至新位置後再次點擊鎖定。  
-  - *預期結果*：進入時強制清除 `transform` 並移除 transition，拖曳結束後物理儲存 `getBoundingClientRect()` 真理坐標。  
-  - *AST 語意錨點推演*：`toggleToastPositioningMode` 內 `toast.style.transform = 'none'`，`setupDraggableUI` 呼叫時 `isToast = true` 抑制 translate 重疊。  
-  - *終審標籤*：`[PASS]`
+* **TC-REG-04：資產負債表選擇器收斂與 K 線接力 Watchdog 時序對齊 (`FIX-04`)**
+  * **測試情境**：驗證資產負債表表格鎖定與接力超時時間。
+  * **操作步驟**：審查 DOM 選擇器字串與 Worker Watchdog 延遲常數。
+  * **預期結果**：選擇器收斂為 `.balanceSheet__table table, .stockPanel__view table`，移除全域裸露 `table`；Watchdog 延長為 25,000ms，消除與 Poller 之時序競爭。
+  * **語意錨點推演**：`MODULE_REGISTRY['balance-sheet']` 內部 `getTableSnapshot` 選擇器字面量，以及 `checkAndExecuteWorkerTask` 內 `setTimeout(..., 25000)`。  
+  * **結論標籤**：`[PASS]`
 
-#### 🏛️ 維度四：靜態資料庫殘缺自癒推演 (TC-DEBT-xx)
+#### ⚠️ 維度三：架構風險與極端情境識別 (TC-RISK)
 
-* **TC-DEBT-01: Storage 配置版本遷移與幽靈欄位剔除**  
-  - *測試情境*：模擬存儲中存在舊版殘缺欄位或幽靈欄位 `toastSettings.anchor`。  
-  - *操作步驟*：調用 `sanitizeConfig({ toastSettings: { anchor: 'bottom-right' } })`。  
-  - *預期結果*：`anchor` 被 `delete` 顯式剔除，其餘核心設定項補齊預設值。  
-  - *AST 語意錨點推演*：`sanitizeConfig` 內 `delete ts.anchor;` 與 `DEFAULT_CONFIG` 葉節點回退鏈保全。  
-  - *終審標籤*：`[PASS]`
+* **TC-RISK-01：`CATEGORIES` 跨分頁快照抹殺防禦與深度陣列守衛 (`FIX-03` / `WB-01`)**
+  * **測試情境**：驗證分類改名與組合更新時本機資料之原子化寫入。
+  * **操作步驟**：審查 `saveCategories` 實作及載入初始化校驗。
+  * **預期結果**：儲存時重新由 Storage 讀取最新狀態並執行 `mutatorFn` 後寫回；初始化時驗證 `Array.isArray(c.profiles)`，防止殘缺陣列導致執行期拋錯。
+  * **語意錨點推演**：`saveCategories` 封裝於 `initMainApp` 頂層內部，改名與存檔回呼全面透過該函式變更。  
+  * **結論標籤**：`[PASS]`
 
-* **TC-DEBT-02: 站點排序陣列殘缺自癒推演**  
-  - *測試情境*：模擬 `siteTabOrder` 遺漏新站點或型別非陣列。  
-  - *操作步驟*：調用 `sanitizeConfig({ siteTabOrder: ['chatgpt'] })`。  
-  - *預期結果*：自動保留現有順序並於尾端補齊其餘 10 個站點，保證長度為 11 且無重複項。  
-  - *AST 語意錨點推演*：`sanitizeConfig` 內 `defaultSites.forEach(s => { if (!data.siteTabOrder.includes(s)) data.siteTabOrder.push(s); })`。  
-  - *終審標籤*：`[PASS]`
+#### 🏛️ 維度四：靜態資料庫殘缺自癒推演 (TC-DEBT)
 
-* **TC-DEBT-03: 雜訊規則惡意或殘缺正則防禦**  
-  - *測試情境*：模擬存儲內被注入致命 dotAll 吞噬正則（如 `/.*?[\n]?/gis`）。  
-  - *操作步驟*：調用 `sanitizeConfig` 檢查正則清洗機制。  
-  - *預期結果*：命中 `badRegexPattern` 檢測，強制自動回退至出廠安全預設正則。  
-  - *AST 語意錨點推演*：`sanitizeConfig` 內 `badRegexPattern.test(data.noiseSettings.customNoiseRegexes)` 命中時重置為 `DEFAULT_CONFIG.noiseSettings.customNoiseRegexes`。  
-  - *終審標籤*：`[PASS]`
+* **TC-DEBT-01：全設定備份 Payload 完整性結構自癒 (`WB-02`)**
+  * **測試情境**：驗證 `applyJsonData` 於各設定鍵缺失或型態異常時之容錯。
+  * **操作步驟**：推演導入缺漏或殘缺 JSON 設定檔。
+  * **預期結果**：數值型態經 `safeInt` 兜底，字串經 `.trim()` 轉型，分類陣列驗證 `Array.isArray` 後方寫入 Storage，系統零崩潰。
+  * **語意錨點推演**：`applyJsonData` 內部逐欄以安全檢查保護。  
+  * **結論標籤**：`[PASS]`
 
 ---
 
 ### 3. 驗收報告格式要求 (Mandatory Output Schema)
 
 #### 3.1 測試環境與涵蓋範圍總覽
-- **目標版本號**：4.3.4
-- **目標語系**：JavaScript (ES6+ Userscript / Tampermonkey)
-- **Profile**：Profile-WebScript
-- **測試範圍**：全量 11 站點適配器、雙軌成果物抽屜、QA 採集暫存池、雲端同步引擎、Toast 定位體系。
+* **目標版本號**：`3.9.0`
+* **目標語系**：`zh-TW`
+* **By-Design 豁免清單**：自選股與大盤跳過路由、失焦狀態下原生剪貼簿例外吞除、大盤無逐筆流水帳。
+* **Profile**：`Profile-WebScript`
 
 #### 3.2 四大維度逐項檢驗表格
-
-| 案例編號 | 測試維度 | 檢驗核心目標 | 實體代碼語意錨點 | 終審標籤 |
+| 測試案例編號 | 測試維度 | 核心驗收目標 | 實體代碼對應邏輯錨點 | 終審標籤 |
 | :--- | :--- | :--- | :--- | :--- |
-| **TC-NEW-01** | 維度一：新功能 | Claude 雙軌成果物提取與降級 | `handleClaudePreviewAction 內 緊鄰 getClaudeDeliverableText` | `[PASS]` |
-| **TC-NEW-02** | 維度一：新功能 | MiniMax 水合煞車長度下放 | `getMiniMaxDeliverableText 內 緊鄰 txt.length > 0` | `[PASS]` |
-| **TC-NEW-03** | 維度一：新功能 | QA 採集隊列 TTL 與齒輪右鍵清空 | `getQaQueue 內 緊鄰 Date.now() - raw.lastUpdated` | `[PASS]` |
-| **TC-REG-01** | 維度二：防迴歸 | 雲端同步本機座標與熱鍵防抹殺 | `syncFromJsonDoc 內 緊鄰 preservedHotkeys.captureHotkey` | `[PASS]` |
-| **TC-REG-02** | 維度二：防迴歸 | 成果物綠鍵永駐與點擊穿透契約 | `createUIElement 內 緊鄰 btnPreviewGreen` | `[PASS]` |
-| **TC-REG-03** | 維度二：防迴歸 | AI Studio 切片雙引擎與正則防吞噬 | `executeSingleMatchSlice 內 緊鄰 findRegexClosingSlash` | `[PASS]` |
-| **TC-RISK-01** | 維度三：風險情境 | 滿額自動總結與滾動更新佇列競爭 | `handleCaptureAction 內 緊鄰 count >= targetCount` | `[PASS]` |
-| **TC-RISK-02** | 維度三：風險情境 | F7/F4 雙熱鍵與 Caret Browsing 阻斷 | `setupHotkeys 內 緊鄰 e.preventDefault()` | `[PASS]` |
-| **TC-RISK-03** | 維度三：風險情境 | Toast 長亮定位與動態拖曳防死鎖 | `toggleToastPositioningMode 內 緊鄰 isToastPositioningMode` | `[PASS]` |
-| **TC-DEBT-01** | 維度四：債務推演 | Storage 配置遷移與 anchor 剔除 | `sanitizeConfig 內 緊鄰 delete ts.anchor` | `[PASS]` |
-| **TC-DEBT-02** | 維度四：債務推演 | 11 站點排序陣列缺漏自癒 | `sanitizeConfig 內 緊鄰 data.siteTabOrder.push(s)` | `[PASS]` |
-| **TC-DEBT-03** | 維度四：債務推演 | 致命 dotAll 吞噬正則免疫回退 | `sanitizeConfig 內 緊鄰 badRegexPattern.test` | `[PASS]` |
+| **TC-NEW-01** | 維度一 | URL 標的嗅探與 Profile 自動分流 | `applyAutoRoute` 內 `stockId.startsWith("00")` 決策分支 | `[PASS]` |
+| **TC-NEW-02** | 維度一 | 同頁面手動選擇優先鎖 | `applyAutoRoute` 頂部 `userManuallySelectedProfile` 檢查 | `[PASS]` |
+| **TC-NEW-03** | 維度一 | 雲端試算表 CSV 同步與防空熔斷 | `syncGoogleSheetLists` 內調用 `isHtmlResponse` 與 Set 去重 | `[PASS]` |
+| **TC-NEW-04** | 維度一 | 中央舞台 460px 雙欄 Grid 佈局 | `getDynamicUIParams` 內 `centerW: 460` 與樣式注入 | `[PASS]` |
+| **TC-NEW-05** | 維度一 | 個股/ETF 情境遮罩與聯集防抹殺 | `loadProfileData` 內顯隱切換與儲存時聯集合併 | `[PASS]` |
+| **TC-NEW-06** | 維度一 | 剪貼簿失焦雙軌寫入與呼吸燈 | `finishScrape` 內 `!document.hasFocus()` 與脈衝動效 | `[PASS]` |
+| **TC-REG-01** | 維度二 | 批次指紋防踩踏與 3 分鐘停滯釋放 | `startRelayBatchScrape` 注入 `taskId` 與監聽計時器超時 | `[PASS]` |
+| **TC-REG-02** | 維度二 | 座標寫入 `Number.isFinite` 兜底 | `toggleSideDrawer` 與 `makeDraggable` 內座標兜底 | `[PASS]` |
+| **TC-REG-03** | 維度二 | 雙抽屜 Storage Key 徹底隔離 | `#cm-cfg-save.onclick` 剝離系統設定鍵 | `[PASS]` |
+| **TC-REG-04** | 維度二 | 選擇器裸表收斂與 Watchdog 25s | `MODULE_REGISTRY['balance-sheet']` 選擇器與定時器 25000ms | `[PASS]` |
+| **TC-RISK-01** | 維度三 | 快照抹殺根治與深度陣列守衛 | `saveCategories` 原子化更新與內部 profiles 陣列檢查 | `[PASS]` |
+| **TC-DEBT-01** | 維度四 | 設定備份匯入結構自癒防呆 | `applyJsonData` 內部欄位安全型態轉換 | `[PASS]` |
 
 #### 3.2.1 🕹️ 人類實機操作核對專區 (Manual Live Verification Area)
-
 | 實機項目編號 | 驗證操作目標 | 實體代碼對應邏輯錨點 | 實機回填要求 | 當前專區狀態 |
 | :--- | :--- | :--- | :--- | :--- |
-| **MV-01** | MiniMax / Z.AI / Claude 右側抽屜實機開合與提取 | `getClaudeDeliverableText / getZaiDeliverableText / getMiniMaxDeliverableText` | 於具備 Artifacts 或成果物之對話中點擊綠鍵，貼回剪貼簿字數與開合延遲日誌 | 待回填 |
-| **MV-02** | F4 / F7 全域跨輸入框採集與總結流暢度 | `setupHotkeys 內 緊鄰 isHotkeyMatch` | 於文字輸入框內聚焦狀態按下 F4 與 F7，確認輸入框文字未被截斷且總結如期產生 | 待回填 |
+| **MV-01** | 實機三螢幕多視窗並行批次複製 | `finishScrape` 內 `!document.hasFocus()` 處 | 實測失焦完成時是否出現呼吸燈且 F9 能取回最新數據 | 待回填 |
+| **MV-02** | 實機 Google 試算表公開位址同步 | `syncGoogleSheetLists` 內 `GM_xmlhttpRequest` 處 | 點擊同步確認 Storage 名單正確更新且萬能補零生效 | 待回填 |
 
 #### 3.3 🚨 發現之缺陷與異常清單 (Defects & Observations)
-*(本次靜態白箱審查未發現 P0 / P1 / P2 級阻斷性架構缺陷。全量代碼防禦完備。)*
+* 無阻塞性缺陷（P0 / P1 / P2 均為 0 項）。
 
 #### 3.3.1 🧬 清單外白箱代碼缺陷 (Off-List Static Vulnerabilities)
-*(Phase 0.1 至 0.5 專項排查全數通過，無清單外白箱缺陷。)*
+* 無清單外白箱安全漏洞。
 
 #### 3.4 最終 PASS / FAIL 簽核結論與發布建議
-
-**【6-A 技術手冊封存核准】**  
-- **結論依據**：3.2 表格內全量 12 項靜態測試案例（TC-NEW 3項、TC-REG 3項、TC-RISK 3項、TC-DEBT 3項）全數獲判終審標籤 `[PASS]`。Phase 0 代碼五大排查無任何架構漏洞，Zero-Meltdown 冷啟動無暴斃風險，AST 閉環結構完整。
-- **發布處置**：正式簽發【6-A 技術手冊封存核准】，解除 ENG 交付責任，允許代碼正式合併。
-- **6-B 維運追蹤**：3.2.1 專區中之 `MV-01` 與 `MV-02` 獨立移入 6-B 現場維運核對追蹤事項，由測試人員實機回填，不反向阻礙本輪代碼交付。
+* **靜態審查結果**：3.2 表格內全量 12 項測試案例均為 `[PASS]`，白箱推演無架構阻斷缺陷，無未決之 `[🟡 未決待處置]`。
+* **分階段簽核授權**：依據 QP-13🚀 規範，正式簽發 **【6-A 技術手冊封存核准】**，宣告本輪代碼靜態架構與白箱代碼品質達標，**解除 ENG 交付責任**。
+* **維運銜接**：3.2.1 專區之 2 項動態實機操作項目移入 **【6-B 維運與動態追蹤待辦】**，供現場環境後續追蹤回填，不阻礙本次代碼交付。
