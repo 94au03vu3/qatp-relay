@@ -79,223 +79,202 @@
 
 ## 【貳、 QA 測試驗證任務書 (QATP)】
 
-> **1. 目標版本號**：`1.3.2` ｜ **2. 目標語系**：`繁體中文 (PCRE2 規則維護 / Python Desktop GUI)` ｜ **3. By-Design 豁免清單**：`見下方第 1 小節清單` ｜ **4. Profile**：`Profile-BackendScript`
+> 🔒 **表頭規格預設值顯式定錨**：  
+> **1. 目標版本號**：`4.3.5` ｜ **2. 目標語系**：`繁體中文 (zh-TW) UI，相容簡繁 AI 平台標籤` ｜ **3. By-Design 豁免清單**：`見第 1 小節清單 (4 項，含對稱面與不可豁免鐵律自查)` ｜ **4. Profile**：`Profile-WebScript`
 
-> 🔒 **預判標籤與安全港規則提醒**：  
-> ① 預判 `[FAIL]` 僅限 P0 工安級、P1 架構安全級及法定契約項（功能虛報、數據造假、版本號未宣告或未遞增）。  
-> ② 輔助性讓步延遲（如帳號切換 `0.3s` 或模型切換 `1.0s` 之 `sleep`）、具合理豁免說明且非最後防線之 `[N/A]` 標記、非實質縮寫之排版微瑕，均歸屬安全港，嚴禁預判為 `[FAIL]`，僅得列為 P3 觀察項。  
-> ③ 所有程式碼定位描述嚴格採用「`{函式名/模組名} 內 緊鄰 {字面量或條件式} 處`」語意錨點，不得使用行號定位。
+> 🔒 **QATP 預判標籤總則與安全港閉環（對齊 QA 前綴【邊界 3】）**：  
+> ① 預判 `[FAIL]`（阻斷簽核）之允許集合，**嚴格限縮於三類：P0 阻斷性嚴重架構缺陷、P1 架構安全級、法定契約項（功能虛報、數據造假、版本號未宣告/未遞增）**。  
+> ② **🛡️ 非失真安全港條款**：輔助性讓步延遲（如網頁導航或抽屜切換之 `setTimeout`）未列入獨立定時器清單者（惟代碼本體根本欠缺必要讓步導致競態或 CPU 飆高者不入港）、反向驗證清單標記 `[N/A]` 且附帶合理無涉自述者（惟屬 Zero-Meltdown、救援入口存活、資料完整性最後驗證依據者不得入港）、參數名稱非實質縮寫或排版微瑕，**嚴禁預判為 `[FAIL]`**，一律列為 P3 工單衛生觀察項。
 
 ---
 
 ### 0. 🧬 【強制優先】Phase 0：獨立白箱代碼靜態風險排查 (Static Code Audit)
 
-QA 展開維度驗收表格前，必須獨立完成以下五大底層靜態審查，若發現新風險請依 4 要素記錄於 3.3.1：
-* **0.1 【Shell / CLI / 外部進程與路徑轉義漏洞排查】**：檢查 `launch_sentinel_gui`、`open_file_path` 與 `save_and_backup_dict` 中 `subprocess.Popen`、`subprocess.run` 及 `os.startfile` 之參數組裝，核對是否嚴禁 `shell=True`，以及傳入含空白／中文 Windows 路徑時是否受 list 傳參保護。
-* **0.2 【字串與正則邊界吞噬排查】**：全面複掃 `validate_pcre_syntax` 內 `pcre2_verb_pattern`、`\\x\{([0-9a-fA-F]+)\}`、`sanitize_invisible_chars` 及 `ENTRY_BLOCK_REGEX`，核對是否均具備非空錨點、是否違反單行邊界或誤設 `re.S` 導致跨行換行吞噬。
-* **0.3 【系統資源競爭、死鎖、洩漏與跨執行緒 GUI 讀寫排查】**：核對 `_start_stopwatch`、`_stop_stopwatch`、`_exec_stage1`、`_exec_stage2`、`run_auto_pipeline._pipeline` 及 `test_api_connection._worker` 是否將所有 Tk 元件操作與 `after_cancel` 排入主執行緒（`root.after(0, ...)`），並核對多執行緒共用 `stopwatch_token` 在 `is_running` 互斥保護下是否無競爭漏洞。
-* **0.4 【全域頂層範圍語法異常與入口盲區排查 (Zero-Meltdown Audit)】**：獨立複查模組頂層導入、`__version__` 位置、`sys.setrecursionlimit(5000)`、`HAS_DND`／`GENAI_MODE` 條件分支，確認無頂層未捕獲異常；遵守舉證責任，Python 原始字串 `r'...'` 內合法轉義序列不得憑空推測為語法損壞。
-* **0.5 【災難救援與脫困指令執行環境能力邊界排查】**：核對 `.bak` 還原、工作目錄 `.tmp` 清理與 `config.json` 損壞自癒機制是否完全匹配 Windows 本機執行環境權限與編碼邊界（`utf-8-sig`／`utf-8`）。
+QA 必須在展開 TC 表格前，針對目標原始碼獨立完成以下五大底層排查，並將發現附 4 要素記錄於【3.3.1】：
+* **0.1 【外部橋接與輸入驗證檢查】**：檢查 `injectQwenFiberBridge()` 與 `injectMiniMaxFiberBridge()` 之腳本注入是否全採 `textContent`（0 `innerHTML`），以及雲端 URL 提取 `getSafeDocLinkUrl()` 是否維持 `http://` / `https://` 白名單隔離。
+* **0.2 【字串與正則邊界吞噬排查】**：檢查 `DEFAULT_CONFIG.noiseSettings.customNoiseRegexes`、`sanitizeAffixText`、以及 `v4.3.5` 新增之 Z.AI 系統按鈕排除正則、Qwen 開門按鈕過濾正則與 Fiber 字串特徵正則，確認無 dotAll `s` 與 `.*?` 共構及空交替分支。
+* **0.3 【非同步資源競爭、超時保護與生命週期排查】**：檢查 `getZaiDeliverableText` 與 `getQwenDeliverableText` 之輪詢上限 (`10000ms`)、水合穩定煞車 (`stableRounds >= 2`)、舊抽屜關閉讓步 (`250ms`)、`CustomEvent` 監聽器移除與 `3000ms` 超時定時器清理，確認無監聽器洩漏或 Promise 永久懸掛。
+* **0.4 🚨 【全域頂層範圍語法例外防護與入口存活審查 (Zero-Meltdown Audit)】**：獨立複查腳本頭部前 10 行 `@version 4.3.5` 宣告、頂層 IIFE 範圍之變數初始化、正則字面量合法轉義（`\n`、`\r`、`\t`、`\|` 屬合法 JS 正則字面量），以及 `GM_registerMenuCommand` 與 `Storage` 異常捕獲之無條件存活。
+* **0.5 🛡️ 【災難救援與雙層儲存執行環境邊界排查 (Runtime Context Feasibility)】**：檢查 `Storage` 讀寫與救援策略是否兼顧 Userscript 擴充套件沙盒 (`GM_*`) 與瀏覽器一般頁面 (`localStorage`) 雙層邊界，並於 DevTools Context 差異下提供清晰異常防護與雙環境可驗證性。
 
 ---
 
 ### 1. 🛡️ 【強制】架構妥協與驗收豁免須知 (By-Design Exceptions)
 
-1. **外部 SDK 模型名稱原樣透傳（No `models/` Prefix）**：
-   * *說明*：`raw_sdk_call` 將設定之模型字串（如 `gemini-3.8-flash`）直接透傳予官方 SDK，刻意不拼接 `models/` 前綴以免觸發 `404 NOT_FOUND`。
-   * *合法對稱面*：若測試環境提供自訂非官方代理端點要求 `models/` 前綴而未生效，屬規格外預期排除；目標官方端點必須原樣透傳。
-   * *不可豁免鐵律自查*：無衝突（不導致載入期崩潰或資料損毀）。
-2. **衝突哨兵缺失、逾時或非對沖腳本異常平滑降級**：
-   * *說明*：`save_and_backup_dict` 在未啟用哨兵、腳本不存在、執行逾時（> 5s）或腳本自身發生非對沖 Python 異常時，僅於狀態列警告並放行常規存檔。
-   * *合法對稱面*：哨兵正常回報對沖關鍵字時必須硬阻斷存檔；哨兵環境異常時放行存檔屬預期防禦行為，不得判 FAIL。
-   * *不可豁免鐵律自查*：無衝突。
-3. **PCRE2 專屬語法寬容放行策略**：
-   * *說明*：`validate_pcre_syntax` 預替換 PCRE2 控制動詞後，僅攔截 7 項 `fatal_blacklist` 明確錯誤，對 `\p{Han}`、`\K`、非定長 lookbehind 及未列舉之冷門 `re.error` 採放行策略，深層語意交由哨兵把關。
-   * *合法對稱面*：不在 7 項黑名單內之 PCRE2 特有語法報錯予以放行屬預期設計；命中 7 項黑名單或括號不對稱者必須硬阻斷。
-   * *不可豁免鐵律自查*：無衝突。
-4. **可選拖曳套件 `tkinterdnd2` 平滑降級**：
-   * *說明*：環境未安裝 `tkinterdnd2` 時 `HAS_DND = False`，工具改以標準 `tk.Tk()` 啟動並停用檔案拖曳綁定。
-   * *合法對稱面*：純標準庫環境下不具備拖曳功能屬預期行為；具備 `tkinterdnd2` 環境必須正常註冊 `DND_FILES`。
-   * *不可豁免鐵律自查*：無衝突。
-5. **頁籤 2 滾輪穿透作用邊界與 Windows 原生 `os.startfile` 相依**：
-   * *說明*：全域滾輪綁定僅限游標停留於頁籤 2 且非 `txt_history` 元件時生效，切換頁籤立即解綁；快速檢驗按鈕依賴系統副檔名關聯。
-   * *合法對稱面*：切回頁籤 1 時頁籤 2 不再響應滾輪屬預期隔離；系統未配置 `.txt` 編輯器關聯時交由 OS 處理。
-   * *不可豁免鐵律自查*：無衝突。
-6. **歷史紀錄時間戳依系統本地時區渲染**：
-   * *說明*：時間戳 `%z` 依據作業系統當下時區輸出（如 `+0800`）。
-   * *合法對稱面*：在不同時區測試機產出對應時區偏移量屬預期行為，不可硬性寫死比對 `+0800`。
-   * *不可豁免鐵律自查*：無衝突。
+1. **Qwen 雙軌綠鍵無預覽階梯平滑降級 【By-Design】**
+   - **豁免範圍與對稱面**：在 Qwen 純對話無 `.response-present-file-card` 且 `.file-preview-panel` 未開啟時，點擊綠鍵彈出友善提示並降級複製乾淨對話（及 `F4` 動作為 `'PREVIEW'` 時平滑降級複製對話正文並裝配前綴）屬於預期設計；**對稱面**：當最新輪次存在有效檔案卡片或右側已開啟目標預覽抽屜時，若誤觸降級或遺漏提取右側內容，仍屬 P0 實質缺陷。
+   - **不可豁免鐵律自查**：無衝突（未豁免載入異常或目標情境資料損壞）。
+2. **Qwen 預設採集動作維持 `'SINGLE'` 【By-Design】**
+   - **豁免範圍與對稱面**：全新安裝預設 `qaQueueSettings.siteActions.qwen` 為 `'SINGLE'` 屬兼容一般純聊天的預期配置；**對稱面**：使用者於 Tab 3 手動切換為 `'PREVIEW'` 或 `'PREVIEW_CLEAN'` 後，系統必須正確寫入組態並於 `F4` 執行預覽提取管線。
+   - **不可豁免鐵律自查**：無衝突。
+3. **Claude 多檔案 Artifacts 僅實裝預留探針 【By-Design】**
+   - **豁免範圍與對稱面**：`v4.3.5` 於 `isClaudeArtifactActive` 與 `getClaudeDeliverableText` 僅預留多檔 `[role="tablist"]` 探針與對齊勾子，不實質執行多檔跨 Tab 點擊切換屬預期範圍；**對稱面**：現行 Claude 單一 Artifact 提取與無抽屜階梯降級功能不得出現任何迴歸。
+   - **不可豁免鐵律自查**：無衝突。
+4. **固定功能識別色與非目標平台差異 【By-Design】**
+   - **豁免範圍與對稱面**：雙軌綠鍵（`.ai-copy-btn-docx`）固定使用 `#10b981 !important` 維持翡翠綠永駐，與無右側抽屜之 7 個平台（ChatGPT、DeepSeek、Kimi、AI Studio、Mistral、Perplexity、智譜）不顯示綠鍵均屬預期差異；**對稱面**：使用者動態自訂之 `toastSettings` (`background`、`fontSize`) 嚴禁遭樣式表 `!important` 鎖死，且 Claude、Qwen、Z.AI、MiniMax 4 站必須完整呈現雙軌藍綠鍵。
+   - **不可豁免鐵律自查**：無衝突。
 
 ---
 
 ### 2. 四大維度測試案例清單 (Test Cases)
 
+> 🛑 **代碼位置語意錨點強制規範**：本任務書全部定位均採「`{函式名/模組名} 內 緊鄰 {字面量或條件式} 處`」之語意錨點格式，不使用任何實體行號。
+
 #### 🌟 維度一：新功能驗收 (TC-NEW-xx)
 
-* **TC-NEW-01｜FIX-01 雙階碼錶世代 Token 隔離、主執行緒派發與字色重置 (`AC-03`)**
-  * *測試情境*：模擬「一鍵雙階自動優化」於階段一完成並寫入綠色狀態字後，在極短時間內緊接啟動階段二碼錶，檢驗舊計時器是否立即作廢、狀態字是否歸零且字色重置為藍字。
-  * *操作步驟*：
-    1. 追蹤 `RadarRegexToolApp.__init__` 內 `stopwatch_token` 與 `stopwatch_after_id` 初值。
-    2. 追蹤 `_start_stopwatch` 與 `_stop_stopwatch` 執行路徑，模擬階段一呼叫 `_start_stopwatch(..., fg_color="#2563eb")` ➔ `_exec_stage1` 呼叫 `update_status(..., fg_color="#059669")` ➔ `_pipeline` 呼叫 `_stop_stopwatch()` ➔ 立即呼叫 `_start_stopwatch("⏳ 雷達 QA 審核中...", fg_color="#2563eb")`。
-    3. 模擬階段一殘留之舊 `_tick` 閉包在 token 已遞增後被主事件迴圈喚醒；並於階段二完成後觸發 `finally` 內 `_stop_stopwatch()`。
-  * *預期結果*：
-    - `_start_stopwatch` 遞增 `stopwatch_token` 後，經 `self.root.after(0, _init_on_main)` 於主執行緒呼叫 `after_cancel` 清除舊句柄，立即將 `lbl_status` 刷新為 `(已耗時: 0s)...` 且 `fg="#2563eb"`（無綠字殘留）。
-    - 舊階段 `_tick` 喚醒時因 `my_token != self.stopwatch_token` 立即 return，不會以舊秒數覆蓋階段二狀態。
-    - `_stop_stopwatch` 僅置 `False`、遞增 token 並派發 `_cancel_on_main` 取消定時器，不覆寫階段二完成後之最終綠色結果文字。
-  * *代碼 AST 語意錨點*：`RadarRegexToolApp.__init__` 內緊鄰 `self.stopwatch_token = 0` 處；`_start_stopwatch` 內緊鄰 `def _init_on_main():` 與 `self.lbl_status.config(text=f"{desc_prefix} (已耗時: 0s)...", fg=fg_color)` 處；`_stop_stopwatch` 內緊鄰 `self.stopwatch_token += 1` 與 `def _cancel_on_main():` 處。
+* **`TC-NEW-01`：Z.AI 多檔案最右側活躍 Tab 自動對齊與短文水合煞車 (`TSK-ZAI-TAB`, `FIX-01`, `ENH-01`)**
+  - **測試情境**：Z.AI 右側抽屜頂部同時存在多個檔案 Tab（如 `Round1.md` 位於左側、`Round2.md` 位於最右側）且目前停留在左側舊檔；以及開門加載短文字成果物（`< 30` 字）。
+  - **白箱檢查步驟**：
+    1. 檢視 `focusZaiRightmostTab` 是否排除腳本容器 `#ai-universal-copy-container` / `#ai-copy-floating-orb`、過濾右側頂部區域（`rect.left > window.innerWidth * 0.35`、`rect.top > 30 && rect.top < 100`、`rect.width >= 40`）並排除系統控制按鈕（`分享`、`保存到云盘`、`关闭`、`close`、`exit`、`複製`、`Copy`）。
+    2. 檢查多檔排序是否按 `rect.left` 由大到小鎖定最右側標籤，並檢查活躍狀態（`aria-selected === 'true'`、`.active`、`/bg-[-a-z0-9]+|selected/`），非活躍時點擊並回傳檔案名。
+    3. 檢查 `getZaiDeliverableText` 於「抽屜已開且無新開門鈕」與「點擊開門後」兩條路徑是否皆調用 `focusZaiRightmostTab()`、觸發 `📑 已自動切換至最新檔案：...` Toast 並讓步 `200ms`。
+    4. 檢查 `getZaiPreviewText` 與 `getZaiDeliverableText` 水合煞車門檻是否已下放至 `length > 0` 並具備逾時 `lastObservedText` 兜底。
+  - **預期結果**：多檔時精準點擊最右側非活躍 Tab 並觸發切換 Toast；單檔時回傳 `null` 不重複點擊；短文字成果物於連續 2 輪 (`400ms`) 穩定後跳出輪詢，不耗滿 10 秒。
+  - **代碼 AST 語意錨點推演**：位於 `focusZaiRightmostTab` 內 緊鄰 `validTabs.sort` 處、`getZaiPreviewText` 內 緊鄰 `if (md && md.length > 0)` 處，以及 `getZaiDeliverableText` 內 緊鄰 `const switchedFile = focusZaiRightmostTab()` 處。
 
-* **TC-NEW-02｜FIX-02 PCRE2 回溯控制動詞安全替換、致命黑名單裁決與換行存活性驗證 (`AC-04`)**
-  * *測試情境*：驗證 `validate_pcre_syntax` 對含 `(*SKIP)(*FAIL)` 之合法條目、字元類內字面量、PCRE2 擴展語法、真實損壞語法及**多段落字典樣本換行存活性**之處理正確性。
-  * *操作步驟*：
-    1. **合法回溯控制動詞樣本**：輸入包含 `(*SKIP)(*FAIL)`、`(*PRUNE)`、`(*COMMIT)` 且括號對稱之多行字典樣本（含 `;` 註解行與空行與規則行），檢查 `validate_pcre_syntax` 回傳值。
-    2. **詞法保護樣本**：輸入含 `[(*SKIP)]` 字元類與跳脫 `\*` 之規則行，驗證 `pcre2_verb_pattern` 替換結果。
-    3. **PCRE2 擴展樣本**：輸入含 `\p{Han}`、`\K`、`\x{4E00}` 及非定長 lookbehind 之規則行。
-    4. **致命損壞樣本**：分別輸入缺右括號 `(abc`、孤立右括號 `abc)`、未閉合字元類 `[abc`、無前置原子量詞 `*abc`、結尾反斜線 `abc\`、倒置量詞 `a{5,2}`、無效區間 `[z-a]`。
-    5. **換行存活性驗證 (Newline Vitality Verification)**：輸入具備 5 行有效規則＋註解之多段落樣本，驗證經過 `validate_pcre_syntax` 及後續 `stitch_and_deduplicate`／存檔擷取管線後，輸出換行符數量落入預期行數區間（與條目區塊行數吻合），無全文壓扁為單行現象。
-  * *預期結果*：
-    - 樣本 1、2、3 全部回傳 `(True, "")`；`[(*SKIP)]` 與 `\*` 命中群組 1 原樣保留不被改寫為 `(?:)`。
-    - 樣本 4 全數回傳 `(False, "...")`，硬阻斷存檔且磁碟原檔未更動。
-    - 樣本 5 多行換行結構完整保留，正則 `pcre2_verb_pattern` 與 `sanitize_invisible_chars` 均無吞噬換行。
-  * *代碼 AST 語意錨點*：`validate_pcre_syntax` 內緊鄰 `pcre2_verb_pattern = re.compile(...)`、`fatal_blacklist = [` 與 `transpiled = pcre2_verb_pattern.sub(...)` 處。
+* **`TC-NEW-02`：Qwen Agent 單輪多段聚合與跨欄雜訊隔離 (`TSK-QWEN-AGENT`)**
+  - **測試情境**：Qwen Agent 模式單輪輸出同時包含 `.response-agent-thinking`、`.response-phase-tool-call`、`.response-present-file-card` 與多段平行 `.response-message-content`，且右側同時開啟 `.file-preview-panel`。
+  - **白箱檢查步驟**：
+    1. 檢視 `Adapters.Qwen.getAiNodes` 是否優先鎖定 `.chat-response-message`，排除 `.file-preview-panel`、腳本 UI 及使用者容器，並映射至 `.chat-response-message-render-flow`。
+    2. 檢視傳統模式降級路徑與 `Adapters.Qwen.getUserNodes` 是否同步加入 `!node.closest('.file-preview-panel')` 與 `.chat-user-message-container` 支援。
+    3. 檢視 `Adapters.Qwen.cleanNode` 是否依序執行 `cleanUniversalNoise` 並移除 `.response-agent-thinking`、`.response-agent-thinking-panel`、`.response-tool-call-row`、`.response-phase-tool-call`、`.response-present-file`、`.response-present-file-card`。
+  - **預期結果**：單輪多段正文被完整聚合轉譯，思考／工具／檔案卡雜訊 100% 剔除，且右側 `.file-preview-panel` 內容絕不混入左側對話提取結果。
+  - **代碼 AST 語意錨點推演**：位於 `Adapters.Qwen.getAiNodes` 內 緊鄰 `const agentTurns = Array.from` 處、`Adapters.Qwen.getUserNodes` 內 緊鄰 `.chat-user-message-container` 處，以及 `Adapters.Qwen.cleanNode` 內 緊鄰 `.response-present-file-card` 處。
 
-* **TC-NEW-03｜UX-01 歷史看板滾輪隔離與頁籤空選值邊界防護 (`AC-05`)**
-  * *測試情境*：驗證頁籤 2 歷史看板 `txt_history` 上滾動滑鼠時只捲動看板本身而不捲動外層 `tab2_canvas`，以及 `notebook.select()` 回傳空值時之安全防護。
-  * *操作步驟*：
-    1. 追蹤 `build_tab2` 中 `self.txt_history` 之事件綁定與 `_on_history_wheel` 對 `<Button-4>`、`<Button-5>` 及 Windows `<MouseWheel>`（含高精細觸控板 `delta` 小於 120 導致 `int(-delta/120) == 0` 之情況）之處理。
-    2. 追蹤 `_on_global_mousewheel`、`_on_global_mousewheel_up`、`_on_global_mousewheel_down` 之入口過濾條件。
-    3. 模擬 `self.notebook.select()` 回傳 `""` 時觸發 `_on_tab_changed`。
-  * *預期結果*：
-    - `_on_history_wheel` 主動驅動 `self.txt_history.yview_scroll(...)`（非 0 步階）後回傳 `"break"`；全域滾輪回呼對 `event.widget is self.txt_history` 亦直接 `return`，達成雙重隔離且看板本身可順暢捲動。
-    - `_on_tab_changed` 於 `sel` 為空時安全判定 `idx = -1` 並呼叫 `_unbind_global_mousewheel()`，絕不拋出 `TclError`。
-  * *代碼 AST 語意錨點*：`build_tab2` 內緊鄰 `self.txt_history.bind("<MouseWheel>", self._on_history_wheel)` 處；`_on_history_wheel` 內緊鄰 `return "break"` 處；`_on_global_mousewheel` 內緊鄰 `if event.widget is self.txt_history:` 處；`_on_tab_changed` 內緊鄰 `sel = self.notebook.select()` 處。
+* **`TC-NEW-03`：Qwen 雙軌按鈕分裂與 Page-World React Fiber (`s@6[5].content`) 無損預覽提取 (`TSK-QWEN-DUAL`)**
+  - **測試情境**：於 Qwen 頁面掛載工具列、點擊綠鍵「📄 複製右側預覽」或透過 `F4` (`PREVIEW`) 採集右側檔案預覽內容（含內含未跳脫管道符 `|` 之 Markdown 表格與純代碼 `.cm-editor` 視圖）。
+  - **白箱檢查步驟**：
+    1. 檢視 `createUIElement` 是否將 `isQwen` 納入雙軌判斷（`isZai || isMiniMax || isClaude || isQwen`），藍鍵文字 `'📋 複製最後對話'`，綠鍵樣式 `.ai-copy-btn-docx` 並綁定 `handleQwenPreviewAction()`。
+    2. 檢視 `isQwenPreviewActive()` 與 `closeQwenPreviewDrawer()` 是否正確鎖定 `.file-preview-panel` 內容尺寸與關閉按鈕。
+    3. 檢視 `injectQwenFiberBridge()` 是否使用 `.textContent` 注入 `#qwen-fiber-bridge`、向上遍歷 `__reactFiber$` (`depth < 35`)、掃描 `memoizedState` 鏈（含陣列/物件槽位 `.content`）與 `memoizedProps`，並過濾 `<svg` / `<!DOCTYPE`。
+    4. 檢視 `getQwenDeliverableText()` 是否鎖定末輪末張 `.response-present-file-card`、透過 `--active` 類名執行關舊開新 (`closeQwenPreviewDrawer()` + `250ms`)、過濾非下載開門鈕、執行 400ms 水合煞車，並於 `fromFiber` 失敗或 `.cm-editor` 情境平滑降級至 `parseCodeBlock` / `domToMarkdown`。
+    5. 檢視 `extractSiteTextByAction` 是否已為 `adapter.id === 'qwen'` 接線並於無預覽時階梯降級。
+  - **預期結果**：雙軌藍綠鍵正確呈現；有檔案卡時能自動開門直取原始無損 Markdown 保留表格管道符與換行；無預覽時友善提示並降級複製乾淨對話。
+  - **代碼 AST 語意錨點推演**：位於 `injectQwenFiberBridge` 內 緊鄰 `inspectStateSlot` 處、`getQwenDeliverableText` 內 緊鄰 `response-present-file-card--active` 處、`extractSiteTextByAction` 內 緊鄰 `else if (adapter.id === 'qwen')` 處，以及 `createUIElement` 內 緊鄰 `const isQwen = adapter.id === 'qwen'` 處。
 
-* **TC-NEW-04｜UX-02 空路徑正規化保持與時區時間戳對齊 (`AC-06`)**
-  * *測試情境*：驗證留空路徑設定不退化為 `"."`，以及歷史紀錄看板時區時間戳與表頭對齊。
-  * *操作步驟*：
-    1. 將 `""`、`"   "`、`None` 與 `"C:/dict/正則查找字典.txt"` 分別傳入 `_norm_path_or_empty`。
-    2. 模擬於頁籤 2 清空 `entry_dict_2` 與 `entry_sentinel_path` 後執行 `save_all_settings`，再重啟調用 `load_config`、及觸發 `get_selected_dict_content`。
-    3. 檢查 `build_tab2` 歷史看板表頭與分隔線長度，並追蹤 `append_history_log`、`_exec_stage2`、`save_and_backup_dict` 之時間戳產生與 `ljust(25)` 排版寬度。
-  * *預期結果*：
-    - `_norm_path_or_empty` 對空／純空白／`None` 回傳 `""`，對非空路徑回傳標準反斜線路徑；`config.json` 保持 `""` 而非 `"."`。
-    - 4 處寫入點均使用 `datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z")`，表頭時間戳欄寬（26 字元單位）與分隔線 `"-" * 105` 齊整對齊。
-  * *代碼 AST 語意錨點*：`_norm_path_or_empty` 內緊鄰 `return os.path.normpath(s) if s else ""` 處；`build_tab2` 內緊鄰 `self.txt_history.insert(tk.END, "-" * 105 + "\n")` 處；`append_history_log` 內緊鄰 `default_ts = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z")` 處。
+* **`TC-NEW-04`：Claude 多檔 Artifacts 預留探針、預設動作拍板與 UI 文案更新 (`TSK-CLA-MULTI`, `CFG-QWEN-01`, `ENH-02`)**
+  - **測試情境**：檢驗 Claude 多檔探針擴充、Qwen 預設採集動作配置、Tab 5 熱鍵衝突提示與設定視窗標題。
+  - **白箱檢查步驟**：
+    1. 檢視 `isClaudeArtifactActive()` 與 `getClaudeDeliverableText()` 是否已加入 `[role="tablist"]` / `[class*="artifact"] button` 探針與右側頂部 tablist 勾子，同時不影響單檔複製與剪貼簿異常降級。
+    2. 檢視 `DEFAULT_CONFIG.qaQueueSettings.siteActions.qwen` 與 `sanitizeConfig` 補齊邏輯是否一致維持 `'SINGLE'`。
+    3. 檢視 `openManager` 視窗標題與 `renderPaneUI` `hotkeyHint.textContent` 是否分別更新為 `v4.3.5` 與多熱鍵別名／讓渡指引。
+  - **預期結果**：4 項組態、探針與 UI 文案均 100% 對齊規格，Claude 現有雙軌提取行為零迴歸。
+  - **代碼 AST 語意錨點推演**：位於 `isClaudeArtifactActive` 內 緊鄰 `[role="tablist"]` 處、`getClaudeDeliverableText` 內 緊鄰 `rightTablists` 處、`DEFAULT_CONFIG` 內 緊鄰 `qwen: 'SINGLE'` 處、`renderPaneUI` 內 緊鄰 `hotkeyHint.textContent =` 處，以及 `openManager` 內 緊鄰 `title.textContent =` 處。
 
----
+#### 🔄 維度二：關鍵防禦機制實體存活審查 (AST Defense Invariant Audit) (TC-REG-xx)
 
-#### 🔄 維度二：關鍵防禦機制實體存活審查 (TC-REG-xx)
+* **`TC-REG-01`：Safe DOM 零 `innerHTML` 注入與動態外觀樣式權重級聯防呆 (`CSS Specificity Guard`)**
+  - **測試情境**：審查全檔 DOM 建構方式與 `toastSettings` (`background`, `fontSize`) 樣式覆寫優先序。
+  - **白箱檢查步驟**：
+    1. 全檔搜尋 `innerHTML`、`outerHTML`、`insertAdjacentHTML` 與 `eval(`，驗證出現次數是否為 0。
+    2. 檢視 `injectStyles()` 中 `.ai-copy-toast-node` 之 CSS 宣告，確認 `background` 與 `font-size` 未附加 `!important`。
+    3. 檢視 `showToast()` 與 `toggleToastPositioningMode()` 是否以 `toast.style.setProperty('background', ..., 'important')` 與 `toast.style.fontSize` 保持最高權威。
+  - **預期結果**：全檔 0 處不安全 HTML 注入；使用者動態調整 Toast 背景與字級可立即生效而不被 CSS 樣式表鎖死。
+  - **代碼 AST 語意錨點推演**：位於 `injectQwenFiberBridge` 內 緊鄰 `script.textContent =` 處、`injectStyles` 內 緊鄰 `.ai-copy-toast-node {` 處，以及 `showToast` 內 緊鄰 `toast.style.setProperty('background'` 處。
 
-* **TC-REG-01｜版本宣告錨點與 SDK 模型名稱原樣透傳禁令 (`AC-01`, `AC-02`)**
-  * *審查情境*：確認頭部版本宣告位置與 `raw_sdk_call` 模型名稱透傳未被重構破壞。
-  * *審查步驟*：檢視檔案頭部前 10 行 `__version__` 宣告、主視窗標題格式，並追蹤 `raw_sdk_call` 兩種 SDK 分支之參數傳遞。
-  * *預期結果*：`__version__ = "1.3.2"` 位於頭部前 10 行內；`raw_sdk_call` 嚴格原樣傳入 `model_name`，無任何 `models/` 字串拼接邏輯。
-  * *代碼 AST 語意錨點*：模組頂部緊鄰 `__version__ = "1.3.2"` 處；`raw_sdk_call` 內緊鄰 `model=model_name` 與 `genai_legacy.GenerativeModel(model_name)` 處。
+* **`TC-REG-02`：切片酬載雙換行存活性與正則清洗單行邊界防吞噬 (`Newline Vitality` & `Anti-Swallowing`)**
+  - **測試情境**：驗證多段落 Markdown 在經過切片組合、雜訊清洗與各平台轉譯後，換行符與雙換行分隔是否維持存活，不被正則吞噬壓扁為單行。
+  - **白箱檢查步驟**：
+    1. 檢視 `DEFAULT_CONFIG.noiseSettings.customNoiseRegexes` 與 `sanitizeConfig` 之 `badRegexPattern` 守衛，確認所有清洗正則皆鎖定 `[^\n]*` 且無 dotAll `s` + `.*?` 或空分支。
+    2. 檢視 `composeSlicePayload(prefix, body, rawSuffix)` 與 `handleSliceCopyAction` 之 `replace` 分支，確認無效正則會觸發 `try-catch` 紅色 Toast 阻斷並維持輸出末端雙換行 `\n\n`。
+    3. 檢視 `getQwenDeliverableText()` 之降級鏈，確認 `.cm-editor` 經 `parseCodeBlock`（逐行 `.cm-line` `.join('\n')`）與 `.qwen-markdown` 經 `domToMarkdown` 均保留多行換行結構。
+  - **預期結果**：輸入多段落真實樣本後，換行總數維持完整段落分隔，不發生全文壓扁成單行或無差別吞噬。
+  - **代碼 AST 語意錨點推演**：位於 `DEFAULT_CONFIG.noiseSettings` 內 緊鄰 `customNoiseRegexes:` 處、`composeSlicePayload` 內 緊鄰 `let tail = '\n\n'` 處，以及 `handleSliceCopyAction` 內 緊鄰 `替換正則語法無效` 處。
 
-* **TC-REG-02｜跨執行緒 UI 隔離（Worker 0 處 `.get()`）與 6 組按鈕互斥鎖**
-  * *審查情境*：確認背景執行緒 100% 依賴不可變快照，且任務異常時互斥鎖必定釋放。
-  * *審查步驟*：掃描 `_exec_stage1`、`_exec_stage2`、`call_gemini_api`、`_runner`、`_pipeline` 是否存在任何 `.get()` 存取 Tkinter 元件；檢視 `set_ui_locked` 控制清單與 `finally` 釋放路徑。
-  * *預期結果*：背景執行緒 0 處呼叫 Tkinter `.get()`；`btn_auto`, `btn_clear`, `btn_s1`, `btn_s2`, `btn_save`, `test_btn` 全部受 `set_ui_locked` 控管，所有任務閉包之 `finally` 皆透過 `root.after(0, lambda: self.set_ui_locked(False))` 解鎖。
-  * *代碼 AST 語意錨點*：`create_task_snapshot` 內緊鄰 `raw_log = self.txt_log.get("1.0", tk.END).strip()` 處；`set_ui_locked` 內緊鄰 `for btn in [self.btn_auto, ...]:` 處；`run_auto_pipeline._pipeline` 內緊鄰 `finally:` 處。
-
-* **TC-REG-03｜雙錨點唯一性、SHA-256 數位印章防調包與代碼圍欄硬阻斷**
-  * *審查情境*：驗證 `save_and_backup_dict` 之寫入前置防線是否完整保留。
-  * *審查步驟*：逐條追蹤 `save_and_backup_dict` 對目標 Radio 防漂移、`ANCHOR_TEXT` / `EOF_MARKER` 計數檢驗（`!= 1`）、`s2_hash` 比對及 `"```"` 圍欄檢測邏輯。
-  * *預期結果*：任一門禁未通過即彈出警告、釘選橫幅並中止寫入，磁碟原檔完全不受影響。
-  * *代碼 AST 語意錨點*：`save_and_backup_dict` 內緊鄰 `anchor_count = qa_output.count(self.ANCHOR_TEXT)`、`current_hash = hashlib.sha256(...)` 與 `if "```" in cleaned_extracted:` 處。
-
-* **TC-REG-04｜第 0 秒極速硬阻斷、縫合去重、哨兵健全判定與 `utf-8-sig` 原子覆寫**
-  * *審查情境*：驗證目標字不匹配阻斷、多區塊去重置換、哨兵識別與檔案原子置換流程存活。
-  * *審查步驟*：追蹤 `check_and_block_alien_targets`、`stitch_and_deduplicate`、`save_and_backup_dict` 哨兵子進程判定及寫檔編碼／`os.replace` 流程；同時驗證 `sanitize_invisible_chars` 與 `stitch_and_deduplicate` 在多段落輸入下保留條目間換行結構。
-  * *預期結果*：外來目標字於 0ms 阻斷不鎖死 UI；重複區塊首處置換、其餘倒序抹除且保留換行區隔；哨兵僅在命中對沖特徵時阻斷；備份至 `bak/` 並以 `utf-8-sig` 寫入 `.tmp` 後 `os.replace` 原子置換。
-  * *代碼 AST 語意錨點*：`check_and_block_alien_targets` 內緊鄰 `alien_targets =` 處；`stitch_and_deduplicate` 內緊鄰 `for m in reversed(matches):` 處；`save_and_backup_dict` 內緊鄰 `is_collision = (` 與 `os.replace(tmp_file_path, target_path)` 處。
-
----
+* **`TC-REG-03`：雙層覆寫隔離 (`applyLocalOnlyOverrides`)、熱鍵空字串還原防呆與幽靈欄位清除**
+  - **測試情境**：驗證雲端同步或本地 JSON 匯入時本機座標／排版／空熱鍵是否保全，以及 `toastSettings.anchor` 是否徹底絕跡。
+  - **白箱檢查步驟**：
+    1. 檢視 `syncFromJsonDoc()` 與 `renderPaneCloud()` 檔案匯入回呼，確認均調用 `applyLocalOnlyOverrides()`，且 `syncFromJsonDoc()` 採 `typeof preservedHotkeys.xxx !== 'undefined'` 還原空字串熱鍵。
+    2. 全檔檢視 `toastSettings.anchor` 存在性，確認 `DEFAULT_CONFIG` 無此鍵且 `sanitizeConfig` 顯式執行 `delete ts.anchor`。
+  - **預期結果**：雲端同步接納新站設定同時 100% 保留本機座標、排版與清空熱鍵；設定物件中無殘留 `anchor` 幽靈欄位。
+  - **代碼 AST 語意錨點推演**：位於 `applyLocalOnlyOverrides` 內 緊鄰 `targetConfig.toastPosition =` 處、`syncFromJsonDoc` 內 緊鄰 `typeof preservedHotkeys.captureHotkey !== 'undefined'` 處，以及 `sanitizeConfig` 內 緊鄰 `delete ts.anchor` 處。
 
 #### ⚠️ 維度三：架構風險與極端情境識別 (TC-RISK-xx)
 
-* **TC-RISK-01｜雙階毫秒級連續切換與任務中途異常時之碼錶與鎖定競態推演**
-  * *風險情境*：推演極端情況下（階段一剛完成隨即進入階段二，或階段一／二途中拋出網路例外／快照初始化失敗）是否發生碼錶空轉、狀態列覆寫錯亂或 UI 永久鎖死。
-  * *操作與推演步驟*：
-    1. 追蹤 `run_stage1_thread`、`run_stage2_thread`、`run_auto_pipeline` 在 `create_task_snapshot()` 拋出 `FileNotFoundError` 時之行為。
-    2. 追蹤 `_pipeline` 在 Stage 1 成功後立刻呼叫 `_stop_stopwatch()` + `_start_stopwatch()`，再於 Stage 2 拋出例外時進入 `finally` 執行 `_stop_stopwatch()` 與解鎖之事件序列。
-  * *預期結果*：快照例外由進入點 `try-except` 捕獲並釘選橫幅，完全不進入 `set_ui_locked(True)`；背景例外必進入 `finally`，遞增 token 使任何殘餘 `_tick` 失效，並安全解除鎖定與計時器。
-  * *代碼 AST 語意錨點*：`run_auto_pipeline` 內緊鄰 `except Exception as e:` 與 `def _pipeline(snap: dict):` 內 `finally:` 處。
+* **`TC-RISK-01`：Z.AI / Qwen 多輪檔案切換競態清場與水合煞車逾時兜底推演**
+  - **測試情境**：極端慢速網路下抽屜花費逾 9.5 秒始完成文字水合（未達 2 輪穩定即觸及 `10000ms` 上限），或連續點擊不同檔案卡切換預覽。
+  - **白箱檢查步驟**：
+    1. 追蹤 `getZaiDeliverableText` 與 `getQwenDeliverableText` 之 `while (Date.now() - startTime < 10000)` 迴圈跳出條件與迴圈後 `lastObservedText` 兜底賦值邏輯。
+    2. 追蹤抽屜已開啟且切換檔案時是否皆具備 `200ms` / `250ms` 舊 DOM 銷毀讓步與 `150ms` 微任務沈澱延遲。
+    3. 檢視 `getZaiDeliverableText` 內 `if (!targetBtn && isDrawerOpen)` 分支下，若使用者在 `isZaiPreviewActive()` (`txt.length > 50`) 與短文 (`≤ 50` 字) 邊界進行無開門鈕重取時之可達性風險。
+  - **預期結果**：逾時後只要已觀測到非空文字即能成功兜底回傳，不白白失敗；多檔切換具備讓步保護；針對 Z.AI 無按鈕短文重取邊界於報告如實登錄風險觀察（供人類實機確認）。
+  - **代碼 AST 語意錨點推演**：位於 `getZaiDeliverableText` 內 緊鄰 `if (!text && lastObservedText.length > 0)` 處、`isZaiPreviewActive` 內 緊鄰 `if (txt.length > 50) return true` 處，以及 `getQwenDeliverableText` 內 緊鄰 `if (!isReady && lastObservedText.length > 0)` 處。
 
-* **TC-RISK-02｜可選依賴缺失降級與多帳號單組授權失效自動躍遷**
-  * *風險情境*：推演無 `tkinterdnd2`、哨兵腳本異常／逾時、以及多帳號池第一組 Key 失效（400/403）時系統韌性。
-  * *操作與推演步驟*：
-    1. 追蹤 `HAS_DND = False` 時 `__main__` 與 `build_tab1` 是否跳過 `drop_target_register`。
-    2. 追蹤 `save_and_backup_dict` 中哨兵回傳 `returncode != 0` 但無對沖關鍵字，以及拋出 `subprocess.TimeoutExpired` 之處置與 `finally` 清理 `.sentinel_dryrun.tmp`。
-    3. 追蹤 `call_gemini_api` 三種策略（`horizontal_first`、`quality_locked`、`vertical_first`）遭遇 `is_account_auth_error` 時之分支流向。
-  * *預期結果*：拖曳缺失與哨兵異常均平滑降級且清理暫存隔離檔；單組授權失效自動跳轉下組可用帳號繼續執行，僅在全帳號耗盡後始拋出最終例外。
-  * *代碼 AST 語意錨點*：`call_gemini_api` 內緊鄰 `def is_account_auth_error(e: Exception)` 處；`save_and_backup_dict` 內緊鄰 `elif proc.returncode != 0:` 與 `except subprocess.TimeoutExpired:` 處。
+* **`TC-RISK-02`：Qwen Page-World Fiber 穿透受阻、事件監聽超時清理與純代碼視圖降級**
+  - **測試情境**：宿主啟用嚴格 CSP 阻斷 inline `<script>` 執行，或 React 升級變更 Fiber 內部屬性名導致 `fromFiber === false`，或抽屜為純代碼 `.cm-editor` 視圖。
+  - **白箱檢查步驟**：
+    1. 檢查 `getQwenDeliverableText` 中 `Promise` 與 `3000ms` `setTimeout` 是否在超時與正常回應雙路徑均呼叫 `window.removeEventListener('__QWEN_EXTRACT_RESPONSE__', onResponse)` 及 `clearTimeout(timer)`。
+    2. 檢查當 `fromFiber === false` 或 `extractResult.markdown` 為空時，是否平滑落入 `cmBox` (`parseCodeBlock`) 或 `mdBox` (`domToMarkdown`) 降級分支，不拋出未捕獲異常。
+    3. 檢查 `injectQwenFiberBridge()` 之 `inspectStateSlot` 與 `memoizedProps` 掃描是否正確排除 `<svg` / `<!DOCTYPE` 字串避免誤把內聯圖示或 HTML 骨架當作 Markdown 回傳。
+  - **預期結果**：監聽器與計時器 100% 對稱回收，無記憶體洩漏；Fiber 失效或代碼視圖均能無縫降級並產出乾淨 Markdown。
+  - **代碼 AST 語意錨點推演**：位於 `getQwenDeliverableText` 內 緊鄰 `window.removeEventListener('__QWEN_EXTRACT_RESPONSE__', onResponse)` 處，以及 `injectQwenFiberBridge` 內 緊鄰 `isValidMdString` 處。
 
----
+* **`TC-RISK-03`：Userscript 雙層儲存與執行 Context 邊界脫困驗證 (`QP-Track1-DualLayer-Rescue`)**
+  - **測試情境**：驗證儲存與讀取路徑在 Userscript 擴充套件沙盒 (`GM_*`) 與瀏覽器一般頁面 Context (`localStorage` 降級) 兩種執行邊界下之容錯行為。
+  - **白箱檢查步驟**：
+    1. 檢視 `Storage.get` / `Storage.set` 與 `getQaQueue` / `setQaQueue` 是否優先判定 `typeof GM_getValue !== 'undefined'` / `typeof GM_setValue !== 'undefined'`，未定義時安全降級至 `localStorage`。
+    2. 檢視儲存寫入 `catch` 區塊是否明確觸發紅色 Toast 警報而非靜默吞錯。
+  - **預期結果**：一般頁面 Context 下讀取與寫入能無錯降級至 `localStorage` 不拋出 `ReferenceError`，擴充套件沙盒 Context 下正確讀寫 `GM_*` 儲存體；實機雙 Context 切換操作納入 3.2.1 專區 `MV-06` 實測。
+  - **代碼 AST 語意錨點推演**：位於 `Storage` 內 緊鄰 `if (typeof GM_getValue !== 'undefined')` 處，以及 `getQaQueue` / `setQaQueue` 內 緊鄰 `localStorage.setItem(QA_QUEUE_KEY` 處。
 
 #### 🏛️ 維度四：靜態資料庫殘缺自癒推演 (Static Mock Data-Flow Trace) (TC-DEBT-xx)
 
-* **TC-DEBT-01｜畸形組態自癒、空路徑防護與新增狀態變數讀寫活性雙向核驗**
-  * *推演情境*：對 `config.json` 注入破損 JSON、非 list 之 `api_profiles`、非 dict 帳號元素、越界數值（`max_retries=999`, `base_delay_seconds=-5`, `locked_account_index=99`）及純空白路徑 `"   "`；並核驗新增實例屬性之讀寫雙向活性。
-  * *推演步驟*：
-    1. 逐步追蹤 `load_config` 對上述殘缺輸入之修復與 Clamp 結果。
-    2. 對 `self.stopwatch_token` 與 `self.stopwatch_after_id` 進行全檔寫入點與讀取點盤點，確認無 Write-Only 殭屍變數。
-  * *預期結果*：`load_config` 修復為 3 組合法帳號、數值收斂於法定上下界、空白路徑歸為 `""`；`stopwatch_token` 與 `stopwatch_after_id` 均有明確寫入與讀取消費點（`_tick`、`_init_on_main`、`_cancel_on_main`），讀寫閉環完整。
-  * *代碼 AST 語意錨點*：`load_config` 內緊鄰 `if not isinstance(raw_profiles, list):` 與 `for path_k in [...]` 處；`_start_stopwatch` 與 `_stop_stopwatch` 內全部 `self.stopwatch_token` 及 `self.stopwatch_after_id` 存取處。
+* **`TC-DEBT-01`：設定字典極端殘缺 / 舊版遷移自癒推演 (`sanitizeConfig`)**
+  - **測試情境**：餵入 `null`、`{}`、缺漏 `siteActions.qwen`、帶有舊版幽靈欄位 `toastSettings.anchor: 'bottom-right'` 及空字串熱鍵 `captureHotkey: ''` 之殘缺/舊版組態物件。
+  - **白箱檢查步驟**：
+    1. 逐支路推演 `sanitizeConfig(data)` 對 `data.siteTabOrder`、`data.toastSettings`、`data.qaQueueSettings`、`data.qaQueueSettings.siteActions` 之補齊與白名單驗證。
+    2. 確認 `toastSettings.anchor` 被 `delete ts.anchor` 移除、`siteActions.qwen` 在缺失或非法值時回退 `'SINGLE'`，且 `captureHotkey: ''` 經 `typeof qs.captureHotkey !== 'undefined'` 與 `typeof qs.captureHotkey !== 'string'` 檢查後完整保留空字串不被強制重設為 `'F4'`。
+  - **預期結果**：0 處拋出 `TypeError` / `ReferenceError`，殘缺設定 100% 自癒為合法 `v4.3.5` 結構且不覆蓋既有空字串熱鍵。
+  - **代碼 AST 語意錨點推演**：位於 `sanitizeConfig` 內 緊鄰 `delete ts.anchor` 處與緊鄰 `qs.siteActions[s] =` 處。
 
-* **TC-DEBT-02｜全新安裝零狀態啟動與孤兒暫存檔清理推演**
-  * *推演情境*：工作目錄無 `config.json`、無 `bak/` 資料夾且存在逾 10 分鐘之 `.tmp` / `.sentinel_dryrun.tmp` 殘留檔時啟動程式。
-  * *推演步驟*：追蹤 `load_config`、`cleanup_orphan_tmp_files`（含 `self._norm_path_or_empty` 防空路徑檢查）及 `build_top_bar`／`build_tab2` 初始化行為。
-  * *預期結果*：零狀態下自動使用 `DEFAULT_CONFIG` 安全啟動不崩潰；`cleanup_orphan_tmp_files` 於背景線程安全移除超時暫存檔，且當設定檔路徑為空時不會誤掃非預期路徑。
-  * *代碼 AST 語意錨點*：`cleanup_orphan_tmp_files` 內緊鄰 `p = self._norm_path_or_empty(self.config.get(k, ""))` 與 `if now - os.path.getmtime(fp) > 600:` 處。
+* **`TC-DEBT-02`：新舊變數與 DOM 橋接識別符讀寫活性雙向核驗**
+  - **測試情境**：盤點 `v4.3.5` 新增函式、局部變數、DOM ID 與事件名稱之寫入與讀取次數，排查 Write-Only 殭屍變數。
+  - **白箱檢查步驟**：
+    1. 核驗 `isQwen`（宣告於 `createUIElement`）於藍綠鍵文字、標題與點擊分派皆有讀取消費。
+    2. 核驗 `qwen-fiber-bridge`、`__QWEN_EXTRACT_REQUEST__`、`__QWEN_EXTRACT_RESPONSE__` 在 `injectQwenFiberBridge` 與 `getQwenDeliverableText` 成對讀寫／派發與監聽。
+    3. 檢查 `getClaudeDeliverableText` 中 `TSK-CLA-MULTI` 預留之 `rightTabs`（搭配 `void rightTabs;` 顯式標註預留）並確認不構成無意遺留死代碼，於報告中如實記錄其預留性質。
+  - **預期結果**：除 `TSK-CLA-MULTI` 規格明定之預留勾子 `rightTabs` 外，全檔無未讀取之 Write-Only 殭屍變數與殘留幽靈欄位。
+  - **代碼 AST 語意錨點推演**：位於 `getClaudeDeliverableText` 內 緊鄰 `void rightTabs;` 處、`injectQwenFiberBridge` 內 緊鄰 `id = 'qwen-fiber-bridge'` 處，以及 `createUIElement` 內 緊鄰 `const isQwen = adapter.id === 'qwen'` 處。
 
 ---
 
 ### 3. 驗收報告格式要求 (Mandatory Output Schema)
 
-QA 回覆報告必須嚴格依循以下章節結構輸出：
+請 QA 嚴格依照以下結構產出完整驗收報告：
 
 #### 3.1 測試環境與涵蓋範圍總覽
-* 顯式確認四項規格定錨：**目標版本號 `1.3.2` ｜ 目標語系 `繁體中文 (PCRE2 / Python GUI)` ｜ By-Design 豁免清單 `已核對第 1 節共 6 項` ｜ Profile `Profile-BackendScript`**。
-* 簡述本次審查執行方式（白箱靜態代碼路徑推演）與涵蓋範圍（Phase 0 五大排查 ＋ 四大維度 12 項靜態 TC）。
+* 明列本次四項定錨確認（版本號 `4.3.5`、語系、By-Design 清單、Profile `Profile-WebScript`）與瀏覽器測試矩陣（Sleipnir / Brave / Firefox）。
 
 #### 3.2 四大維度逐項檢驗表格
-| TC 編號 | 維度 | 驗證目標 | 實體代碼語意錨點 | 推演判定（四態標籤 / 🟡 未決） | 備註 |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **TC-NEW-01** | 維度一 | 雙階碼錶世代隔離、主執行緒派發與字色重置 | `...` | `[PASS] / ...` | `...` |
-| **TC-NEW-02** | 維度一 | PCRE2 控制動詞置換、黑名單與換行存活性 | `...` | `[PASS] / ...` | `...` |
-| **TC-NEW-03** | 維度一 | 歷史看板滾輪隔離與空頁籤防護 | `...` | `[PASS] / ...` | `...` |
-| **TC-NEW-04** | 維度一 | 空路徑維持 `""` 與時區時間戳對齊 | `...` | `[PASS] / ...` | `...` |
-| **TC-REG-01** | 維度二 | 頭部版本宣告與 SDK 透傳禁令 | `...` | `[PASS] / ...` | `...` |
-| **TC-REG-02** | 維度二 | Worker 0 `.get()` 隔離與 6 按鈕互斥鎖 | `...` | `[PASS] / ...` | `...` |
-| **TC-REG-03** | 維度二 | 雙錨點唯一、SHA-256 印章與圍欄阻斷 | `...` | `[PASS] / ...` | `...` |
-| **TC-REG-04** | 維度二 | 第 0 秒阻斷、縫合去重、哨兵與原子覆寫 | `...` | `[PASS] / ...` | `...` |
-| **TC-RISK-01** | 維度三 | 雙階切換與例外中斷競態推演 | `...` | `[PASS] / ...` | `...` |
-| **TC-RISK-02** | 維度三 | 依賴降級與多帳號授權躍遷容錯 | `...` | `[PASS] / ...` | `...` |
-| **TC-DEBT-01** | 維度四 | 畸形組態自癒與新增變數讀寫雙向核驗 | `...` | `[PASS] / ...` | `...` |
-| **TC-DEBT-02** | 維度四 | 零狀態啟動與孤兒暫存檔背景清理 | `...` | `[PASS] / ...` | `...` |
-
-*(四態終審標籤嚴格限選：`[PASS]`、`[PASS (By-Design)]`、`[PASS (Retired)]`、`[FAIL]`；涉及待補證或仲裁未決者填 `[🟡 未決待處置]`)*
+* 僅填寫上述 12 項靜態白箱推演項目（`TC-NEW-01~04`、`TC-REG-01~03`、`TC-RISK-01~03`、`TC-DEBT-01~02`），每項必須給出四態終審標籤：`[PASS]` ｜ `[PASS (By-Design)]` ｜ `[PASS (Retired)]` ｜ `[FAIL]`（若存在待裁決爭議或補證，填註 `[🟡 未決待處置]`）。嚴禁出現模糊暫緩標籤。
 
 #### 3.2.1 🕹️ 人類實機操作核對專區 (Manual Live Verification Area)
 | 實機項目編號 | 驗證操作目標 | 實體代碼對應邏輯錨點 | 實機回填要求 | 當前專區狀態 |
 | :--- | :--- | :--- | :--- | :--- |
-| **MV-01** | 雙階連續執行碼錶歸零與藍字重置實測 | `run_auto_pipeline._pipeline` 內緊鄰 `self._stop_stopwatch()` 後接 `self._start_stopwatch(...)` 處 | 於真實視窗執行「一鍵雙階自動優化」，錄影或截圖確認 Stage 1 轉 Stage 2 瞬間狀態列文字變回 `0s` 且字色呈藍色 `#2563eb`，無舊秒數跳回覆寫，完成後保留最終綠色成功文案 | 待回填 |
-| **MV-02** | 含 `(*SKIP)(*FAIL)` 字典條目實機存檔驗收 | `validate_pcre_syntax` 內緊鄰 `pcre2_verb_pattern.sub(...)` 與 `save_and_backup_dict` 內 `os.replace` 處 | 使用含 `(*SKIP)(*FAIL)` 之真實 QA 輸出（如 `[須]` 條目）點擊存檔，回傳狀態列成功訊息、確認 `bak/` 已產出 `.bak` 且目標字典檔維持 `utf-8-sig` 換行完整；另以故意缺右括號樣本確認 Linter Gate 紅框阻斷 | 待回填 |
-| **MV-03** | 頁籤 2 歷史看板滾輪隔離與時區時間戳對齊 | `build_tab2` 內緊鄰 `_on_history_wheel` 與 `append_history_log` 內 `strftime("%Y-%m-%d %H:%M:%S %z")` 處 | 切換至頁籤 2，滑鼠懸停於 `txt_history` 滾動確認僅看板內部捲動且外層畫布紋風不動，同時截圖確認時間戳含 `+0800` 等本地時區且表頭欄位對齊無錯位 | 待回填 |
-| **MV-04** | 頁籤 2 留空路徑存檔防 `"."` 退化實測 | `save_all_settings` 與 `load_config` 內緊鄰 `self._norm_path_or_empty(...)` 處 | 於頁籤 2 清空任一路徑輸入框並點擊儲存設定，貼回 `config.json` 對應鍵值內容，確認為 `""` 而非 `"."` | 待回填 |
+| **MV-01** | Z.AI 多檔最右側 Tab 自動切換實測 | `focusZaiRightmostTab` 與 `getZaiDeliverableText` 內 緊鄰 `已自動切換至最新檔案` 處 | 開啟含 2 個以上檔案 Tab 之 Z.AI 抽屜，手動點選最左側舊 Tab 後按綠鍵或 `F4`，貼回 Toast 截圖與剪貼簿首尾內容 | 待回填 |
+| **MV-02** | Z.AI 短文字成果物 (`< 30` 字) 煞車耗時實測 | `getZaiPreviewText` 與 `getZaiDeliverableText` 內 緊鄰 `text.length > 0` 處 | 預覽 `15~25` 字短文件，確認 1 秒內完成提取而非耗滿 10 秒超時 | 待回填 |
+| **MV-03** | Qwen Agent 單輪多段聚合與跨欄隔離實測 | `Adapters.Qwen.getAiNodes` 內 緊鄰 `.chat-response-message-render-flow` 處 | 於 Qwen Agent 開啟右側抽屜狀態下點擊藍鍵，貼回複製結果確認含多段正文、無思考／工具卡片且無右側預覽混入 | 待回填 |
+| **MV-04** | Qwen 雙軌綠鍵 Fiber (`s@6[5].content`) 無損提取與關舊開新實測 | `injectQwenFiberBridge` 與 `getQwenDeliverableText` 內 緊鄰 `response-present-file-card--active` 處 | 針對含複雜表格管道符 `|` 之檔案卡片測試綠鍵與多輪切換開門，確認回報「無損 Raw MD」且表格欄位與換行完整；另測無檔案卡輪次確認平滑降級 | 待回填 |
+| **MV-05** | Toast 動態外觀即時覆寫驗證 | `showToast` 內 緊鄰 `setProperty('background'` 處 | 於 Tab 5 變更背景色與字級後不重整頁面直接觸發 Toast，確認即時生效 | 待回填 |
+| **MV-06** | `QP-Track1-DualLayer-Rescue` 雙環境脫困實測 | `Storage` 與 `getQaQueue` 內 緊鄰 `GM_getValue` / `localStorage` 處 | 分別於 DevTools 預設 Page Context 與 Userscript 擴充套件沙盒 Context 執行救援指令並回報結果 | 待回填 |
+
+*專區狀態集合：`{待回填 ｜ 已回填-通過 ｜ 已回填-異常轉升格 3.3 缺陷並附 4 要素}`*
 
 #### 3.3 🚨 發現之缺陷與異常清單 (Defects & Observations)
-凡判定 `[FAIL]` 或回報異常者，必須附帶 **缺陷復現 4 要素**：
-1. **具體代碼位置**（語意錨點格式，嚴禁硬行號）
-2. **最小復現邏輯推演**
-3. **實際行為 vs 預期行為**
-4. **置信度標記與證據鏈**（🔴 確認缺陷 / 🟡 疑似風險 / ⚪ 需實機驗證/人審回報）
+凡判定 `[FAIL]` 或發現異常者，必須附帶 **缺陷復現 4 要素**（語意錨點零行號、最小復現推演、實際行為 vs 預期行為、置信度標記 🔴 / 🟡 / ⚪）。
 
 #### 3.3.1 🧬 清單外白箱代碼缺陷 (Off-List Static Vulnerabilities)
-彙整 Phase 0.1 至 0.5 獨立排查發現（無則顯式宣告「Phase 0 五大排查全數通過，無清單外靜態缺陷」）。
+承接 Phase 0 (0.1 至 0.5) 排查結果，若有清單外發現一律登錄於此。
 
 #### 3.4 最終 PASS / FAIL 簽核結論與發布建議
-* 若 3.2 表格內全部 12 項靜態 TC 均為四態閉環通過標籤（`[PASS]`／`[PASS (By-Design)]`／`[PASS (Retired)]`），Phase 0 無未決缺陷且無未處置之 `🟡` 標記，應即刻簽發 **【6-A 技術手冊封存核准】**，正式解除 ENG 交付責任並允許進入階段 5 技術交接檔產出；同時將 3.2.1 專區 `MV-01` 至 `MV-04` 移入 **【6-B 維運與動態追蹤待辦】**，不阻礙技術封存進度。
-* 若存在任何工程 `[FAIL]` 或未解決之 `[🟡 未決待處置]`，則依雙門禁 Fallback 機制暫緩最終簽核並詳列待修復或待補證項目。
+* 若 12 項靜態 TC 全數閉環 (`[PASS]` / `[PASS (By-Design)]` / `[PASS (Retired)]`) 且無未決之 `[🟡 未決待處置]`，即依 **6-A / 6-B 分階段簽核協議** 簽發 **【6-A 技術手冊封存核准】**，解除 ENG 交付責任，並將 `MV-01~MV-06` 轉入 **【6-B 維運與動態追蹤待辦】**；否則退回雙門禁暫緩簽核。
 
 ---
-*(註：本任務書之 `【肆、 跨輪次任務切換解除鎖定協定】` 已維持常駐就緒，待後續 QA 回傳報告完成仲裁與階段 5 收尾，收到 ENG 產出之《v1.3.2 技術交接檔》時，本 PM 實例將立即執行階段 6 簽核審計。)*
+
+## 【叁、 執行輸入區確認 (Target Anchoring)】
+
+本次任務書目標代碼為隨附提交之 `AI 雙模式乾淨複製器 v4.3.5`（`TARGET_VERSION: 4.3.5` ｜ `BASELINE_VERSION: 4.3.4` ｜ `TARGET_LANGUAGE: 繁體中文 UI` ｜ `PROFILE_TYPE: Profile-WebScript` ｜ `RETIREMENT_REQUESTED: NO`）。請 QA 依上方任務書規範直接針對 `v4.3.5` 原始碼展開驗收審查並回傳報告。
+
+---
+
+> 🔔 **【任務切換監聽狀態】**：本實例已保持常駐監聽，後續收到多方 QA 報告時將啟動階段 4.5 白箱仲裁與 Hotfix 工單防偽審查；收到技術交接檔時將依反倒嚼熔斷鎖與結算閉環執行階段 6 分階簽核。
