@@ -79,173 +79,223 @@
 
 ## 【貳、 QA 測試驗證任務書 (QATP)】
 
-> 🔒 **規格預設值顯式定錨**：  
-> **1. 目標版本號**：`3.9.0` ｜ **2. 目標語系**：`zh-TW` ｜ **3. By-Design 豁免清單**：`見下方第 1 小節` ｜ **4. Profile**：`Profile-WebScript`
+> **1. 目標版本號**：`1.3.2` ｜ **2. 目標語系**：`繁體中文 (PCRE2 規則維護 / Python Desktop GUI)` ｜ **3. By-Design 豁免清單**：`見下方第 1 小節清單` ｜ **4. Profile**：`Profile-BackendScript`
+
+> 🔒 **預判標籤與安全港規則提醒**：  
+> ① 預判 `[FAIL]` 僅限 P0 工安級、P1 架構安全級及法定契約項（功能虛報、數據造假、版本號未宣告或未遞增）。  
+> ② 輔助性讓步延遲（如帳號切換 `0.3s` 或模型切換 `1.0s` 之 `sleep`）、具合理豁免說明且非最後防線之 `[N/A]` 標記、非實質縮寫之排版微瑕，均歸屬安全港，嚴禁預判為 `[FAIL]`，僅得列為 P3 觀察項。  
+> ③ 所有程式碼定位描述嚴格採用「`{函式名/模組名} 內 緊鄰 {字面量或條件式} 處`」語意錨點，不得使用行號定位。
 
 ---
 
-### 0. 🧬 Phase 0：獨立白箱代碼靜態風險排查 (Static Code Audit)
+### 0. 🧬 【強制優先】Phase 0：獨立白箱代碼靜態風險排查 (Static Code Audit)
 
-* **0.1 【Shell / CLI / 外部進程與路徑轉義漏洞排查】**：  
-  `[PASS]` 本專案為前端 Userscript，未調用外部 Shell/CLI 命令。URL 參數建構採專屬正則提取與字串拼接，無命令注入途徑。
-* **0.2 【字串與正則邊界吞噬排查】**：  
-  `[PASS]` 核心標的提取正則 `/\/stock\/([A-Za-z0-9]+)(?:[\/\?#]|$)/` 採用非捕獲群組邊界，無萬用字元跨行吞噬風險；Google 試算表正規提取採 `[a-zA-Z0-9-_]+` 明確字元集，換行存活性經推演完整。
-* **0.3 【系統資源競爭、死鎖、洩漏與跨執行緒 GUI 讀寫排查】**：  
-  `[PASS]` 批次接力計時器 `batchMonitorTimer` 與輪詢計時器 `singleScrapePoller` 於啟動與終止分支均落實 `clearInterval` 與顯式重置；`singleScrapePoller` 設有 50 次 (25 秒) 硬性截止上限。
-* **0.4 🚨 【全域頂層範圍語法崩潰與入口盲區排查 (Zero-Meltdown Audit)】**：  
-  `[PASS]` 頂層 IIFE `setupNetworkInterceptor` 於 `unsafeWindow` 具備三元運算子降級；主程式入口 `initMainApp` 採 `document.readyState` 監聽保護；前置版本號宣告於第 5 行符合規格；`GM_registerMenuCommand` 無條件掛載，頂層範圍無未防護之死區存取。
-* **0.5 🛡️ 【災難救援與脫困指令執行環境能力邊界排查 (Runtime Context Feasibility)】**：  
-  `[PASS]` 原生註冊之選單指令「🔄 重置面板位置 (尋回 UI)」直接調用原生 `GM_setValue` 與 DOM 修改，無需依賴內部非同步閉包，具備沙盒內獨立脫困可行性。
+QA 展開維度驗收表格前，必須獨立完成以下五大底層靜態審查，若發現新風險請依 4 要素記錄於 3.3.1：
+* **0.1 【Shell / CLI / 外部進程與路徑轉義漏洞排查】**：檢查 `launch_sentinel_gui`、`open_file_path` 與 `save_and_backup_dict` 中 `subprocess.Popen`、`subprocess.run` 及 `os.startfile` 之參數組裝，核對是否嚴禁 `shell=True`，以及傳入含空白／中文 Windows 路徑時是否受 list 傳參保護。
+* **0.2 【字串與正則邊界吞噬排查】**：全面複掃 `validate_pcre_syntax` 內 `pcre2_verb_pattern`、`\\x\{([0-9a-fA-F]+)\}`、`sanitize_invisible_chars` 及 `ENTRY_BLOCK_REGEX`，核對是否均具備非空錨點、是否違反單行邊界或誤設 `re.S` 導致跨行換行吞噬。
+* **0.3 【系統資源競爭、死鎖、洩漏與跨執行緒 GUI 讀寫排查】**：核對 `_start_stopwatch`、`_stop_stopwatch`、`_exec_stage1`、`_exec_stage2`、`run_auto_pipeline._pipeline` 及 `test_api_connection._worker` 是否將所有 Tk 元件操作與 `after_cancel` 排入主執行緒（`root.after(0, ...)`），並核對多執行緒共用 `stopwatch_token` 在 `is_running` 互斥保護下是否無競爭漏洞。
+* **0.4 【全域頂層範圍語法異常與入口盲區排查 (Zero-Meltdown Audit)】**：獨立複查模組頂層導入、`__version__` 位置、`sys.setrecursionlimit(5000)`、`HAS_DND`／`GENAI_MODE` 條件分支，確認無頂層未捕獲異常；遵守舉證責任，Python 原始字串 `r'...'` 內合法轉義序列不得憑空推測為語法損壞。
+* **0.5 【災難救援與脫困指令執行環境能力邊界排查】**：核對 `.bak` 還原、工作目錄 `.tmp` 清理與 `config.json` 損壞自癒機制是否完全匹配 Windows 本機執行環境權限與編碼邊界（`utf-8-sig`／`utf-8`）。
 
 ---
 
-### 1. 🛡️ 架構妥協與驗收豁免須知 (By-Design Exceptions)
+### 1. 🛡️ 【強制】架構妥協與驗收豁免須知 (By-Design Exceptions)
 
-1. **自選股與大盤頁面排除自動路由【By-Design / 預期行為】**：  
-   `/watchlist` 與 `/market` 頁面無單一標的代碼，自動路由邏輯主動略過，維持使用者當前選擇。  
-   *不可豁免鐵律自查：無衝突（核心資料無損壞，載入無崩潰）。*
-2. **失焦狀態下 `navigator.clipboard.writeText` 拋出例外【By-Design / 預期行為】**：  
-   瀏覽器沙盒限制背景分頁調用 Clipboard API，腳本以 `.catch(() => {})` 靜默吞除，並改由 `GM_setClipboard` 雙軌寫入及 UI 呼吸燈引導，屬安全降級策略。  
-   *不可豁免鐵律自查：無衝突。*
-3. **大盤技術分析輸出剝離流水帳【By-Design / 預期行為】**：  
-   大盤 K 線僅保留雷達摘要，不輸出逐筆 OHLCV，以節省上下文視窗空間。  
-   *不可豁免鐵律自查：無衝突。*
+1. **外部 SDK 模型名稱原樣透傳（No `models/` Prefix）**：
+   * *說明*：`raw_sdk_call` 將設定之模型字串（如 `gemini-3.8-flash`）直接透傳予官方 SDK，刻意不拼接 `models/` 前綴以免觸發 `404 NOT_FOUND`。
+   * *合法對稱面*：若測試環境提供自訂非官方代理端點要求 `models/` 前綴而未生效，屬規格外預期排除；目標官方端點必須原樣透傳。
+   * *不可豁免鐵律自查*：無衝突（不導致載入期崩潰或資料損毀）。
+2. **衝突哨兵缺失、逾時或非對沖腳本異常平滑降級**：
+   * *說明*：`save_and_backup_dict` 在未啟用哨兵、腳本不存在、執行逾時（> 5s）或腳本自身發生非對沖 Python 異常時，僅於狀態列警告並放行常規存檔。
+   * *合法對稱面*：哨兵正常回報對沖關鍵字時必須硬阻斷存檔；哨兵環境異常時放行存檔屬預期防禦行為，不得判 FAIL。
+   * *不可豁免鐵律自查*：無衝突。
+3. **PCRE2 專屬語法寬容放行策略**：
+   * *說明*：`validate_pcre_syntax` 預替換 PCRE2 控制動詞後，僅攔截 7 項 `fatal_blacklist` 明確錯誤，對 `\p{Han}`、`\K`、非定長 lookbehind 及未列舉之冷門 `re.error` 採放行策略，深層語意交由哨兵把關。
+   * *合法對稱面*：不在 7 項黑名單內之 PCRE2 特有語法報錯予以放行屬預期設計；命中 7 項黑名單或括號不對稱者必須硬阻斷。
+   * *不可豁免鐵律自查*：無衝突。
+4. **可選拖曳套件 `tkinterdnd2` 平滑降級**：
+   * *說明*：環境未安裝 `tkinterdnd2` 時 `HAS_DND = False`，工具改以標準 `tk.Tk()` 啟動並停用檔案拖曳綁定。
+   * *合法對稱面*：純標準庫環境下不具備拖曳功能屬預期行為；具備 `tkinterdnd2` 環境必須正常註冊 `DND_FILES`。
+   * *不可豁免鐵律自查*：無衝突。
+5. **頁籤 2 滾輪穿透作用邊界與 Windows 原生 `os.startfile` 相依**：
+   * *說明*：全域滾輪綁定僅限游標停留於頁籤 2 且非 `txt_history` 元件時生效，切換頁籤立即解綁；快速檢驗按鈕依賴系統副檔名關聯。
+   * *合法對稱面*：切回頁籤 1 時頁籤 2 不再響應滾輪屬預期隔離；系統未配置 `.txt` 編輯器關聯時交由 OS 處理。
+   * *不可豁免鐵律自查*：無衝突。
+6. **歷史紀錄時間戳依系統本地時區渲染**：
+   * *說明*：時間戳 `%z` 依據作業系統當下時區輸出（如 `+0800`）。
+   * *合法對稱面*：在不同時區測試機產出對應時區偏移量屬預期行為，不可硬性寫死比對 `+0800`。
+   * *不可豁免鐵律自查*：無衝突。
 
 ---
 
 ### 2. 四大維度測試案例清單 (Test Cases)
 
-#### 🌟 維度一：新功能驗收 (TC-NEW)
+#### 🌟 維度一：新功能驗收 (TC-NEW-xx)
 
-* **TC-NEW-01：URL 標的代碼嗅探與個股/ETF 零點擊自動路由**
-  * **測試情境**：驗證標的變更時自動切換 Profile。
-  * **操作步驟**：分別跳轉至 `stock/2330`、`stock/00878`、`stock/009813`、`stock/00679B`。
-  * **預期結果**：`2330` 自動載入存股分類 (catId: 0)；`00878` 命中高股息載入 Profile 11；`009813` 命中市值型載入 Profile 10；`00679B` 命中債券特徵載入 Profile 12。
-  * **語意錨點推演**：`initMainApp` 內 `applyAutoRoute` 緊鄰 `stockId.startsWith("00")` 處，依字尾特徵與 Storage 名單精確分流。  
-  * **結論標籤**：`[PASS]`
+* **TC-NEW-01｜FIX-01 雙階碼錶世代 Token 隔離、主執行緒派發與字色重置 (`AC-03`)**
+  * *測試情境*：模擬「一鍵雙階自動優化」於階段一完成並寫入綠色狀態字後，在極短時間內緊接啟動階段二碼錶，檢驗舊計時器是否立即作廢、狀態字是否歸零且字色重置為藍字。
+  * *操作步驟*：
+    1. 追蹤 `RadarRegexToolApp.__init__` 內 `stopwatch_token` 與 `stopwatch_after_id` 初值。
+    2. 追蹤 `_start_stopwatch` 與 `_stop_stopwatch` 執行路徑，模擬階段一呼叫 `_start_stopwatch(..., fg_color="#2563eb")` ➔ `_exec_stage1` 呼叫 `update_status(..., fg_color="#059669")` ➔ `_pipeline` 呼叫 `_stop_stopwatch()` ➔ 立即呼叫 `_start_stopwatch("⏳ 雷達 QA 審核中...", fg_color="#2563eb")`。
+    3. 模擬階段一殘留之舊 `_tick` 閉包在 token 已遞增後被主事件迴圈喚醒；並於階段二完成後觸發 `finally` 內 `_stop_stopwatch()`。
+  * *預期結果*：
+    - `_start_stopwatch` 遞增 `stopwatch_token` 後，經 `self.root.after(0, _init_on_main)` 於主執行緒呼叫 `after_cancel` 清除舊句柄，立即將 `lbl_status` 刷新為 `(已耗時: 0s)...` 且 `fg="#2563eb"`（無綠字殘留）。
+    - 舊階段 `_tick` 喚醒時因 `my_token != self.stopwatch_token` 立即 return，不會以舊秒數覆蓋階段二狀態。
+    - `_stop_stopwatch` 僅置 `False`、遞增 token 並派發 `_cancel_on_main` 取消定時器，不覆寫階段二完成後之最終綠色結果文字。
+  * *代碼 AST 語意錨點*：`RadarRegexToolApp.__init__` 內緊鄰 `self.stopwatch_token = 0` 處；`_start_stopwatch` 內緊鄰 `def _init_on_main():` 與 `self.lbl_status.config(text=f"{desc_prefix} (已耗時: 0s)...", fg=fg_color)` 處；`_stop_stopwatch` 內緊鄰 `self.stopwatch_token += 1` 與 `def _cancel_on_main():` 處。
 
-* **TC-NEW-02：URL 自動路由去抖動與同頁面手動選擇優先鎖**
-  * **測試情境**：驗證同標的頁面手動切換選單後不被定時器逆向覆蓋。
-  * **操作步驟**：進入 `stock/2330`，手動切換至 Profile 1，等待 3 秒定時器輪詢。
-  * **預期結果**：選單與勾選維持 Profile 1，未被強制作動重設回 Profile 4。
-  * **語意錨點推演**：`selCat.onchange` 與 `selProf.onchange` 內設定 `userManuallySelectedProfile = true`，且 `applyAutoRoute` 頂部具備 `stockId === lastSniffedStockId && userManuallySelectedProfile` 中斷保護。  
-  * **結論標籤**：`[PASS]`
+* **TC-NEW-02｜FIX-02 PCRE2 回溯控制動詞安全替換、致命黑名單裁決與換行存活性驗證 (`AC-04`)**
+  * *測試情境*：驗證 `validate_pcre_syntax` 對含 `(*SKIP)(*FAIL)` 之合法條目、字元類內字面量、PCRE2 擴展語法、真實損壞語法及**多段落字典樣本換行存活性**之處理正確性。
+  * *操作步驟*：
+    1. **合法回溯控制動詞樣本**：輸入包含 `(*SKIP)(*FAIL)`、`(*PRUNE)`、`(*COMMIT)` 且括號對稱之多行字典樣本（含 `;` 註解行與空行與規則行），檢查 `validate_pcre_syntax` 回傳值。
+    2. **詞法保護樣本**：輸入含 `[(*SKIP)]` 字元類與跳脫 `\*` 之規則行，驗證 `pcre2_verb_pattern` 替換結果。
+    3. **PCRE2 擴展樣本**：輸入含 `\p{Han}`、`\K`、`\x{4E00}` 及非定長 lookbehind 之規則行。
+    4. **致命損壞樣本**：分別輸入缺右括號 `(abc`、孤立右括號 `abc)`、未閉合字元類 `[abc`、無前置原子量詞 `*abc`、結尾反斜線 `abc\`、倒置量詞 `a{5,2}`、無效區間 `[z-a]`。
+    5. **換行存活性驗證 (Newline Vitality Verification)**：輸入具備 5 行有效規則＋註解之多段落樣本，驗證經過 `validate_pcre_syntax` 及後續 `stitch_and_deduplicate`／存檔擷取管線後，輸出換行符數量落入預期行數區間（與條目區塊行數吻合），無全文壓扁為單行現象。
+  * *預期結果*：
+    - 樣本 1、2、3 全部回傳 `(True, "")`；`[(*SKIP)]` 與 `\*` 命中群組 1 原樣保留不被改寫為 `(?:)`。
+    - 樣本 4 全數回傳 `(False, "...")`，硬阻斷存檔且磁碟原檔未更動。
+    - 樣本 5 多行換行結構完整保留，正則 `pcre2_verb_pattern` 與 `sanitize_invisible_chars` 均無吞噬換行。
+  * *代碼 AST 語意錨點*：`validate_pcre_syntax` 內緊鄰 `pcre2_verb_pattern = re.compile(...)`、`fatal_blacklist = [` 與 `transpiled = pcre2_verb_pattern.sub(...)` 處。
 
-* **TC-NEW-03：Google 試算表 CSV 雲端三向同步、萬能補零與防空熔斷**
-  * **測試情境**：驗證 CSV 轉譯、HTML 守衛、補零與空內容保護。
-  * **操作步驟**：配置合法試算表網址並點擊同步；模擬未公開試算表 HTML 內容；模擬全空 CSV。
-  * **預期結果**：合法 CSV 解析後 A/B 欄純數字補前綴 `00`，C 欄不補 `00`，去重後寫入 Storage；HTML 響應與空內容觸發警告並中止落地，本機現有名單無損。
-  * **語意錨點推演**：`syncGoogleSheetLists` 內調用 `getGoogleSheetsCsvUrl` 與 `isHtmlResponse`，並於解析末端檢查陣列長度後落地。  
-  * **結論標籤**：`[PASS]`
+* **TC-NEW-03｜UX-01 歷史看板滾輪隔離與頁籤空選值邊界防護 (`AC-05`)**
+  * *測試情境*：驗證頁籤 2 歷史看板 `txt_history` 上滾動滑鼠時只捲動看板本身而不捲動外層 `tab2_canvas`，以及 `notebook.select()` 回傳空值時之安全防護。
+  * *操作步驟*：
+    1. 追蹤 `build_tab2` 中 `self.txt_history` 之事件綁定與 `_on_history_wheel` 對 `<Button-4>`、`<Button-5>` 及 Windows `<MouseWheel>`（含高精細觸控板 `delta` 小於 120 導致 `int(-delta/120) == 0` 之情況）之處理。
+    2. 追蹤 `_on_global_mousewheel`、`_on_global_mousewheel_up`、`_on_global_mousewheel_down` 之入口過濾條件。
+    3. 模擬 `self.notebook.select()` 回傳 `""` 時觸發 `_on_tab_changed`。
+  * *預期結果*：
+    - `_on_history_wheel` 主動驅動 `self.txt_history.yview_scroll(...)`（非 0 步階）後回傳 `"break"`；全域滾輪回呼對 `event.widget is self.txt_history` 亦直接 `return`，達成雙重隔離且看板本身可順暢捲動。
+    - `_on_tab_changed` 於 `sel` 為空時安全判定 `idx = -1` 並呼叫 `_unbind_global_mousewheel()`，絕不拋出 `TclError`。
+  * *代碼 AST 語意錨點*：`build_tab2` 內緊鄰 `self.txt_history.bind("<MouseWheel>", self._on_history_wheel)` 處；`_on_history_wheel` 內緊鄰 `return "break"` 處；`_on_global_mousewheel` 內緊鄰 `if event.widget is self.txt_history:` 處；`_on_tab_changed` 內緊鄰 `sel = self.notebook.select()` 處。
 
-* **TC-NEW-04：中央舞台 460px 雙欄佈局拓寬與 Accordion 分流**
-  * **測試情境**：驗證 CSS Grid 雙欄佈局於 1080p 螢幕之呈現。
-  * **操作步驟**：展開主面板，全開所有 Accordion。
-  * **預期結果**：即時五檔置頂通欄 (`cm-grid-full`)，技術/財務分析佔據左欄，基本/籌碼/ETF 佔據右欄，舞台寬度動態自適應為 460px，按鈕常駐可見。
-  * **語意錨點推演**：`getDynamicUIParams` 內 `centerW: 460 + (off * 16)`，且 `createUI` 內容器採用 `.cm-checkbox-area-grid`。  
-  * **結論標籤**：`[PASS]`
+* **TC-NEW-04｜UX-02 空路徑正規化保持與時區時間戳對齊 (`AC-06`)**
+  * *測試情境*：驗證留空路徑設定不退化為 `"."`，以及歷史紀錄看板時區時間戳與表頭對齊。
+  * *操作步驟*：
+    1. 將 `""`、`"   "`、`None` 與 `"C:/dict/正則查找字典.txt"` 分別傳入 `_norm_path_or_empty`。
+    2. 模擬於頁籤 2 清空 `entry_dict_2` 與 `entry_sentinel_path` 後執行 `save_all_settings`，再重啟調用 `load_config`、及觸發 `get_selected_dict_content`。
+    3. 檢查 `build_tab2` 歷史看板表頭與分隔線長度，並追蹤 `append_history_log`、`_exec_stage2`、`save_and_backup_dict` 之時間戳產生與 `ljust(25)` 排版寬度。
+  * *預期結果*：
+    - `_norm_path_or_empty` 對空／純空白／`None` 回傳 `""`，對非空路徑回傳標準反斜線路徑；`config.json` 保持 `""` 而非 `"."`。
+    - 4 處寫入點均使用 `datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z")`，表頭時間戳欄寬（26 字元單位）與分隔線 `"-" * 105` 齊整對齊。
+  * *代碼 AST 語意錨點*：`_norm_path_or_empty` 內緊鄰 `return os.path.normpath(s) if s else ""` 處；`build_tab2` 內緊鄰 `self.txt_history.insert(tk.END, "-" * 105 + "\n")` 處；`append_history_log` 內緊鄰 `default_ts = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z")` 處。
 
-* **TC-NEW-05：情境感知互斥遮罩與遮罩狀態防抹殺**
-  * **測試情境**：驗證個股與 ETF 切換時面板控制項之隱藏，以及儲存時對隱藏模組記憶之保全。
-  * **操作步驟**：切換至 ETF 專區，確認財務分析區塊隱藏；點擊儲存組合勾選狀態。
-  * **預期結果**：`#acc-finance` 設為 `display: none`；被遮罩之財務分析模組勾選狀態不被清空。
-  * **語意錨點推演**：`cm-btn-save-profile.onclick` 內分別採集 `visibleChecked` 與 `hiddenExisting` 進行 Set 聯集合併。  
-  * **結論標籤**：`[PASS]`
+---
 
-* **TC-NEW-06：剪貼簿失焦靜默遺失防禦與呼吸燈動畫**
-  * **測試情境**：驗證背景分頁完成批次抓取時之防禦機制。
-  * **操作步驟**：於未聚焦主視窗情境下完成批次抓取。
-  * **預期結果**：`document.hasFocus()` 為 `false` 時，Toast 提示手動按鍵，重新複製按鈕套用 `.cm-btn-pulse` 呼吸燈類別；手動複製時若跨標的則彈出代碼差異警告。
-  * **語意錨點推演**：`finishScrape` 內檢測 `!document.hasFocus()`，並於 `#cm-btn-recopy.onclick` 內比較 `lastStockId !== currentStockId`。  
-  * **結論標籤**：`[PASS]`
+#### 🔄 維度二：關鍵防禦機制實體存活審查 (TC-REG-xx)
 
-#### 🔄 維度二：關鍵防禦機制實體存活審查 (TC-REG)
+* **TC-REG-01｜版本宣告錨點與 SDK 模型名稱原樣透傳禁令 (`AC-01`, `AC-02`)**
+  * *審查情境*：確認頭部版本宣告位置與 `raw_sdk_call` 模型名稱透傳未被重構破壞。
+  * *審查步驟*：檢視檔案頭部前 10 行 `__version__` 宣告、主視窗標題格式，並追蹤 `raw_sdk_call` 兩種 SDK 分支之參數傳遞。
+  * *預期結果*：`__version__ = "1.3.2"` 位於頭部前 10 行內；`raw_sdk_call` 嚴格原樣傳入 `model_name`，無任何 `models/` 字串拼接邏輯。
+  * *代碼 AST 語意錨點*：模組頂部緊鄰 `__version__ = "1.3.2"` 處；`raw_sdk_call` 內緊鄰 `model=model_name` 與 `genai_legacy.GenerativeModel(model_name)` 處。
 
-* **TC-REG-01：批次接力任務唯一指紋與雙 Worker 防踩踏 (`FIX-01`)**
-  * **測試情境**：驗證多視窗發起任務時佇列保護與停滯復原。
-  * **操作步驟**：檢查任務資料結構指紋與 Worker 視窗名稱驗證。
-  * **預期結果**：任務具備隨機 `taskId`；Worker 僅在 `window.name === 'CMScrapeWorker'` 下執行；監控計時器具備 180 秒無進度停滯中斷保護。
-  * **語意錨點推演**：`startRelayBatchScrape` 生成 `taskId`，Worker 內部驗證 `latestTask.id !== task.id`，監控定時器內置停滯超時偵測。  
-  * **結論標籤**：`[PASS]`
+* **TC-REG-02｜跨執行緒 UI 隔離（Worker 0 處 `.get()`）與 6 組按鈕互斥鎖**
+  * *審查情境*：確認背景執行緒 100% 依賴不可變快照，且任務異常時互斥鎖必定釋放。
+  * *審查步驟*：掃描 `_exec_stage1`、`_exec_stage2`、`call_gemini_api`、`_runner`、`_pipeline` 是否存在任何 `.get()` 存取 Tkinter 元件；檢視 `set_ui_locked` 控制清單與 `finally` 釋放路徑。
+  * *預期結果*：背景執行緒 0 處呼叫 Tkinter `.get()`；`btn_auto`, `btn_clear`, `btn_s1`, `btn_s2`, `btn_save`, `test_btn` 全部受 `set_ui_locked` 控管，所有任務閉包之 `finally` 皆透過 `root.after(0, lambda: self.set_ui_locked(False))` 解鎖。
+  * *代碼 AST 語意錨點*：`create_task_snapshot` 內緊鄰 `raw_log = self.txt_log.get("1.0", tk.END).strip()` 處；`set_ui_locked` 內緊鄰 `for btn in [self.btn_auto, ...]:` 處；`run_auto_pipeline._pipeline` 內緊鄰 `finally:` 處。
 
-* **TC-REG-02：面板座標與拖曳夾緊 `panel_pos` 之 NaN 數值防禦 (`FIX-02`)**
-  * **測試情境**：驗證初次載入未拖曳或展開抽屜時面板座標計算。
-  * **操作步驟**：檢查寫入 `panel_pos` 之數值型態校驗。
-  * **預期結果**：寫入前均經 `Number.isFinite` 兜底，防止 `parseFloat("")` 產生 `NaN` 污染本機儲存。
-  * **語意錨點推演**：`toggleSideDrawer` 與 `makeDraggable.onmouseup` 處顯式使用 `Number.isFinite(curTop) ? curTop : 150`。  
-  * **結論標籤**：`[PASS]`
+* **TC-REG-03｜雙錨點唯一性、SHA-256 數位印章防調包與代碼圍欄硬阻斷**
+  * *審查情境*：驗證 `save_and_backup_dict` 之寫入前置防線是否完整保留。
+  * *審查步驟*：逐條追蹤 `save_and_backup_dict` 對目標 Radio 防漂移、`ANCHOR_TEXT` / `EOF_MARKER` 計數檢驗（`!= 1`）、`s2_hash` 比對及 `"```"` 圍欄檢測邏輯。
+  * *預期結果*：任一門禁未通過即彈出警告、釘選橫幅並中止寫入，磁碟原檔完全不受影響。
+  * *代碼 AST 語意錨點*：`save_and_backup_dict` 內緊鄰 `anchor_count = qa_output.count(self.ANCHOR_TEXT)`、`current_hash = hashlib.sha256(...)` 與 `if "```" in cleaned_extracted:` 處。
 
-* **TC-REG-03：雙抽屜 Storage Key 徹底隔離 (`UI-03`)**
-  * **測試情境**：驗證右抽屜儲存不反向覆蓋左抽屜系統設定。
-  * **操作步驟**：檢視 `#cm-cfg-save` 點擊回呼所寫入之 Storage Key 清單。
-  * **預期結果**：右抽屜僅寫入 `limit_*` 與黑白名單，徹底剔除 `font_offset`、`isExpanded`、`cm_drawer_side`、`cm_kline_sort` 及熱鍵配置。
-  * **語意錨點推演**：`#cm-cfg-save.onclick` 內不含任何左抽屜配置變數之 `GM_setValue` 調用。  
-  * **結論標籤**：`[PASS]`
+* **TC-REG-04｜第 0 秒極速硬阻斷、縫合去重、哨兵健全判定與 `utf-8-sig` 原子覆寫**
+  * *審查情境*：驗證目標字不匹配阻斷、多區塊去重置換、哨兵識別與檔案原子置換流程存活。
+  * *審查步驟*：追蹤 `check_and_block_alien_targets`、`stitch_and_deduplicate`、`save_and_backup_dict` 哨兵子進程判定及寫檔編碼／`os.replace` 流程；同時驗證 `sanitize_invisible_chars` 與 `stitch_and_deduplicate` 在多段落輸入下保留條目間換行結構。
+  * *預期結果*：外來目標字於 0ms 阻斷不鎖死 UI；重複區塊首處置換、其餘倒序抹除且保留換行區隔；哨兵僅在命中對沖特徵時阻斷；備份至 `bak/` 並以 `utf-8-sig` 寫入 `.tmp` 後 `os.replace` 原子置換。
+  * *代碼 AST 語意錨點*：`check_and_block_alien_targets` 內緊鄰 `alien_targets =` 處；`stitch_and_deduplicate` 內緊鄰 `for m in reversed(matches):` 處；`save_and_backup_dict` 內緊鄰 `is_collision = (` 與 `os.replace(tmp_file_path, target_path)` 處。
 
-* **TC-REG-04：資產負債表選擇器收斂與 K 線接力 Watchdog 時序對齊 (`FIX-04`)**
-  * **測試情境**：驗證資產負債表表格鎖定與接力超時時間。
-  * **操作步驟**：審查 DOM 選擇器字串與 Worker Watchdog 延遲常數。
-  * **預期結果**：選擇器收斂為 `.balanceSheet__table table, .stockPanel__view table`，移除全域裸露 `table`；Watchdog 延長為 25,000ms，消除與 Poller 之時序競爭。
-  * **語意錨點推演**：`MODULE_REGISTRY['balance-sheet']` 內部 `getTableSnapshot` 選擇器字面量，以及 `checkAndExecuteWorkerTask` 內 `setTimeout(..., 25000)`。  
-  * **結論標籤**：`[PASS]`
+---
 
-#### ⚠️ 維度三：架構風險與極端情境識別 (TC-RISK)
+#### ⚠️ 維度三：架構風險與極端情境識別 (TC-RISK-xx)
 
-* **TC-RISK-01：`CATEGORIES` 跨分頁快照抹殺防禦與深度陣列守衛 (`FIX-03` / `WB-01`)**
-  * **測試情境**：驗證分類改名與組合更新時本機資料之原子化寫入。
-  * **操作步驟**：審查 `saveCategories` 實作及載入初始化校驗。
-  * **預期結果**：儲存時重新由 Storage 讀取最新狀態並執行 `mutatorFn` 後寫回；初始化時驗證 `Array.isArray(c.profiles)`，防止殘缺陣列導致執行期拋錯。
-  * **語意錨點推演**：`saveCategories` 封裝於 `initMainApp` 頂層內部，改名與存檔回呼全面透過該函式變更。  
-  * **結論標籤**：`[PASS]`
+* **TC-RISK-01｜雙階毫秒級連續切換與任務中途異常時之碼錶與鎖定競態推演**
+  * *風險情境*：推演極端情況下（階段一剛完成隨即進入階段二，或階段一／二途中拋出網路例外／快照初始化失敗）是否發生碼錶空轉、狀態列覆寫錯亂或 UI 永久鎖死。
+  * *操作與推演步驟*：
+    1. 追蹤 `run_stage1_thread`、`run_stage2_thread`、`run_auto_pipeline` 在 `create_task_snapshot()` 拋出 `FileNotFoundError` 時之行為。
+    2. 追蹤 `_pipeline` 在 Stage 1 成功後立刻呼叫 `_stop_stopwatch()` + `_start_stopwatch()`，再於 Stage 2 拋出例外時進入 `finally` 執行 `_stop_stopwatch()` 與解鎖之事件序列。
+  * *預期結果*：快照例外由進入點 `try-except` 捕獲並釘選橫幅，完全不進入 `set_ui_locked(True)`；背景例外必進入 `finally`，遞增 token 使任何殘餘 `_tick` 失效，並安全解除鎖定與計時器。
+  * *代碼 AST 語意錨點*：`run_auto_pipeline` 內緊鄰 `except Exception as e:` 與 `def _pipeline(snap: dict):` 內 `finally:` 處。
 
-#### 🏛️ 維度四：靜態資料庫殘缺自癒推演 (TC-DEBT)
+* **TC-RISK-02｜可選依賴缺失降級與多帳號單組授權失效自動躍遷**
+  * *風險情境*：推演無 `tkinterdnd2`、哨兵腳本異常／逾時、以及多帳號池第一組 Key 失效（400/403）時系統韌性。
+  * *操作與推演步驟*：
+    1. 追蹤 `HAS_DND = False` 時 `__main__` 與 `build_tab1` 是否跳過 `drop_target_register`。
+    2. 追蹤 `save_and_backup_dict` 中哨兵回傳 `returncode != 0` 但無對沖關鍵字，以及拋出 `subprocess.TimeoutExpired` 之處置與 `finally` 清理 `.sentinel_dryrun.tmp`。
+    3. 追蹤 `call_gemini_api` 三種策略（`horizontal_first`、`quality_locked`、`vertical_first`）遭遇 `is_account_auth_error` 時之分支流向。
+  * *預期結果*：拖曳缺失與哨兵異常均平滑降級且清理暫存隔離檔；單組授權失效自動跳轉下組可用帳號繼續執行，僅在全帳號耗盡後始拋出最終例外。
+  * *代碼 AST 語意錨點*：`call_gemini_api` 內緊鄰 `def is_account_auth_error(e: Exception)` 處；`save_and_backup_dict` 內緊鄰 `elif proc.returncode != 0:` 與 `except subprocess.TimeoutExpired:` 處。
 
-* **TC-DEBT-01：全設定備份 Payload 完整性結構自癒 (`WB-02`)**
-  * **測試情境**：驗證 `applyJsonData` 於各設定鍵缺失或型態異常時之容錯。
-  * **操作步驟**：推演導入缺漏或殘缺 JSON 設定檔。
-  * **預期結果**：數值型態經 `safeInt` 兜底，字串經 `.trim()` 轉型，分類陣列驗證 `Array.isArray` 後方寫入 Storage，系統零崩潰。
-  * **語意錨點推演**：`applyJsonData` 內部逐欄以安全檢查保護。  
-  * **結論標籤**：`[PASS]`
+---
+
+#### 🏛️ 維度四：靜態資料庫殘缺自癒推演 (Static Mock Data-Flow Trace) (TC-DEBT-xx)
+
+* **TC-DEBT-01｜畸形組態自癒、空路徑防護與新增狀態變數讀寫活性雙向核驗**
+  * *推演情境*：對 `config.json` 注入破損 JSON、非 list 之 `api_profiles`、非 dict 帳號元素、越界數值（`max_retries=999`, `base_delay_seconds=-5`, `locked_account_index=99`）及純空白路徑 `"   "`；並核驗新增實例屬性之讀寫雙向活性。
+  * *推演步驟*：
+    1. 逐步追蹤 `load_config` 對上述殘缺輸入之修復與 Clamp 結果。
+    2. 對 `self.stopwatch_token` 與 `self.stopwatch_after_id` 進行全檔寫入點與讀取點盤點，確認無 Write-Only 殭屍變數。
+  * *預期結果*：`load_config` 修復為 3 組合法帳號、數值收斂於法定上下界、空白路徑歸為 `""`；`stopwatch_token` 與 `stopwatch_after_id` 均有明確寫入與讀取消費點（`_tick`、`_init_on_main`、`_cancel_on_main`），讀寫閉環完整。
+  * *代碼 AST 語意錨點*：`load_config` 內緊鄰 `if not isinstance(raw_profiles, list):` 與 `for path_k in [...]` 處；`_start_stopwatch` 與 `_stop_stopwatch` 內全部 `self.stopwatch_token` 及 `self.stopwatch_after_id` 存取處。
+
+* **TC-DEBT-02｜全新安裝零狀態啟動與孤兒暫存檔清理推演**
+  * *推演情境*：工作目錄無 `config.json`、無 `bak/` 資料夾且存在逾 10 分鐘之 `.tmp` / `.sentinel_dryrun.tmp` 殘留檔時啟動程式。
+  * *推演步驟*：追蹤 `load_config`、`cleanup_orphan_tmp_files`（含 `self._norm_path_or_empty` 防空路徑檢查）及 `build_top_bar`／`build_tab2` 初始化行為。
+  * *預期結果*：零狀態下自動使用 `DEFAULT_CONFIG` 安全啟動不崩潰；`cleanup_orphan_tmp_files` 於背景線程安全移除超時暫存檔，且當設定檔路徑為空時不會誤掃非預期路徑。
+  * *代碼 AST 語意錨點*：`cleanup_orphan_tmp_files` 內緊鄰 `p = self._norm_path_or_empty(self.config.get(k, ""))` 與 `if now - os.path.getmtime(fp) > 600:` 處。
 
 ---
 
 ### 3. 驗收報告格式要求 (Mandatory Output Schema)
 
+QA 回覆報告必須嚴格依循以下章節結構輸出：
+
 #### 3.1 測試環境與涵蓋範圍總覽
-* **目標版本號**：`3.9.0`
-* **目標語系**：`zh-TW`
-* **By-Design 豁免清單**：自選股與大盤跳過路由、失焦狀態下原生剪貼簿例外吞除、大盤無逐筆流水帳。
-* **Profile**：`Profile-WebScript`
+* 顯式確認四項規格定錨：**目標版本號 `1.3.2` ｜ 目標語系 `繁體中文 (PCRE2 / Python GUI)` ｜ By-Design 豁免清單 `已核對第 1 節共 6 項` ｜ Profile `Profile-BackendScript`**。
+* 簡述本次審查執行方式（白箱靜態代碼路徑推演）與涵蓋範圍（Phase 0 五大排查 ＋ 四大維度 12 項靜態 TC）。
 
 #### 3.2 四大維度逐項檢驗表格
-| 測試案例編號 | 測試維度 | 核心驗收目標 | 實體代碼對應邏輯錨點 | 終審標籤 |
-| :--- | :--- | :--- | :--- | :--- |
-| **TC-NEW-01** | 維度一 | URL 標的嗅探與 Profile 自動分流 | `applyAutoRoute` 內 `stockId.startsWith("00")` 決策分支 | `[PASS]` |
-| **TC-NEW-02** | 維度一 | 同頁面手動選擇優先鎖 | `applyAutoRoute` 頂部 `userManuallySelectedProfile` 檢查 | `[PASS]` |
-| **TC-NEW-03** | 維度一 | 雲端試算表 CSV 同步與防空熔斷 | `syncGoogleSheetLists` 內調用 `isHtmlResponse` 與 Set 去重 | `[PASS]` |
-| **TC-NEW-04** | 維度一 | 中央舞台 460px 雙欄 Grid 佈局 | `getDynamicUIParams` 內 `centerW: 460` 與樣式注入 | `[PASS]` |
-| **TC-NEW-05** | 維度一 | 個股/ETF 情境遮罩與聯集防抹殺 | `loadProfileData` 內顯隱切換與儲存時聯集合併 | `[PASS]` |
-| **TC-NEW-06** | 維度一 | 剪貼簿失焦雙軌寫入與呼吸燈 | `finishScrape` 內 `!document.hasFocus()` 與脈衝動效 | `[PASS]` |
-| **TC-REG-01** | 維度二 | 批次指紋防踩踏與 3 分鐘停滯釋放 | `startRelayBatchScrape` 注入 `taskId` 與監聽計時器超時 | `[PASS]` |
-| **TC-REG-02** | 維度二 | 座標寫入 `Number.isFinite` 兜底 | `toggleSideDrawer` 與 `makeDraggable` 內座標兜底 | `[PASS]` |
-| **TC-REG-03** | 維度二 | 雙抽屜 Storage Key 徹底隔離 | `#cm-cfg-save.onclick` 剝離系統設定鍵 | `[PASS]` |
-| **TC-REG-04** | 維度二 | 選擇器裸表收斂與 Watchdog 25s | `MODULE_REGISTRY['balance-sheet']` 選擇器與定時器 25000ms | `[PASS]` |
-| **TC-RISK-01** | 維度三 | 快照抹殺根治與深度陣列守衛 | `saveCategories` 原子化更新與內部 profiles 陣列檢查 | `[PASS]` |
-| **TC-DEBT-01** | 維度四 | 設定備份匯入結構自癒防呆 | `applyJsonData` 內部欄位安全型態轉換 | `[PASS]` |
+| TC 編號 | 維度 | 驗證目標 | 實體代碼語意錨點 | 推演判定（四態標籤 / 🟡 未決） | 備註 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **TC-NEW-01** | 維度一 | 雙階碼錶世代隔離、主執行緒派發與字色重置 | `...` | `[PASS] / ...` | `...` |
+| **TC-NEW-02** | 維度一 | PCRE2 控制動詞置換、黑名單與換行存活性 | `...` | `[PASS] / ...` | `...` |
+| **TC-NEW-03** | 維度一 | 歷史看板滾輪隔離與空頁籤防護 | `...` | `[PASS] / ...` | `...` |
+| **TC-NEW-04** | 維度一 | 空路徑維持 `""` 與時區時間戳對齊 | `...` | `[PASS] / ...` | `...` |
+| **TC-REG-01** | 維度二 | 頭部版本宣告與 SDK 透傳禁令 | `...` | `[PASS] / ...` | `...` |
+| **TC-REG-02** | 維度二 | Worker 0 `.get()` 隔離與 6 按鈕互斥鎖 | `...` | `[PASS] / ...` | `...` |
+| **TC-REG-03** | 維度二 | 雙錨點唯一、SHA-256 印章與圍欄阻斷 | `...` | `[PASS] / ...` | `...` |
+| **TC-REG-04** | 維度二 | 第 0 秒阻斷、縫合去重、哨兵與原子覆寫 | `...` | `[PASS] / ...` | `...` |
+| **TC-RISK-01** | 維度三 | 雙階切換與例外中斷競態推演 | `...` | `[PASS] / ...` | `...` |
+| **TC-RISK-02** | 維度三 | 依賴降級與多帳號授權躍遷容錯 | `...` | `[PASS] / ...` | `...` |
+| **TC-DEBT-01** | 維度四 | 畸形組態自癒與新增變數讀寫雙向核驗 | `...` | `[PASS] / ...` | `...` |
+| **TC-DEBT-02** | 維度四 | 零狀態啟動與孤兒暫存檔背景清理 | `...` | `[PASS] / ...` | `...` |
+
+*(四態終審標籤嚴格限選：`[PASS]`、`[PASS (By-Design)]`、`[PASS (Retired)]`、`[FAIL]`；涉及待補證或仲裁未決者填 `[🟡 未決待處置]`)*
 
 #### 3.2.1 🕹️ 人類實機操作核對專區 (Manual Live Verification Area)
 | 實機項目編號 | 驗證操作目標 | 實體代碼對應邏輯錨點 | 實機回填要求 | 當前專區狀態 |
 | :--- | :--- | :--- | :--- | :--- |
-| **MV-01** | 實機三螢幕多視窗並行批次複製 | `finishScrape` 內 `!document.hasFocus()` 處 | 實測失焦完成時是否出現呼吸燈且 F9 能取回最新數據 | 待回填 |
-| **MV-02** | 實機 Google 試算表公開位址同步 | `syncGoogleSheetLists` 內 `GM_xmlhttpRequest` 處 | 點擊同步確認 Storage 名單正確更新且萬能補零生效 | 待回填 |
+| **MV-01** | 雙階連續執行碼錶歸零與藍字重置實測 | `run_auto_pipeline._pipeline` 內緊鄰 `self._stop_stopwatch()` 後接 `self._start_stopwatch(...)` 處 | 於真實視窗執行「一鍵雙階自動優化」，錄影或截圖確認 Stage 1 轉 Stage 2 瞬間狀態列文字變回 `0s` 且字色呈藍色 `#2563eb`，無舊秒數跳回覆寫，完成後保留最終綠色成功文案 | 待回填 |
+| **MV-02** | 含 `(*SKIP)(*FAIL)` 字典條目實機存檔驗收 | `validate_pcre_syntax` 內緊鄰 `pcre2_verb_pattern.sub(...)` 與 `save_and_backup_dict` 內 `os.replace` 處 | 使用含 `(*SKIP)(*FAIL)` 之真實 QA 輸出（如 `[須]` 條目）點擊存檔，回傳狀態列成功訊息、確認 `bak/` 已產出 `.bak` 且目標字典檔維持 `utf-8-sig` 換行完整；另以故意缺右括號樣本確認 Linter Gate 紅框阻斷 | 待回填 |
+| **MV-03** | 頁籤 2 歷史看板滾輪隔離與時區時間戳對齊 | `build_tab2` 內緊鄰 `_on_history_wheel` 與 `append_history_log` 內 `strftime("%Y-%m-%d %H:%M:%S %z")` 處 | 切換至頁籤 2，滑鼠懸停於 `txt_history` 滾動確認僅看板內部捲動且外層畫布紋風不動，同時截圖確認時間戳含 `+0800` 等本地時區且表頭欄位對齊無錯位 | 待回填 |
+| **MV-04** | 頁籤 2 留空路徑存檔防 `"."` 退化實測 | `save_all_settings` 與 `load_config` 內緊鄰 `self._norm_path_or_empty(...)` 處 | 於頁籤 2 清空任一路徑輸入框並點擊儲存設定，貼回 `config.json` 對應鍵值內容，確認為 `""` 而非 `"."` | 待回填 |
 
 #### 3.3 🚨 發現之缺陷與異常清單 (Defects & Observations)
-* 無阻塞性缺陷（P0 / P1 / P2 均為 0 項）。
+凡判定 `[FAIL]` 或回報異常者，必須附帶 **缺陷復現 4 要素**：
+1. **具體代碼位置**（語意錨點格式，嚴禁硬行號）
+2. **最小復現邏輯推演**
+3. **實際行為 vs 預期行為**
+4. **置信度標記與證據鏈**（🔴 確認缺陷 / 🟡 疑似風險 / ⚪ 需實機驗證/人審回報）
 
 #### 3.3.1 🧬 清單外白箱代碼缺陷 (Off-List Static Vulnerabilities)
-* 無清單外白箱安全漏洞。
+彙整 Phase 0.1 至 0.5 獨立排查發現（無則顯式宣告「Phase 0 五大排查全數通過，無清單外靜態缺陷」）。
 
 #### 3.4 最終 PASS / FAIL 簽核結論與發布建議
-* **靜態審查結果**：3.2 表格內全量 12 項測試案例均為 `[PASS]`，白箱推演無架構阻斷缺陷，無未決之 `[🟡 未決待處置]`。
-* **分階段簽核授權**：依據 QP-13🚀 規範，正式簽發 **【6-A 技術手冊封存核准】**，宣告本輪代碼靜態架構與白箱代碼品質達標，**解除 ENG 交付責任**。
-* **維運銜接**：3.2.1 專區之 2 項動態實機操作項目移入 **【6-B 維運與動態追蹤待辦】**，供現場環境後續追蹤回填，不阻礙本次代碼交付。
+* 若 3.2 表格內全部 12 項靜態 TC 均為四態閉環通過標籤（`[PASS]`／`[PASS (By-Design)]`／`[PASS (Retired)]`），Phase 0 無未決缺陷且無未處置之 `🟡` 標記，應即刻簽發 **【6-A 技術手冊封存核准】**，正式解除 ENG 交付責任並允許進入階段 5 技術交接檔產出；同時將 3.2.1 專區 `MV-01` 至 `MV-04` 移入 **【6-B 維運與動態追蹤待辦】**，不阻礙技術封存進度。
+* 若存在任何工程 `[FAIL]` 或未解決之 `[🟡 未決待處置]`，則依雙門禁 Fallback 機制暫緩最終簽核並詳列待修復或待補證項目。
+
+---
+*(註：本任務書之 `【肆、 跨輪次任務切換解除鎖定協定】` 已維持常駐就緒，待後續 QA 回傳報告完成仲裁與階段 5 收尾，收到 ENG 產出之《v1.3.2 技術交接檔》時，本 PM 實例將立即執行階段 6 簽核審計。)*
