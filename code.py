@@ -5,7 +5,7 @@ sys.setrecursionlimit(5000)
 
 
 # 頂層版本號規範宣告 (AC-01: 於前 10 行內明確宣告)
-__version__ = "1.5.3"
+__version__ = "1.5.4"
 
 
 import copy
@@ -75,17 +75,17 @@ DISPATCH_DESCRIPTIONS = {
 RETRY_ROUTE_DESCRIPTIONS = {
     "horizontal_first": (
         "⚡【橫向擴展優先：A主 ➔ B主 ➔ C主 ➔ 降階備援 (極限守護主模型品質)】\n"
-        "• 流程：帳號1(3.6) 遇阻 ➔ 帳號2(3.6) 遇阻 ➔ 帳號3(3.6) 遇阻 ➔ 全員失敗始切換 帳號1(3.5) 降階。\n"
+        "• 流程：帳號1(3.8) 遇阻 ➔ 帳號2(3.8) 遇阻 ➔ 帳號3(3.8) 遇阻 ➔ 全員失敗始切換 帳號1(3.6) 降階。\n"
         "• 優勢：絕不輕易向降階模型妥協！只要任何一個備用帳號的主模型有空檔就立即完成，品質最高。"
     ),
     "quality_locked": (
         "🚀【品質優先不降：全帳號持續輪流重試主要模型 (嚴禁降階)】\n"
-        "• 流程：帳號1(3.6) ➔ 帳號2(3.6) ➔ 帳號3(3.6) ➔ 退避重試輪動... (模型永遠鎖死 3.6，絕不切換 3.5/3.5-lite)。\n"
+        "• 流程：帳號1(3.8) ➔ 帳號2(3.8) ➔ 帳號3(3.8) ➔ 退避重試輪動... (模型永遠鎖死 3.8，絕不切換 3.6/3.5-lite)。\n"
         "• 優勢：追求極致 PCRE 正則嚴密品質，寧可遭遇退避等待也絕不接受次級模型生成的正則條目。"
     ),
     "vertical_first": (
         "🛡️【帳號穿透優先：A主 ➔ A副1 ➔ A副2 ➔ B主 ➔ B副... (單帳號深度穿透)】\n"
-        "• 流程：帳號1(3.6) 遇阻 ➔ 帳號1(3.5) 遇阻 ➔ 帳號1(3.5-lite) 耗盡 ➔ 始切換 帳號2(3.6) 重新來過。\n"
+        "• 流程：帳號1(3.8) 遇阻 ➔ 帳號1(3.6) 遇阻 ➔ 帳號1(3.5-lite) 耗盡 ➔ 始切換 帳號2(3.8) 重新來過。\n"
         "• 優勢：傳統保守策略，盡可能集中在單一帳號內完成模型階梯切換，適合主帳號配額充足但偶發特定模型 503 之場景。"
     )
 }
@@ -143,7 +143,7 @@ class Toast:
 
 
 # ---------------------------------------------------------------------------
-# 3. 主應用程式 GUI 類別 (v1.5.3 雙層底欄、世代碼錶、動態換檔與 PCRE2 寬容版)
+# 3. 主應用程式 GUI 類別 (v1.5.4 單模型配額隔離、300s 逾時與 2026-11 模型階梯版)
 # ---------------------------------------------------------------------------
 class NovelRegexToolApp:
     CONFIG_FILE = os.path.join(SCRIPT_DIR, "config.json")
@@ -152,11 +152,11 @@ class NovelRegexToolApp:
 
 
     PRESET_MODELS = [
+        "gemini-4-hydrogen",
+        "gemini-3.8-flash",
         "gemini-3.6-flash",
-        "gemini-3.5-flash",
         "gemini-3.5-flash-lite",
-        "gemini-3.7-flash",
-        "gemini-3.8-flash"
+        "gemini-3.1-flash-lite"
     ]
 
 
@@ -176,12 +176,12 @@ class NovelRegexToolApp:
         "account_dispatch_mode": "random",
         "retry_route_policy": "horizontal_first",
         "locked_account_index": 0,
-        "gemini_model": "gemini-3.6-flash",
-        "fallback_model_1": "gemini-3.5-flash",
+        "gemini_model": "gemini-3.8-flash",
+        "fallback_model_1": "gemini-3.6-flash",
         "fallback_model_2": "gemini-3.5-flash-lite",
         "max_retries": 3,
         "base_delay_seconds": 2.0,
-        "request_timeout_seconds": 120.0,
+        "request_timeout_seconds": 300.0,
         "enable_fallback": True,
         "swap_bottom_bar": False,
         "enable_click_to_copy": False,
@@ -210,7 +210,7 @@ class NovelRegexToolApp:
         self.rr_counter = 0  # 依序輪動計數器
 
 
-        # 碼錶世代隔離相關實例屬性 (v1.5.3 升級)
+        # 碼錶世代隔離相關實例屬性
         self.stopwatch_running = False
         self.stopwatch_start_time = 0.0
         self.stopwatch_prefix = ""
@@ -421,13 +421,13 @@ class NovelRegexToolApp:
 
 
         if not isinstance(cfg.get("gemini_model"), str) or not cfg.get("gemini_model", "").strip():
-            cfg["gemini_model"] = "gemini-3.6-flash"
+            cfg["gemini_model"] = "gemini-3.8-flash"
         else:
             cfg["gemini_model"] = cfg["gemini_model"].strip()
 
 
         if not isinstance(cfg.get("fallback_model_1"), str):
-            cfg["fallback_model_1"] = "gemini-3.5-flash"
+            cfg["fallback_model_1"] = "gemini-3.6-flash"
         else:
             cfg["fallback_model_1"] = cfg["fallback_model_1"].strip()
 
@@ -451,10 +451,10 @@ class NovelRegexToolApp:
 
 
         try:
-            timeout_val = float(cfg.get("request_timeout_seconds", 120.0))
+            timeout_val = float(cfg.get("request_timeout_seconds", 300.0))
             cfg["request_timeout_seconds"] = max(10.0, min(600.0, timeout_val))
         except Exception:
-            cfg["request_timeout_seconds"] = 120.0
+            cfg["request_timeout_seconds"] = 300.0
 
 
         for b_key, b_def in [
@@ -554,7 +554,7 @@ class NovelRegexToolApp:
 
 
         self.model_combo = ttk.Combobox(self.top_frame, values=self.PRESET_MODELS, width=22)
-        current_model = self.config.get("gemini_model", "gemini-3.6-flash")
+        current_model = self.config.get("gemini_model", "gemini-3.8-flash")
         self.model_combo.set(current_model)
         self.model_combo.grid(row=0, column=3, padx=5, sticky=tk.W)
 
@@ -667,7 +667,7 @@ class NovelRegexToolApp:
         idx = self.account_combo.current()
         if idx >= 0:
             self.config["locked_account_index"] = idx
-        self.config["gemini_model"] = self.model_combo.get().strip() or "gemini-3.6-flash"
+        self.config["gemini_model"] = self.model_combo.get().strip() or "gemini-3.8-flash"
         self.save_config()
         self.update_top_account_combo_values()
         Toast.show(self.root, f"✅ 頂部設定已儲存！當前鎖定帳號 [{idx+1}]，模型 [{self.config['gemini_model']}]")
@@ -692,7 +692,7 @@ class NovelRegexToolApp:
 
 
     # -----------------------------------------------------------------------
-    # 頁籤 1: 核心維護作業區 (黃金動線與 v1.5.3 雙層流式底欄佈局)
+    # 頁籤 1: 核心維護作業區 (黃金動線與雙層流式底欄佈局)
     # -----------------------------------------------------------------------
     def build_tab1(self, parent):
         paned = ttk.PanedWindow(parent, orient=tk.VERTICAL)
@@ -1262,7 +1262,7 @@ class NovelRegexToolApp:
 
         ttk.Label(row_params, text="單次請求逾時(秒):").pack(side=tk.LEFT, padx=(0, 4))
         self.entry_request_timeout = ttk.Spinbox(row_params, from_=10.0, to=600.0, increment=10.0, width=6)
-        self.entry_request_timeout.set(str(self.config.get("request_timeout_seconds", 120.0)))
+        self.entry_request_timeout.set(str(self.config.get("request_timeout_seconds", 300.0)))
         self.entry_request_timeout.pack(side=tk.LEFT, padx=(0, 14))
 
 
@@ -1280,7 +1280,7 @@ class NovelRegexToolApp:
 
         ttk.Label(row_fb, text="第一備援模型:").pack(side=tk.LEFT, padx=(0, 4))
         self.combo_fallback_1 = ttk.Combobox(row_fb, values=self.PRESET_MODELS, width=20)
-        self.combo_fallback_1.set(self.config.get("fallback_model_1", "gemini-3.5-flash"))
+        self.combo_fallback_1.set(self.config.get("fallback_model_1", "gemini-3.6-flash"))
         self.combo_fallback_1.pack(side=tk.LEFT, padx=(0, 16))
 
 
@@ -1406,7 +1406,7 @@ class NovelRegexToolApp:
             timeout_val = float(self.entry_request_timeout.get())
             self.config["request_timeout_seconds"] = max(10.0, min(600.0, timeout_val))
         except ValueError:
-            self.config["request_timeout_seconds"] = 120.0
+            self.config["request_timeout_seconds"] = 300.0
         self.entry_request_timeout.set(str(self.config["request_timeout_seconds"]))
 
 
@@ -1895,16 +1895,19 @@ class NovelRegexToolApp:
 
 
         try:
-            timeout_val = float(self.config.get("request_timeout_seconds", 120.0))
+            timeout_val = float(self.config.get("request_timeout_seconds", 300.0))
             timeout_val = max(10.0, min(600.0, timeout_val))
         except Exception:
-            timeout_val = 120.0
+            timeout_val = 300.0
+
+
+        primary_model = self.model_combo.get().strip() or self.config.get("gemini_model", "gemini-3.8-flash") or "gemini-3.8-flash"
 
 
         return {
             "log_content": log_content,
             "candidate_profiles": candidate_profiles,
-            "primary_model": self.model_combo.get().strip() or self.config.get("gemini_model", "gemini-3.6-flash"),
+            "primary_model": primary_model,
             "repair_dict_path": repair_dict_path,
             "eng_prompt_path": eng_prompt_path,
             "qa_prompt_path": qa_prompt_path,
@@ -1919,7 +1922,7 @@ class NovelRegexToolApp:
                 "base_delay_seconds": float(self.config.get("base_delay_seconds", 2.0)),
                 "request_timeout_seconds": timeout_val,
                 "enable_fallback": bool(self.config.get("enable_fallback", True)),
-                "fallback_model_1": self.config.get("fallback_model_1", "gemini-3.5-flash"),
+                "fallback_model_1": self.config.get("fallback_model_1", "gemini-3.6-flash"),
                 "fallback_model_2": self.config.get("fallback_model_2", "gemini-3.5-flash-lite")
             }
         }
@@ -1928,7 +1931,7 @@ class NovelRegexToolApp:
     # -----------------------------------------------------------------------
     # SDK 底層請求封裝 (相容模式 + 逾時透傳軟降級，嚴禁拼接 models/ 前綴【By Design】)
     # -----------------------------------------------------------------------
-    def raw_sdk_call(self, api_key, model_name, prompt_text, timeout_seconds=120.0):
+    def raw_sdk_call(self, api_key, model_name, prompt_text, timeout_seconds=300.0):
         if not api_key:
             raise Exception("API Key 為空，無法發起請求！")
 
@@ -1936,7 +1939,7 @@ class NovelRegexToolApp:
         try:
             timeout_val = max(10.0, min(600.0, float(timeout_seconds)))
         except (TypeError, ValueError):
-            timeout_val = 120.0
+            timeout_val = 300.0
 
 
         if GENAI_MODE == "google.genai":
@@ -2006,11 +2009,11 @@ class NovelRegexToolApp:
 
         api_key = current_prof.get("key", "").strip()
         account_name = current_prof.get("name", "帳號")
-        model_name = self.model_combo.get().strip() or self.config.get("gemini_model", "gemini-3.6-flash")
+        model_name = self.model_combo.get().strip() or self.config.get("gemini_model", "gemini-3.8-flash") or "gemini-3.8-flash"
         try:
-            timeout_sec = max(10.0, min(600.0, float(self.config.get("request_timeout_seconds", 120.0))))
+            timeout_sec = max(10.0, min(600.0, float(self.config.get("request_timeout_seconds", 300.0))))
         except (TypeError, ValueError):
-            timeout_sec = 120.0
+            timeout_sec = 300.0
 
 
         self.set_ui_locked(True)
@@ -2064,8 +2067,8 @@ class NovelRegexToolApp:
 
 
     # -----------------------------------------------------------------------
-    # 【v1.5.3 核心演算法 7】多帳號多階梯高韌性調用核心
-    # (支援 3 條重試路線、授權失效自動躍遷與黑名單、秒級心跳倒數、逾時透傳與終極失敗歸因)
+    # 【v1.5.4 核心演算法 7】多帳號多階梯高韌性調用核心 (BK-154-01 單模型配額隔離升級)
+    # (支援 3 條重試路線、授權失效跳過、單模型配額二維隔離、秒級心跳倒數與 300s 逾時透傳)
     # -----------------------------------------------------------------------
     def call_gemini_api(self, prompt_text, candidate_profiles, primary_model, retry_cfg, stage_name="任務"):
         route_policy = retry_cfg.get("retry_route_policy", "horizontal_first")
@@ -2073,9 +2076,9 @@ class NovelRegexToolApp:
         base_delay = retry_cfg.get("base_delay_seconds", 2.0)
         enable_fallback = retry_cfg.get("enable_fallback", True)
         try:
-            timeout_seconds = max(10.0, min(600.0, float(retry_cfg.get("request_timeout_seconds", 120.0))))
+            timeout_seconds = max(10.0, min(600.0, float(retry_cfg.get("request_timeout_seconds", 300.0))))
         except (TypeError, ValueError):
-            timeout_seconds = 120.0
+            timeout_seconds = 300.0
 
 
         models_ladder = [primary_model]
@@ -2097,8 +2100,9 @@ class NovelRegexToolApp:
             raise Exception("尚未設定任何有效的 Gemini API Key！")
 
 
-        # 請求級授權黑名單 (僅存活於本次 call_gemini_api 呼叫週期)
+        # 請求級授權黑名單與單模型配額耗盡二維集合 (僅存活於本次 call_gemini_api 呼叫週期)
         auth_failed_indices = set()
+        quota_exhausted_pairs = set()
         last_error = None
         last_account_name = "未知帳號"
         last_model = primary_model
@@ -2108,15 +2112,51 @@ class NovelRegexToolApp:
             is_not_found = ("404" in err_upper or "NOT_FOUND" in err_upper)
             is_auth_err = (not is_not_found) and any(k in err_upper for k in [
                 "400", "403", "API_KEY_INVALID", "PERMISSION_DENIED",
-                "INVALID_ARGUMENT", "API KEY NOT VALID", "API KEY EXPIRED",
-                "QUOTA EXCEEDED FOR QUOTA METRIC"
+                "INVALID_ARGUMENT", "API KEY NOT VALID", "API KEY EXPIRED"
             ])
-            is_trans_err = any(k in err_upper for k in [
+
+
+            is_daily_quota_err = False
+            if (not is_not_found) and (not is_auth_err) and ("429" in err_upper or "RESOURCE_EXHAUSTED" in err_upper):
+                has_daily_kw = any(k in err_upper for k in [
+                    "GENERATEREQUESTSPERDAY", "PERDAY", "PER_DAY", "DAILY LIMIT"
+                ])
+                has_metric_kw = any(k in err_upper for k in [
+                    "QUOTA EXCEEDED FOR QUOTA METRIC", "QUOTA EXCEEDED FOR METRIC"
+                ])
+                has_per_minute_kw = any(k in err_upper for k in ["PERMINUTE", "PER MINUTE"])
+
+
+                has_long_retry = bool(re.search(
+                    r'RETRY[ \t_]*(?:IN|DELAY)[ \t"\':=]*\d+(?:\.\d+)?[^\S\r\n]*H',
+                    err_upper
+                ))
+                if not has_long_retry:
+                    for m in re.finditer(
+                        r'RETRY[ \t_]*(?:IN|DELAY)[ \t"\':=]*(\d+(?:\.\d+)?)[^\S\r\n]*([MS])',
+                        err_upper
+                    ):
+                        try:
+                            val = float(m.group(1))
+                            unit = m.group(2)
+                            seconds = val * 60.0 if unit == "M" else val
+                            if seconds >= 300.0:
+                                has_long_retry = True
+                                break
+                        except ValueError:
+                            continue
+
+
+                if has_daily_kw or (has_metric_kw and not has_per_minute_kw) or has_long_retry:
+                    is_daily_quota_err = True
+
+
+            is_trans_err = (not is_not_found) and (not is_auth_err) and (not is_daily_quota_err) and any(k in err_upper for k in [
                 "503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED",
                 "500", "INTERNAL", "504", "DEADLINE_EXCEEDED", "HIGH DEMAND",
                 "EMPTY RESPONSE", "TIMEOUT", "TIMED OUT", "READTIMEOUT"
             ])
-            return is_auth_err, is_trans_err
+            return is_auth_err, is_daily_quota_err, is_trans_err
 
 
         # 路線 1: horizontal_first (橫向擴展優先：A主➔B主➔C主 ➔ 降階備援)
@@ -2126,9 +2166,12 @@ class NovelRegexToolApp:
 
 
                 for attempt in range(1, max_retries + 1):
+                    round_had_transient = False
+
+
                     for prof_idx, prof in enumerate(candidate_profiles):
                         prof_key = prof.get("original_index", prof_idx)
-                        if prof_key in auth_failed_indices:
+                        if prof_key in auth_failed_indices or (prof_key, current_model) in quota_exhausted_pairs:
                             continue
 
 
@@ -2173,7 +2216,7 @@ class NovelRegexToolApp:
                             last_error = e
                             err_str = str(e)
                             err_upper = err_str.upper()
-                            is_auth_err, is_transient = _classify_error(err_upper)
+                            is_auth_err, is_daily_quota_err, is_transient = _classify_error(err_upper)
 
 
                             err_summary = err_str.split("\n")[0][:45]
@@ -2190,12 +2233,24 @@ class NovelRegexToolApp:
                                 continue
 
 
+                            if is_daily_quota_err:
+                                quota_exhausted_pairs.add((prof_key, current_model))
+                                self.update_status(
+                                    f"⚠️ [{stage_name}] 帳號 [{account_name}] 之 [{current_model}] 配額已滿，跳過並切換...",
+                                    fg_color="#d97706"
+                                )
+                                continue
+
+
                             if not is_transient:
                                 raise e
 
 
+                            round_had_transient = True
                             has_next_valid = any(
-                                p.get("key", "").strip() and p.get("original_index", idx) not in auth_failed_indices
+                                p.get("key", "").strip()
+                                and p.get("original_index", idx) not in auth_failed_indices
+                                and (p.get("original_index", idx), current_model) not in quota_exhausted_pairs
                                 for idx, p in enumerate(candidate_profiles[prof_idx + 1:], start=prof_idx + 1)
                             )
                             if has_next_valid:
@@ -2210,7 +2265,12 @@ class NovelRegexToolApp:
                         )
 
 
-                    if attempt < max_retries:
+                    active_indices = valid_indices - auth_failed_indices
+                    if active_indices and all((idx, current_model) in quota_exhausted_pairs for idx in active_indices):
+                        break
+
+
+                    if attempt < max_retries and round_had_transient:
                         sleep_time = (base_delay * (2 ** (attempt - 1))) + random.uniform(0.1, 0.5)
                         self._sleep_with_heartbeat(sleep_time, stage_name, current_model, attempt, max_retries)
 
@@ -2228,9 +2288,12 @@ class NovelRegexToolApp:
 
 
             for attempt in range(1, max_retries + 1):
+                round_had_transient = False
+
+
                 for prof_idx, prof in enumerate(candidate_profiles):
                     prof_key = prof.get("original_index", prof_idx)
-                    if prof_key in auth_failed_indices:
+                    if prof_key in auth_failed_indices or (prof_key, current_model) in quota_exhausted_pairs:
                         continue
 
 
@@ -2267,7 +2330,7 @@ class NovelRegexToolApp:
                         last_error = e
                         err_str = str(e)
                         err_upper = err_str.upper()
-                        is_auth_err, is_transient = _classify_error(err_upper)
+                        is_auth_err, is_daily_quota_err, is_transient = _classify_error(err_upper)
 
 
                         err_summary = err_str.split("\n")[0][:45]
@@ -2284,12 +2347,29 @@ class NovelRegexToolApp:
                             continue
 
 
+                        if is_daily_quota_err:
+                            quota_exhausted_pairs.add((prof_key, current_model))
+                            self.update_status(
+                                f"⚠️ [{stage_name}] 帳號 [{account_name}] 之 [{current_model}] 配額已滿，跳過並切換...",
+                                fg_color="#d97706"
+                            )
+                            active_indices = valid_indices - auth_failed_indices
+                            if active_indices and all((idx, current_model) in quota_exhausted_pairs for idx in active_indices):
+                                raise Exception(
+                                    f"所有可用帳號於品質鎖定主模型 [{current_model}] 皆已達配額上限，已立即終止！最後出錯節點: 帳號 [{last_account_name}] | 模型 [{last_model}] | 錯誤代碼: {err_str}"
+                                )
+                            continue
+
+
                         if not is_transient:
                             raise e
 
 
+                        round_had_transient = True
                         has_next_valid = any(
-                            p.get("key", "").strip() and p.get("original_index", idx) not in auth_failed_indices
+                            p.get("key", "").strip()
+                            and p.get("original_index", idx) not in auth_failed_indices
+                            and (p.get("original_index", idx), current_model) not in quota_exhausted_pairs
                             for idx, p in enumerate(candidate_profiles[prof_idx + 1:], start=prof_idx + 1)
                         )
                         if has_next_valid:
@@ -2304,7 +2384,14 @@ class NovelRegexToolApp:
                     )
 
 
-                if attempt < max_retries:
+                active_indices = valid_indices - auth_failed_indices
+                if active_indices and all((idx, current_model) in quota_exhausted_pairs for idx in active_indices):
+                    raise Exception(
+                        f"所有可用帳號於品質鎖定主模型 [{current_model}] 皆已達配額上限，已立即終止！最後出錯節點: 帳號 [{last_account_name}] | 模型 [{last_model}] | 錯誤代碼: {str(last_error)}"
+                    )
+
+
+                if attempt < max_retries and round_had_transient:
                     sleep_time = (base_delay * (2 ** (attempt - 1))) + random.uniform(0.1, 0.5)
                     self._sleep_with_heartbeat(sleep_time, stage_name, current_model, attempt, max_retries)
 
@@ -2327,9 +2414,14 @@ class NovelRegexToolApp:
 
 
                 for m_idx, current_model in enumerate(models_ladder):
+                    if (prof_key, current_model) in quota_exhausted_pairs:
+                        continue
+
+
                     is_fallback_model = (m_idx > 0)
                     last_account_name = account_name
                     last_model = current_model
+                    model_quota_exhausted = False
 
 
                     for attempt in range(1, max_retries + 1):
@@ -2364,7 +2456,7 @@ class NovelRegexToolApp:
                             last_error = e
                             err_str = str(e)
                             err_upper = err_str.upper()
-                            is_auth_err, is_transient = _classify_error(err_upper)
+                            is_auth_err, is_daily_quota_err, is_transient = _classify_error(err_upper)
 
 
                             if is_auth_err:
@@ -2382,6 +2474,23 @@ class NovelRegexToolApp:
                                 break
 
 
+                            if is_daily_quota_err:
+                                quota_exhausted_pairs.add((prof_key, current_model))
+                                model_quota_exhausted = True
+                                if m_idx < len(models_ladder) - 1:
+                                    next_model = models_ladder[m_idx + 1]
+                                    self.update_status(
+                                        f"⚠️ [{stage_name}] 帳號 [{account_name}] 之 [{current_model}] 配額已滿，立即降階嘗試備援模型 [{next_model}]...",
+                                        fg_color="#d97706"
+                                    )
+                                else:
+                                    self.update_status(
+                                        f"⚠️ [{stage_name}] 帳號 [{account_name}] 之 [{current_model}] 配額已滿，跳出此模型...",
+                                        fg_color="#d97706"
+                                    )
+                                break
+
+
                             if not is_transient:
                                 raise e
 
@@ -2395,7 +2504,7 @@ class NovelRegexToolApp:
                         break
 
 
-                    if m_idx < len(models_ladder) - 1:
+                    if not model_quota_exhausted and m_idx < len(models_ladder) - 1:
                         next_model = models_ladder[m_idx + 1]
                         self.update_status(f"⚠️ [{stage_name}] {account_name} 階梯降階切換至後續備援模型 [{next_model}]...", fg_color="#d97706")
                         time.sleep(0.5)
