@@ -79,176 +79,231 @@
 
 ## 【貳、 QA 測試驗證任務書 (QATP)】
 
-> 🔒 **規格四項定錨 (QP-07🚀 / QP-14🚀)**：  
-> **1. 目標版本號**：`1.5.4` ｜ **2. 目標語系**：`繁體中文 (zh-TW) / Python 3.10+` ｜ **3. By-Design 豁免清單**：`見下方第 1 小節清單` ｜ **4. Profile**：`Profile-BackendScript`
+> 🔒 **表頭規格預設值顯式定錨**：  
+> **1. 目標版本號**：`v1.3.3` ｜ **2. 目標語系**：`繁體中文 (zh-TW)` ｜ **3. By-Design 豁免清單**：`見下方第 1 小節清單` ｜ **4. Profile**：`Profile-BackendScript`
 
-> 🔒 **QATP 預判標籤總則與安全港閉環（引用前綴 v1.9.5-final【邊界 3】）**：  
-> ① QA 判定 `[FAIL]`（阻斷簽核）之允許集合，嚴格限縮於：P0 工安級缺陷、P1 架構安全級缺陷、法定契約項（功能虛報、數據造假、版本號未宣告或未遞增）。  
-> ② **非失真安全港**：輔助性讓步延遲（如跨帳號切換 `time.sleep(0.3)`、降階切換 `time.sleep(1.0)`/`0.5`）未列入主計時器矩陣者（惟代碼本體根本欠缺必要讓步導致死循環者不適用安全港）、反向驗證清單標記 `[N/A]` 且附帶合理跨軌無涉自述者（惟涉及 Zero-Meltdown、救援入口存活、資料完整性門禁者不得入港）、參數命名非實質縮寫或排版微瑕，均嚴禁判為 `[FAIL]`，應列為 P3 工單衛生觀察項。
-
----
-
-### 0. 🧬 Phase 0：獨立白箱代碼靜態風險排查 (Static Code Audit)
-
-QA 必須於展開 3.2 表格前，獨立複核以下五大靜態風險領域（發現缺陷須附 4 要素記錄於 `3.3.1`）：
-* **0.1 【Shell / CLI / 外部進程與路徑轉義漏洞排查】**：核查全檔是否存在 `subprocess` / `os.system` / `shell=True`、檔案路徑讀寫是否透過 `_norm_path_or_empty` 與 `os.path.join` 安全拼接、原子臨時檔是否嚴格建立於同目錄避免跨磁區置換失敗。
-* **0.2 【字串與正則邊界吞噬排查】**：獨立審查 `call_gemini_api._classify_error` 新增之兩條 `RETRY` 延遲解析正則，以及 `validate_dict_syntax`、`parse_repair_dict_sections`、`read_file_content` 內所有正則表達式，確認均無 `.*` / `.*?` 與 `re.S` 共構吞噬換行之風險、無空交替分支 `(?:|...)` 造成全位置命中。
-* **0.3 【系統資源競爭、死鎖、洩漏與跨執行緒 GUI 讀寫排查】**：審查背景 Worker（`_exec_stage1`、`_exec_stage2`、`_pipeline`、`test_api_connection._worker`）內是否 0 次直接存取 Widget，所有狀態、碼錶啟閉與 Toast 更新是否 100% 經 `root.after(0, ...)` 收斂至主執行緒；檢查 `stopwatch_token` 與 `heartbeat_active` 互斥防覆蓋是否完整。
-* **0.4 🚨 【全域頂層範圍語法崩潰與入口盲區排查 (Zero-Meltdown Audit)】**：獨立複查前 10 行版本與 `sys.setrecursionlimit(5000)` 順序、`GENAI_MODE` 缺失時雙階 `try-except` 隔離、無有效 Key 或路徑缺失時 UI 主視窗與 `alert_banner` 存活能力。
-* **0.5 🛡️ 【災難救援與脫困指令執行環境能力邊界排查 (Runtime Context Feasibility)】**：確認本機離線救援僅依賴檔案系統 `.bak` 複製與獨立 Python CLI 子進程重建 `config.json`，無錯誤依賴執行中 GUI 記憶體或外部遠端同步介面。
+> 🔒 **QATP 預判標籤總則與安全港閉環（引用對齊前綴接口契約）**：  
+> ① 預判 `[FAIL]`（阻斷簽核）之允許集合嚴格限縮於：P0 工安級、P1 架構安全級、法定契約項（功能虛報、數據造假、版本號未宣告/未遞增）。  
+> ② **非失真安全港**：輔助性讓步延遲（如帳號切換 0.3s、備援切換 1.0s）未列入排程主矩陣者（代碼本體欠缺必要讓步導致死循環者不適用）、反向驗證指標標記 `[N/A]` 且附帶合理豁免自述者（不可豁免門禁之最後驗證依據不適用）、非實質縮寫或排版微瑕，嚴禁預判為 `[FAIL]`，一律列為 P3 觀察項。
 
 ---
 
-### 1. 🛡️ 架構妥協與驗收豁免須知 (By-Design Exceptions)
+### 0. 🧬 【強制優先】Phase 0：獨立白箱代碼靜態風險排查 (Static Code Audit)
 
-1. **SDK 參數原樣透傳無前綴【By Design】**：`raw_sdk_call` 必須原樣透傳純模型字串（如 `"gemini-3.8-flash"`），嚴禁私自拼接 `"models/"` 前綴。*(不可豁免鐵律自查：無衝突)*
-2. **請求級黑名單 (`auth_failed_indices`) 與配額集合 (`quota_exhausted_pairs`) 單次呼叫生命週期限制【By Design】**：兩組集合僅存活於單次 `call_gemini_api` 執行期記憶體中，結束即釋放且絕不持久化寫入 `config.json`，以確保使用者更新金鑰或隔日配額重置後無需重啟工具即可恢復。*(不可豁免鐵律自查：無衝突)*
-3. **既有 `config.json` 用戶自訂值尊重原則【By Design】**：若磁碟既有 `config.json` 已存有合法 `request_timeout_seconds`（範圍 `10.0 ~ 600.0`）或有效模型字串，`load_config` 保留該既有設定而不強制洗白為 `300.0` / `gemini-3.8-flash`，僅於缺鍵、空值或型別異常時套用新預設值。*(不可豁免鐵律自查：無衝突)*
-4. **舊版 SDK 逾時選項 `TypeError` 軟降級【By Design】**：若運行環境安裝之舊版 `google-genai` / `google.generativeai` 不支援 `http_options` 或 `request_options` 參數，捕獲 `TypeError` 後降級省略該參數繼續請求。*(不可豁免鐵律自查：無衝突)*
-5. **PCRE2 預檢寬容邊界【By Design】**：`validate_dict_syntax` 防線 C 對 `\x{1,6}`、`(*SKIP|FAIL|PRUNE|COMMIT|ACCEPT|F)`、`\K`、`\p{...}`/`\P{...}` 與不定長 lookbehind 僅於記憶體副本執行中和放行，字典實體 0 污染；非目標語系（如純 Web/AHK 特化項）於 `Profile-BackendScript` 下屬預期性排除。*(不可豁免鐵律自查：無衝突)*
+QA 必須在展開測試案例表格前，針對下列五大底層面向獨立完成靜態白箱排查；凡發現異常風險，須附 4 要素記錄於報告第 3.3.1 節：
+* **0.1 【Shell / CLI / 外部進程與路徑轉義漏洞排查】**：核查 `save_and_backup_dict` 呼叫哨兵子進程 `subprocess.run` 及 `open_file_path` / `launch_sentinel_gui` 呼叫系統程式之參數列表形式，確認全程使用串列傳參 (`shell=False`) 且無路徑反斜線逸出注入風險。
+* **0.2 【字串與正則邊界吞噬排查】**：核查 `ENTRY_BLOCK_REGEX`、`sanitize_invisible_chars`、`validate_pcre_syntax` 內 `pcre2_verb_pattern` 及所有解析正則，確認未新增跨行 `re.DOTALL` + `.*?` 換行吞噬組合或空交替分支 `(?:|...)`。
+* **0.3 【系統資源競爭、死鎖、洩漏與跨執行緒 GUI 讀寫排查】**：核查背景執行緒是否 0 處直接讀取/寫入 Tkinter 元件；核查 `set_ui_locked`、`_start_stopwatch`、`_stop_stopwatch`、`_exec_stage1`/`_exec_stage2` 中 `last_task_snapshot` 提交與 `WM_DELETE_WINDOW` 停機機制是否能正確回收定時器與退出背景循環。
+* **0.4 🚨 【全域頂層範圍語法崩潰與入口盲區排查 (Zero-Meltdown Audit)】**：獨立複查檔案前 10 行版本宣告、`sys.setrecursionlimit(5000)`、`HAS_DND` 與 `GENAI_MODE` 條件導入降級、以及 `load_config` 缺檔/損壞狀態下主視窗與設定頁是否可無條件啟動；嚴禁以未經舉證之跨語言直覺推測語法崩潰。
+* **0.5 🛡️ 【災難救援與脫困指令執行環境能力邊界排查 (Runtime Context Feasibility)】**：核查原子暫存檔寫入失敗或哨兵對沖阻斷後，工作目錄 `.tmp` 清理與 `bak/` 備份檔案還原路徑是否完全可於獨立 Windows 終端/檔案總管離線執行，無不可執行之環境假設。
 
 ---
 
-### 2. 四大維度測試案例清單 (Test Cases — 共 12 項靜態白箱 TC)
+### 1. 🛡️ 【強制】架構妥協與驗收豁免須知 (By-Design Exceptions)
 
-#### 🌟 維度一：新功能與核心修復驗收 (TC-NEW-xx)
+> 🛑 **不可豁免鐵律與合法對稱面**：載入崩潰（Zero-Meltdown 違規）與目標情境之資料實質損壞恒不得列為 By-Design 豁免；下列豁免項目僅涵蓋架構設計之預期性排除與跨環境邊界。
 
-* **TC-NEW-01：頂層版本宣告、SDK 逾時預設 `300.0s` 貫穿與 2026-11 模型階梯檢查**
-  - **測試情境**：驗證 `v1.5.4` 版本標識與 `BK-154-02` 所有預設模型及逾時參數已在全鏈路同步生效。
-  - **操作步驟**：靜態檢視模組頂層宣告、`NovelRegexToolApp` 類別常數、`RETRY_ROUTE_DESCRIPTIONS`，以及 `load_config`、`build_top_bar`、`save_top_config`、`build_tab2`、`save_all_settings`、`create_task_snapshot`、`raw_sdk_call`、`test_api_connection`、`call_gemini_api` 之預設回退值。
-  - **預期結果**：`__version__ == "1.5.4"` 位於前 10 行且緊隨 `sys.setrecursionlimit(5000)` 之後；`PRESET_MODELS` 精確包含 `["gemini-4-hydrogen", "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]`；全數預設逾時皆為 `300.0`（夾限 `[10.0, 600.0]`）且預設主／副模型為 `gemini-3.8-flash` / `gemini-3.6-flash` / `gemini-3.5-flash-lite`；`RETRY_ROUTE_DESCRIPTIONS` 僅呈現 `3.8`/`3.6`/`3.5-lite`。
-  - **AST 語意錨點**：`__version__ = "1.5.4"`、`NovelRegexToolApp.PRESET_MODELS`、`NovelRegexToolApp.DEFAULT_CONFIG`、`raw_sdk_call` 函式簽名與 `except (TypeError, ValueError):` 分支、`RETRY_ROUTE_DESCRIPTIONS` 字典定義。
+1. **外部 SDK 模型名稱原樣透傳禁令 (`raw_sdk_call`)**
+   * **行為描述**：`raw_sdk_call` 直接將純模型名稱（如 `gemini-3.8-flash`、`gemini-4-hydrogen`）傳給 SDK，嚴禁自動拼接 `models/` 前綴。
+   * **對稱面宣告**：對比誤加前綴導致 `google.genai` 發出 `models/models/...` 而 404 之實質缺陷，原樣透傳為唯一合法設計。
+   * **不可豁免鐵律自查**：無衝突（保障連線可用性，未導致載入崩潰或資料損壞）。
 
-* **TC-NEW-02：`BK-154-01` 錯誤分類器 (`_classify_error`) 三維判定與正則邊界驗證**
-  - **測試情境**：模擬五類 API 異常字串輸入 `call_gemini_api._classify_error`：
-    (A) `429 RESOURCE_EXHAUSTED ... Quota exceeded for quota metric 'Generate Content API requests per day' ... GenerateRequestsPerDayPerProjectPerModel`；
-    (B) `429 RESOURCE_EXHAUSTED ... GenerateRequestsPerMinute ... retryDelay: "25s"`；
-    (C) `429 RESOURCE_EXHAUSTED ... retryDelay: "1500s"` 或 `"retry_delay: 1h"`；
-    (D) `400 API_KEY_INVALID` / `403 PERMISSION_DENIED`；
-    (E) `404 NOT_FOUND`。
-  - **操作步驟**：白箱逐一追蹤 `is_not_found`、`is_auth_err`、`is_daily_quota_err`、`is_trans_err` 之布林求值路徑，並審核 `RETRY` 正則表達式邊界與錨點。
-  - **預期結果**：(A) 與 (C) 必須判定為 `(False, True, False)`（`is_daily_quota_err = True`）；(B) 判定為 `(False, False, True)`（保留 RPM 暫態重試）；(D) 判定為 `(True, False, False)`（絕無 `"QUOTA EXCEEDED FOR QUOTA METRIC"` 混入 `is_auth_err`）；(E) 判定為 `(False, False, False)`；兩條 `RETRY` 正則皆具非空字面錨點 `RETRY` 與 `[^\S\r\n]*`，無跨行吞噬風險。
-  - **AST 語意錨點**：`call_gemini_api` 內 緊鄰 `def _classify_error(err_upper: str):` 處至 `return is_auth_err, is_daily_quota_err, is_trans_err`。
+2. **衝突哨兵缺失、逾時或腳本異常時平滑降級放行 (`save_and_backup_dict`)**
+   * **行為描述**：當哨兵關閉、腳本路徑不存在、`returncode != 0` 非對沖、`TimeoutExpired`（>5s）或啟動異常時，顯示黃字警告並平滑降級放行正式存檔；僅於偵測明確對沖特徵時硬阻斷。
+   * **對稱面宣告**：對比對沖漏攔（實質缺陷），哨兵工具本身不可用時讓位給主體原子存檔屬防禦性可用妥協。
+   * **不可豁免鐵律自查**：無衝突（對沖攔截與 Linter Gate 仍完整運作，未損壞資料）。
 
-* **TC-NEW-03：`BK-154-01` 三條重試路線 (`horizontal_first` / `quality_locked` / `vertical_first`) 之配額跳過與降階流驗證**
-  - **測試情境**：設定 3 組有效帳號與 3 階模型 (`3.8-flash` ➔ `3.6-flash` ➔ `3.5-flash-lite`)，分別於三種路線下模擬帳號 1 在主力模型觸發 `is_daily_quota_err` 之行為。
-  - **操作步驟**：追蹤 `call_gemini_api` 三大分支中 `quota_exhausted_pairs` 的寫入、前置跳過條件、內外層迴圈 `break` / `continue` 控制流與 `_sleep_with_heartbeat` 條件。
-  - **預期結果**：
-    - `vertical_first`：帳號 1 遇 `is_daily_quota_err` 後寫入 `(prof_key, "gemini-3.8-flash")`、設定 `model_quota_exhausted = True` 並立即 `break` 出 `attempt` 迴圈，直接在同一帳號下嘗試 `"gemini-3.6-flash"`（不封鎖帳號 1、不等待退避睡眠）；
-    - `horizontal_first`：帳號 1 遇 `is_daily_quota_err` 後寫入 `quota_exhausted_pairs` 並直接切換帳號 2；當所有 `active_indices` 均對當前模型耗盡時，`all((idx, current_model) in quota_exhausted_pairs ...)` 成立並立即 `break` 出 `attempt` 迴圈降階至備援模型，且不會在無暫態錯誤時空轉睡眠；
-    - `quality_locked`：當所有 `active_indices` 均對 `primary_model` 耗盡配額時，立即拋出明確之配額上限 Fast-Exit 例外。
-  - **AST 語意錨點**：`call_gemini_api` 內 緊鄰 `quota_exhausted_pairs = set()` 後方之 `if route_policy == "horizontal_first":`、`elif route_policy == "quality_locked":`、`elif route_policy == "vertical_first":` 區塊。
+3. **未儲存之頁籤 2 輸入框路徑不生效於當次執行與存檔 (`_warn_unsaved_path_diffs`)**
+   * **行為描述**：若使用者於頁籤 2 修改路徑輸入框但未點擊「💾 儲存所有帳號、路徑與調度設定」，任務與存檔僅以黃底 Toast 警示，實際仍以磁碟 `config.json` 已儲存值為準。
+   * **對稱面宣告**：對比未警告靜默錯寫（缺陷），明示警告並以已確認落盤之組態為準屬防誤觸設計。
+   * **不可豁免鐵律自查**：無衝突（防止輸入半截未確認路徑誤覆寫磁碟）。
 
-* **TC-NEW-04：換行存活性與正則吞噬免疫驗證（QATP 法定必測項）**
-  - **測試情境**：輸入包含多段落換行之雙語修復條目及含 `\x{20000}`、`(*SKIP)(*FAIL)`、`\p{Han}`、`\K`、不定長逆序環視之字典片段，通過 `validate_dict_syntax`、雙向錨點切分與 `save_and_backup_dict` 寫入轉換管線。
-  - **操作步驟**：靜態推演 `between_text.split(self.EOF_MARKER, 1)[0]`、`validate_dict_syntax` 內 `dict_text.splitlines()` 迴圈與 `python_compatible_pattern` 替換對象，以及存檔前 `normalized_lf` 轉換表達式。
-  - **預期結果**：多行字典之換行總數（含 `\n`）於處理後 100% 落入預期行數區間（絕無全文壓扁為單行）；`python_compatible_pattern` 僅於區域變數預檢，最終寫入磁碟之 `final_stitched_dict` 原生保留原始 PCRE2 語法且嚴格以 `utf-8-sig` + LF (`\n`) 輸出。
-  - **AST 語意錨點**：`validate_dict_syntax` 內 緊鄰 `python_compatible_pattern = re.sub(` 處與 `save_and_backup_dict` 內 緊鄰 `normalized_lf = final_stitched_dict.replace(` 處。
+4. **`429 RESOURCE_EXHAUSTED` 刻意不列入帳號授權黑名單 (`call_gemini_api.is_account_auth_error`)**
+   * **行為描述**：單模型每日配額耗盡（429）歸類為 `is_transient_error`，保留該帳號降階切換至備援模型（如 `gemini-3.5-flash-lite` 500 RPD）之資格；反之 `404` / `NOT_FOUND` 前置排除於授權錯誤之外以免空轉全帳號。
+   * **對稱面宣告**：對比無效金鑰（400/403）需列入 `auth_failed_key_hashes` 快速封鎖，429 與 404 分流處置屬配額保護策略。
+   * **不可豁免鐵律自查**：無衝突（未造成無窮迴圈，且全員失效仍觸發 fast-exit）。
 
-#### 🔄 維度二：關鍵防禦機制實體存活審查 (TC-REG-xx)
+5. **既有 `parse_dict_targets` 尾部正則與 `selected_dict_for_ai` 非持久化**
+   * **行為描述**：`parse_dict_targets` 尾部擷取正則維持 `v1.3.2` 原樣（待全量字典回歸樣本齊備後再行調整）；作業期 Radio 選擇維持預設 `"dict1"` 不寫入 `config.json`。
+   * **對稱面宣告**：對比非選定目標之跨會話誤寫風險，不持久化 Radio 選擇屬防呆設計。
+   * **不可豁免鐵律自查**：無衝突（未影響載入與資料完整性）。
 
-* **TC-REG-01：組態原子寫入、存檔動態重讀三路徑與換檔縫合熔斷防線存活**
-  - **測試情境**：檢查 `save_config` 與 `save_and_backup_dict` 在任務產出後外部更改 `config.json` 目標字典路徑（含無標頭目標檔與缺失目標檔）之處置。
-  - **操作步驟**：追蹤 `save_config` 臨時檔原子置換流程，並追蹤 `save_and_backup_dict` 內重讀 `latest_cfg`、三路徑同步邏輯、`stitch_repair_sections` 守衛與 `last_task_snapshot` 保留邏輯。
-  - **預期結果**：`save_config` 使用同目錄 `.tmp` + `flush` + `os.fsync` + `os.replace`；`save_and_backup_dict` 僅同步 `repair_dict_path`、`engineer_prompt_path`、`qa_prompt_path` 三欄位（不覆蓋記憶體其他設定），目標變更時自動重讀並再解析，切片遇 `"__ALL__" in original_sections` 立即阻斷，目標檔缺失中斷時完整保留 `self.last_task_snapshot`。
-  - **AST 語意錨點**：`save_config` 內 緊鄰 `os.replace(temp_cfg_path, self.CONFIG_FILE)` 處、`save_and_backup_dict` 內 緊鄰 `latest_cfg = self.load_config()` 處與 `stitch_repair_sections` 首行守衛。
+---
 
-* **TC-REG-02：雙階碼錶世代隔離、底欄流式折行與關窗防護存活**
-  - **測試情境**：檢查一鍵雙階自動流水線跨階切換、9 分類長切片名稱顯示及任務中點擊視窗右上角關閉按鈕之行為。
-  - **操作步驟**：追蹤 `_start_stopwatch`、`_init_on_main`、`_stopwatch_tick`、`_stop_stopwatch`、`_cancel_on_main`、`_format_stopwatch_text`、`build_tab1` 雙層底欄容器與 `_on_closing` 方法。
-  - **預期結果**：`stopwatch_token` 單調遞增隔離跨階回呼，`_stop_stopwatch` 絕不覆寫終態文字；`action_btn_row` 與 `action_status_row` 上下分離，`_format_stopwatch_text` 將 `(已耗時: Xs)` 前置並動態計算 `wraplength`；`_on_closing` 重置 `self.is_running = False` 並呼叫 `_stop_stopwatch()`。
-  - **AST 語意錨點**：`_format_stopwatch_text`、`_start_stopwatch` 內 `_init_on_main`、`_stop_stopwatch` 內 `_cancel_on_main`、`build_tab1` 內 `_on_status_row_configure`、`_on_closing`。
+### 2. 四大維度測試案例清單 (Test Cases)
 
-* **TC-REG-03：UI 互斥鎖、連通測試 `rr_counter` 零污染、Tab 2 滾輪隔離與四階編碼讀取存活**
-  - **測試情境**：檢查任務執行中頂部下拉操控鎖定、點擊測試連線對輪動計數器之影響、切離 Tab 2 之滾輪解綁，及雙候選 GBK/Big5 檔案讀取。
-  - **操作步驟**：追蹤 `set_ui_locked`、`test_api_connection`、`build_tab2` 滾輪綁定閉包與 `read_file_content` 評分邏輯。
-  - **預期結果**：`set_ui_locked` 同步鎖定/恢復 6 組按鈕與 `account_combo`、`model_combo`；`test_api_connection` 不讀取亦不遞增 `self.rr_counter`；`build_tab2` 具備 `±1` 步進保底、`<Button-4/5>` 與 `<<NotebookTabChanged>>` 主動解綁；`read_file_content` 具 `OSError` 包裝與四階解碼評分鏈。
-  - **AST 語意錨點**：`set_ui_locked` 內 `self.account_combo.config` 排程、`test_api_connection` 內 `selected_idx = self.account_combo.current()`、`build_tab2` 內 `_on_tab_changed`、`read_file_content` 內 `gbk_score` 與 `big5_score` 評分區塊。
+*(全部定位嚴格採「函式/方法名 + 上下文語意特徵字面量」描述)*
+
+#### 🌟 維度一：新功能驗收 (TC-NEW-xx)
+
+1. **`[TC-NEW-01]` 存檔前組態動態重讀、6 鍵選擇性同步、未儲存警示與快照保留 (`BL-new-01`)**
+   * **測試情境**：驗證選定 `dict1`/`dict2` 但檔案不存在時於第 0 秒阻斷；驗證完成 Stage 2 後至頁籤 2 修正路徑並儲存，可直接完成原子覆寫；驗證未儲存路徑變更時彈出黃底 Toast；驗證新目標檔缺檔或切片缺失條目時阻斷且保留快照。
+   * **推演步驟**：
+     1. 檢視 `get_selected_dict_content` 在 `choice in ("dict1", "dict2")` 時對空路徑與 `not os.path.isfile(p)` 之例外拋出，以及 `run_stage1_thread` / `run_stage2_thread` / `run_auto_pipeline` 開頭呼叫 `_warn_unsaved_path_diffs()` 與例外捕捉。
+     2. 檢視 `save_and_backup_dict` 內呼叫 `latest_cfg = self.load_config()` 後，對 6 鍵執行迴圈賦值 `self.config[sync_key] = latest_cfg[sync_key]`，確認未整包覆蓋 `self.config` 其他欄位（如 `api_profiles`、`request_timeout_seconds`）。
+     3. 檢視 `not target_path or not os.path.isfile(target_path)` 與 `missing_in_disk` 分支是否在 `return` 前保留 `self.last_task_snapshot`。
+     4. 檢視 `save_config` 與 `save_and_backup_dict` 寫檔區塊是否執行 `f.flush()`、`os.fsync(f.fileno())`、`os.replace(...)` 與 `finally` 移除殘留 `.tmp`。
+   * **預期結果**：缺檔任務 0ms 阻斷且 UI 解鎖；存檔時動態使用 `latest_cfg` 目標路徑與哨兵開關且不污染其餘記憶體設定；阻斷時 `self.last_task_snapshot` 保持有效可供修正路徑後直接重試存檔；`config.json` 與目標字典具 `fsync` 保護與殘留 `.tmp` 清理。
+   * **AST 語意錨點**：`RadarRegexToolApp.get_selected_dict_content` 內緊鄰 `if not os.path.isfile(p):` 處；`RadarRegexToolApp.save_and_backup_dict` 內緊鄰 `latest_cfg = self.load_config()` 與 `missing_in_disk =` 處；`RadarRegexToolApp.save_config` 內緊鄰 `os.fsync(f.fileno())` 處。
+
+2. **`[TC-NEW-02]` 可調單次請求逾時、2026-11 模型階梯遷移與防反向升級過濾 (`BL-new-02`)**
+   * **測試情境**：驗證 21 葉節點組態、逾時 Spinbox 讀寫與 Clamp、雙代 SDK 逾時參數透傳與軟降級、`PRESET_MODELS` 更新、舊版重路由模型遷移及防反向升級邏輯。
+   * **推演步驟**：
+     1. 核對 `DEFAULT_CONFIG` 葉節點總數為 21，含 `"request_timeout_seconds": 300.0`，`fallback_model_1` 為 `"gemini-3.6-flash"`，`fallback_model_2` 為 `"gemini-3.5-flash-lite"`。
+     2. 核對 `load_config` 對 `gemini-3.7-flash` / `gemini-3.5-flash` 遷移邏輯，以及 `request_timeout_seconds` Clamp (`10.0~600.0`)；核對 `build_tab2` `self.entry_request_timeout` 與 `save_all_settings` 讀寫同步。
+     3. 核對 `raw_sdk_call` 兩種 `GENAI_MODE` 下 `http_options={"timeout": int(timeout_val * 1000)}` 與 `request_options={"timeout": float(timeout_val)}` 之 `except TypeError:` 軟降級與零 `models/` 前綴。
+     4. 核對 `call_gemini_api` 組裝 `models_to_try` 時，當使用者選定 `gemini-3.6-flash` 且備援誤設 `gemini-4-hydrogen` / `gemini-3.8-flash` / `gemini-3.7-flash` 時，因 `self.PRESET_MODELS.index(fb_canon) <= primary_rank` 而被濾除；核對 `is_transient_error` 包含 `"TIMEOUT"`、`"TIMED OUT"`、`"READTIMEOUT"`。
+   * **預期結果**：逾時設定完整貫穿 UI -> Config -> Snapshot -> SDK -> 暫態重試；`PRESET_MODELS` 不含退役重路由模型；絕不對穩定舊模型反向升級備援。
+   * **AST 語意錨點**：`RadarRegexToolApp.DEFAULT_CONFIG` 內緊鄰 `"request_timeout_seconds": 300.0` 處；`RadarRegexToolApp.raw_sdk_call` 內緊鄰 `http_options={"timeout":` 處；`RadarRegexToolApp.call_gemini_api` 內緊鄰 `RETIRED_MODEL_ALIAS` 與 `primary_rank` 處。
+
+3. **`[TC-NEW-03]` 底欄雙層折行、碼錶心跳互鎖、授權誤差隔離與技術債收斂 (`BL-new-03`, `BL-next-01~06`)**
+   * **測試情境**：驗證底欄雙層排布與動態 `wraplength`、秒數前置、`heartbeat_active` 互鎖、歷史看板東亞字寬對齊、API Key SHA-256 雜湊黑名單、`test_api_connection` 降級明示及主執行緒快照提交。
+   * **推演步驟**：
+     1. 檢視 `build_tab1` 與 `repack_bottom_bar` 中 `action_btn_row` / `action_status_row` 及 `<Configure>` 綁定 `wraplength=max(320, e.width - 24)`。
+     2. 檢視 `_start_stopwatch` 輸出 `f"{desc_prefix} (已耗時: {elapsed}s){suffix_part}..."`，且 `_tick` 檢查 `if not self.heartbeat_active:` 始更新文字，對照 `_sleep_with_heartbeat` 中 `try ... finally: self.heartbeat_active = False`。
+     3. 檢視 `call_gemini_api` 使用 `auth_failed_key_hashes` 與 `unique_valid_key_hashes`，且 `is_account_auth_error` 先排除 `"404"` / `"NOT_FOUND"` / `"NOT FOUND"`。
+     4. 檢視 `_pad_display_width` 於 `build_tab2` 表頭與 `append_history_log._do` 之一致套用，以及 `_exec_stage1` / `_exec_stage2` 透過 `root.after(0, lambda s=snapshot: setattr(self, "last_task_snapshot", s))` 提交快照。
+     5. 檢視 `Toast.show` 內 `_safe_destroy` 檢查 `top.winfo_exists()` 及 `test_api_connection` 未配鑰切換提示（確認未更動 `self.rr_counter`）。
+   * **預期結果**：狹窄視窗狀態文字折行不裁切耗時秒數；退避倒數與藍字碼錶零閃爍覆寫；同 Key 多槽位僅失效封鎖一次；歷史看板中英文對齊整潔。
+   * **AST 語意錨點**：`RadarRegexToolApp.build_tab1` 內緊鄰 `self.action_status_row` 處；`RadarRegexToolApp._sleep_with_heartbeat` 內緊鄰 `self.heartbeat_active = True` 處；`RadarRegexToolApp._pad_display_width` 及 `RadarRegexToolApp.call_gemini_api` 內緊鄰 `auth_failed_key_hashes` 處。
+
+4. **`[TC-NEW-04]` 換行存活性驗證與文字編碼寫入完整性 (`stitch_and_deduplicate` + `save_and_backup_dict`)**
+   * **測試情境**：輸入包含多段落註解 `; [編號 詞 - 說明]` 與跨行正則條目之 20+ 行字典樣本，推演經過 `sanitize_invisible_chars`、`slice_dict_blocks`、`validate_pcre_syntax` 與 `stitch_and_deduplicate` 後之換行結構保存率。
+   * **推演步驟**：
+     1. 追蹤 `sanitize_invisible_chars` 正則 `r'[\u200b\ufeff\u200e\u200f]'`，驗證僅剝除 4 種零寬字元，不觸及 `\r` 與 `\n`。
+     2. 追蹤 `stitch_and_deduplicate` 倒序替換首處區塊、補齊 `"\n"` / `"\n\n"` 區塊間隔，並檢視 `save_and_backup_dict` 以 `encoding="utf-8-sig", newline=""` 寫出。
+     3. 輸入 3 行 PCRE2 條目（含 `(*SKIP)(*FAIL)` 及真實註解行）至 `validate_pcre_syntax` 進行逐行掃描推演。
+   * **預期結果**：多行字典換行符總數依區塊替換維持目標區間（絕無被壓扁為單行之情事），輸出檔案具備 UTF-8 BOM 且保留原始換行風格。
+   * **AST 語意錨點**：`RadarRegexToolApp.sanitize_invisible_chars` 內緊鄰 `re.sub` 處；`RadarRegexToolApp.stitch_and_deduplicate` 內緊鄰 `for m in reversed(matches):` 處；`RadarRegexToolApp.save_and_backup_dict` 內緊鄰 `encoding="utf-8-sig", newline=""` 處。
+
+#### 🔄 維度二：關鍵防禦機制實體存活審查 (AST Defense Invariant Audit) (TC-REG-xx)
+
+5. **`[TC-REG-01]` 既有防迴歸門禁實體存活審查（雙錨點 / 數位印章 / 圍欄 / 0ms 硬阻斷）**
+   * **測試情境**：驗證 `v1.3.2` 核心安全門禁未因 `v1.3.3` 重構而退化或遺失。
+   * **推演步驟**：
+     1. 核查 `check_and_block_alien_targets` 於 `run_stage1_thread`、`run_stage2_thread`、`run_auto_pipeline` 中仍在 `set_ui_locked(True)` 之前執行。
+     2. 核查 `save_and_backup_dict` 仍維持 `qa_output.count(self.ANCHOR_TEXT) != 1`、`count(self.EOF_MARKER) != 1`、`current_hash != expected_hash`、`"```" in cleaned_extracted` 阻斷及 `validate_pcre_syntax` 4 道防線。
+     3. 核查 `parse_dict_targets` 與 `ENTRY_BLOCK_REGEX` 是否與 `v1.3.2` 完全一致未改動。
+   * **預期結果**：全數安全門禁與既有正則解析邏輯 100% 存活，無降級或繞過路徑。
+   * **AST 語意錨點**：`RadarRegexToolApp.check_and_block_alien_targets`；`RadarRegexToolApp.save_and_backup_dict` 內緊鄰 `current_hash != expected_hash` 處；`RadarRegexToolApp.validate_pcre_syntax` 內緊鄰 `pcre2_verb_pattern` 處。
+
+6. **`[TC-REG-02]` 執行期 UI 互斥鎖定與跨執行緒安全派發 (`set_ui_locked` & `_start_stopwatch`)**
+   * **測試情境**：驗證所有背景 Worker 執行緒是否嚴格零處呼叫 Tkinter 控制項方法，且 `set_ui_locked` 連動頂部雙下拉選單。
+   * **推演步驟**：
+     1. 逐一檢查 `cleanup_orphan_tmp_files._cleanup`、`test_api_connection._worker`、`run_stage1_thread._runner`、`_exec_stage1`、`run_stage2_thread._runner`、`_exec_stage2`、`run_auto_pipeline._pipeline` 及 `call_gemini_api` 內部，確認所有 UI 更新與 `Toast.show` 均透過 `self.root.after(0, ...)`、`update_status`、`_show_alert_banner`、`_hide_alert_banner` 或 `append_history_log` 派發。
+     2. 檢視 `set_ui_locked` 在 `finally:` 呼叫時由 `root.after(0, _apply_lock)` 安全解除 6 鈕與 `account_combo`/`model_combo` 鎖定。
+   * **預期結果**：0 處背景執行緒直接調用 Tk UI 方法，無潛在 Tcl 線程死鎖。
+   * **AST 語意錨點**：`RadarRegexToolApp.set_ui_locked` 內緊鄰 `self.account_combo.config` 與 `self.model_combo.config` 處；`RadarRegexToolApp.run_auto_pipeline` 內緊鄰 `finally:` 處。
+
+7. **`[TC-REG-03]` 滾輪隔離、世代碼錶隔離與 `s1_meta` 雜湊防錯位繼承存活審查**
+   * **測試情境**：驗證 `v1.3.2` 導入之 UX 與線程隔離修復於 `v1.3.3` 完整保留。
+   * **推演步驟**：
+     1. 檢視 `_on_tab_changed` 空選取保護 `if sel else -1`、`build_tab2` 對 `txt_history` 綁定 `_on_history_wheel`（`return "break"`）及 `_on_global_mousewheel*` 入口 `if event.widget is self.txt_history: return`。
+     2. 檢視 `_start_stopwatch` 與 `_stop_stopwatch` 之 `stopwatch_token` 單調遞增比對與主執行緒 `after_cancel`。
+     3. 檢視 `run_stage2_thread` 中 `s1_hash` 與 `log_content` 雙重比對始繼承 `s1_meta`。
+   * **預期結果**：跨頁籤滾輪、歷史看板滾輪隔離、雙階切換碼錶歸零與獨立執行 Stage 2 標頭防錯位全部完整保留。
+   * **AST 語意錨點**：`RadarRegexToolApp._on_tab_changed`、`RadarRegexToolApp._on_history_wheel`、`RadarRegexToolApp._start_stopwatch`、`RadarRegexToolApp.run_stage2_thread` 內緊鄰 `current_s1_hash` 處。
 
 #### ⚠️ 維度三：架構風險與極端情境識別 (TC-RISK-xx)
 
-* **TC-RISK-01：混合失敗態極端推演（帳號 1 授權失效 + 帳號 2 全模型每日配額耗盡 + 帳號 3 暫態 503）**
-  - **測試情境**：三帳號分別處於「無效金鑰 (`403`)」、「主力與備援模型每日配額用罄 (`429`)」、「暫態過載 (`503`)」，檢驗在三種路線下是否發生死鎖、錯誤跳出或遺漏有效帳號。
-  - **操作步驟**：白箱推演 `horizontal_first`、`quality_locked` 與 `vertical_first` 在混合異常下的狀態集合轉移。
-  - **預期結果**：帳號 1 加入 `auth_failed_indices` 且不再重試；帳號 2 依單模型逐步加入 `quota_exhausted_pairs`（不影響帳號 3）；在 `horizontal_first` 中帳號 3 因遇 `is_trans_err` 設 `round_had_transient = True`，仍能依規退避重試不提前誤殺；若帳號 3 亦耗盡，最終均正確歸因拋出含最後出錯節點帳號、模型與錯誤代碼之例外並展開 `alert_banner`。
-  - **AST 語意錨點**：`call_gemini_api` 內 `round_had_transient` 判斷、`active_indices = valid_indices - auth_failed_indices` 及尾部 `final_err_detail` 例外建構處。
+8. **`[TC-RISK-01]` 執行期關窗 (`WM_DELETE_WINDOW`) 與背景退避中斷收斂**
+   * **測試情境**：背景 Worker 正處於 `_sleep_with_heartbeat` 30 秒退避倒數或正在排程 `_tick` 時，使用者直接關閉主視窗。
+   * **推演步驟**：
+     1. 追蹤 `_on_closing` 設定 `self.is_running = False`、`self.heartbeat_active = False`、呼叫 `_stop_stopwatch()` 並執行 `self.root.destroy()`。
+     2. 追蹤 `_sleep_with_heartbeat` 迴圈條件 `while remaining_seconds > 0 and self.is_running:`，確認關窗後迴圈最多等待 1 秒即主動跳出，`finally` 恢復 `heartbeat_active`；同時確認背景 Thread 皆為 `daemon=True`。
+     3. 核對 `update_status`、`_show_alert_banner`、`_hide_alert_banner`、`append_history_log`、`_start_stopwatch`、`read_file_text_multiformat` 在 `root` 銷毀後執行 `root.after` 或 `winfo_exists()` 時皆包覆 `try ... except Exception:` 防護 `TclError`。
+   * **預期結果**：關窗無殘留非 daemon 背景空轉，亦不因定時器遲到回呼拋出未捕獲 `TclError`。
+   * **AST 語意錨點**：`RadarRegexToolApp._on_closing`；`RadarRegexToolApp._sleep_with_heartbeat` 內緊鄰 `while remaining_seconds > 0 and self.is_running:` 處；`RadarRegexToolApp.update_status` 內緊鄰 `winfo_exists()` 處。
 
-* **TC-RISK-02：異常 `retryDelay` 字串格式污染與非預期無數值邊界推演**
-  - **測試情境**：模擬 API 回傳異常結構之 `429` 錯誤文字（如同時包含 `"PERMINUTE"` 與 `"QUOTA EXCEEDED FOR QUOTA METRIC"`、或 `"RETRY DELAY: INVALID"`、或 `"retryDelay: 0s"`、或含多行換行文字）。
-  - **操作步驟**：靜態推演 `_classify_error` 內 `has_per_minute_kw` 互斥邏輯、`re.finditer` 浮點轉換 `try-except ValueError` 與條件分支結果。
-  - **預期結果**：帶 `"PERMINUTE"` 且 `retryDelay` 小於 `300s` 者判定為暫態限流而非每日配額封鎖；無數字或無效數值不拋出未捕獲例外，平滑回落由 `is_trans_err` 接手重試，絕不引發錯誤分類器崩潰。
-  - **AST 語意錨點**：`call_gemini_api._classify_error` 內 `has_per_minute_kw` 與 `for m in re.finditer(` 內之 `except ValueError:` 區塊。
+9. **`[TC-RISK-02]` 全員相同無效 Key、404 模型不存在與 429 單模型配額耗盡交叉衝擊**
+   * **測試情境**：(a) 3 組帳號欄位誤填同一組無效 API Key；(b) 模型名稱誤填不存在之模型觸發 `404 NOT_FOUND`；(c) 主帳號主模型觸發 `429 RESOURCE_EXHAUSTED`。
+   * **推演步驟**：
+     1. 情境 (a)：第 1 槽失敗觸發 `is_account_auth_error` 將該 Key SHA-256 加入 `auth_failed_key_hashes`，`len(auth_failed_key_hashes) >= len(unique_valid_key_hashes)`（1 >= 1）成立，立即雙層 `break` 跳出所有重試與退避睡眠。
+     2. 情境 (b)：`is_account_auth_error` 首先檢查 `404`/`NOT_FOUND` 並回傳 `False`，且 `is_transient_error` 亦回傳 `False`，因此直接 `raise e` 立即終止並釘選告警橫幅，絕不白白切換 3 組帳號重試同一不存在模型。
+     3. 情境 (c)：`429`/`RESOURCE_EXHAUSTED` 不觸發 `is_account_auth_error` 而命中 `is_transient_error`，保留帳號繼續切換其他帳號或降階至 `gemini-3.5-flash-lite`。
+   * **預期結果**：三種 API 錯誤路由互不干擾，無效請求與空等退避降至最低。
+   * **AST 語意錨點**：`RadarRegexToolApp.call_gemini_api` 內緊鄰 `unique_valid_key_hashes =` 與 `is_account_auth_error` 處。
 
-* **TC-RISK-03：非同步執行緒與高壓重複操作資源洩漏排查**
-  - **測試情境**：在階段一／二失敗或使用者連續切換頁籤並反覆觸發存檔檢核時，檢視是否存在未回收定時器、`alert_banner` 拓撲錯位或臨時 `.tmp` 檔案殘留。
-  - **操作步驟**：檢查 `run_stage1_thread`、`run_stage2_thread`、`run_auto_pipeline` 的 `finally` 保護、`save_config` 與 `save_and_backup_dict` 的 `finally` 清理區塊、以及 `_show_alert_banner` 拓撲守衛。
-  - **預期結果**：背景執行緒 `finally` 必執行 `_stop_stopwatch()` 與 `set_ui_locked(False)`；`.tmp` 檔無論成功失敗皆於 `finally` 移除；`_show_alert_banner` 附帶 `hasattr(self, "notebook")` 守衛確保拓撲順序正確。
-  - **AST 語意錨點**：`_show_alert_banner._do_show` 內 `if hasattr(self, "notebook"):`、各 Worker 函式 `finally:` 區塊、`save_config` 內 `finally:` 區塊。
+10. **`[TC-RISK-03]` 同秒連續存檔 `bak/` 撞名、剪貼簿鎖定與早期橫幅掛載**
+    * **測試情境**：(a) 1 秒內連續執行兩次 `save_and_backup_dict`；(b) Windows 剪貼簿被遠端桌面或其他程式鎖定時點擊「複製 QA 最終字典內容」；(c) `__init__` 早期尚未建立 `top_frame` 時觸發 `_show_alert_banner`。
+    * **推演步驟**：
+      1. 檢視 `save_and_backup_dict` 中 `if os.path.exists(bak_file_path): bak_filename = f"{timestamp}_{os.urandom(2).hex()}_{name_no_ext}.bak"`，確認第二次備份不會覆蓋第一次同秒產出的 `.bak`。
+      2. 檢視 `copy_qa_result` 之 `try ... except Exception:` 黃底 Toast 警示。
+      3. 檢視 `_show_alert_banner._do` 對 `self.alert_banner`、`self.top_frame.winfo_exists()` 與 `self.top_frame.winfo_manager()` 之防守邏輯。
+    * **預期結果**：同秒備份雙雙保留；剪貼簿鎖定顯示清晰黃底警示不閃退；早期橫幅觸發安全無例外。
+    * **AST 語意錨點**：`RadarRegexToolApp.save_and_backup_dict` 內緊鄰 `os.urandom(2).hex()` 處；`RadarRegexToolApp.copy_qa_result` 內緊鄰 `except Exception:` 處；`RadarRegexToolApp._show_alert_banner` 內緊鄰 `self.top_frame.winfo_manager()` 處。
 
-#### 🏛️ 維度四：靜態資料庫殘缺自癒與變數活性推演 (TC-DEBT-xx)
+#### 🏛️ 維度四：靜態資料庫殘缺自癒推演 (Static Mock Data-Flow Trace) (TC-DEBT-xx)
 
-* **TC-DEBT-01：極端殘缺 / 舊版 17 鍵 / 含 BOM / 異常型別 `config.json` 自癒推演**
-  - **測試情境**：模擬四種啟動組態場景：(1) 全新啟動無 `config.json`；(2) `v1.5.3` 舊版 17 鍵含 `request_timeout_seconds: 120.0`；(3) 缺 `request_timeout_seconds` 且 `gemini_model` 為空字串或型別為 `None`、含 UTF-8 BOM；(4) `request_timeout_seconds` 為 `"bad_str"` 或 `99999.0` / `-5.0`。
-  - **操作步驟**：靜態追蹤 `load_config` 內 `copy.deepcopy(self.DEFAULT_CONFIG)`、`utf-8-sig` 讀取與逐鍵邊界校驗分支。
-  - **預期結果**：場景 (1) 與 (3) 自動補齊 `request_timeout_seconds = 300.0` 及 `"gemini-3.8-flash"` / `"gemini-3.6-flash"` / `"gemini-3.5-flash-lite"`；場景 (2) 合法尊重既有 `120.0`；場景 (4) 異常字串回退 `300.0`，超界數值精確夾限至 `600.0` 與 `10.0`，0 觸發 `TypeError` / `ValueError`。
-  - **AST 語意錨點**：`load_config` 內 `cfg = copy.deepcopy(self.DEFAULT_CONFIG)` 至 `return cfg` 全段邊界校驗。
+11. **`[TC-DEBT-01]` 畸形/缺鍵/舊版 `config.json` 自癒與變數讀寫計數雙向核驗**
+    * **測試情境**：模擬磁碟存在 `v1.3.2` 舊版 `config.json`（含 `gemini-3.7-flash` / `gemini-3.5-flash`、缺失 `request_timeout_seconds`、或含非法字串/超界數值如 `request_timeout_seconds: -5`、`max_retries: 999`）與空路徑 `""`，同時進行變數讀寫計數核驗。
+    * **推演步驟**：
+      1. 追蹤 `load_config` 從 `copy.deepcopy(self.DEFAULT_CONFIG)` 疊加磁碟 JSON 後之逐欄遷移與 Clamp 結果：`request_timeout_seconds` 回退 `300.0`（若為 `-5` 則 Clamp 為 `10.0`）；`fallback_model_1` 自動轉 `"gemini-3.6-flash"`；`fallback_model_2` 自動轉 `"gemini-3.5-flash-lite"`；空路徑經 `_norm_path_or_empty` 維持 `""`。
+      2. 執行全類別狀態屬性讀寫核驗：確認 `self.heartbeat_active`（寫於 `__init__`/`_start_stopwatch`/`_sleep_with_heartbeat`/`_on_closing`，讀於 `_start_stopwatch._tick`與`_init_on_main`）、`self.entry_request_timeout`（寫於 `build_tab2`，讀於 `save_all_settings`）、`self.action_btn_row`/`self.action_status_row`（承載 UI 元件與綁定事件）、`self.stopwatch_token`/`self.stopwatch_after_id`（雙向讀寫）無一為 Write-Only 殭屍變數。
+    * **預期結果**：殘缺或舊版組態 100% 無痛自癒，全類別新增與既有狀態變數均為有效雙向讀寫。
+    * **AST 語意錨點**：`RadarRegexToolApp.load_config` 內緊鄰 `RETIRED` 遷移與 `request_timeout_seconds` Clamp 處；`RadarRegexToolApp.__init__` 內緊鄰 `self.heartbeat_active = False` 處。
 
-* **TC-DEBT-02：全域與實例變數讀寫活性雙向核驗（無 Write-Only 殭屍變數）**
-  - **測試情境**：稽核 `v1.5.4` 新增與既有所有狀態變數（包含 `quota_exhausted_pairs`、`auth_failed_indices`、`round_had_transient`、`model_quota_exhausted`、`PRESET_MODELS`、18 個組態鍵與 44 項 UI 引用）之讀寫閉環。
-  - **操作步驟**：逐一核對每個變數的賦值點 (Write) 與引用點 (Read)。
-  - **預期結果**：`quota_exhausted_pairs` 於前檢與 `all(...)` 檢查中被讀取並於 `is_daily_quota_err` 被寫入；`round_had_transient` 於退避守衛被讀取；`model_quota_exhausted` 於 `vertical_first` 降階緩衝守衛被讀取；`PRESET_MODELS` 於 `build_top_bar` 與 `build_tab2` 被讀取；全檔不存在讀取計數為 0 之 Write-Only 殭屍變數。
-  - **AST 語意錨點**：`NovelRegexToolApp` 類別屬性定義、`__init__` 實例屬性與 `call_gemini_api` 區域變數生命週期。
+12. **`[TC-DEBT-02]` 繁體 Big5 vs GBK 雙解碼裁決與損壞位元組降級推演**
+    * **測試情境**：模擬讀取三份外部文本：(a) 純繁體 Big5 舊版字典（位元組同時合法於 Big5 與 GBK 編碼區間）；(b) 簡體 GBK 日誌檔；(c) 含截斷無效位元組之損壞檔案。
+    * **推演步驟**：
+      1. 追蹤 `read_file_text_multiformat` 對 (a)(b) 均跳過 `utf-8-sig`/`utf-8`，進入雙嚴格解碼，各自計算 `_score_cjk_text(decoded_big5, True)` 與 `_score_cjk_text(decoded_gbk, False)`。
+      2. 檢驗繁體詞彙與全形標點在 `is_big5=True` 下獲得高分，在錯誤的 `gbk` 解碼下出現大量日文假名/框線/非 `gb2312` 生僻字扣分，精準選出正確編碼。
+      3. 追蹤 (c) 觸發 `utf-8 errors='ignore'` 降級並安全排程黃底提醒 Toast。
+    * **預期結果**：繁體 Big5 字典不再被 `gbk` 搶先誤解為亂碼；簡體 GBK 亦能正常辨識；損壞檔案不會引發閃退並給出使用者警示。
+    * **AST 語意錨點**：`RadarRegexToolApp._score_cjk_text` 與 `RadarRegexToolApp.read_file_text_multiformat` 內緊鄰 `decoded_gbk is not None and decoded_big5 is not None:` 處。
 
 ---
 
 ### 3. 驗收報告格式要求 (Mandatory Output Schema)
 
+請 QA 嚴格依照下列結構回報驗收結果：
+
 #### 3.1 測試環境與涵蓋範圍總覽
-* 顯式確認四項定錨：目標版本號 (`1.5.4`)、目標語系 (`繁體中文 / Python 3.10+`)、By-Design 豁免清單、Profile (`Profile-BackendScript`)。
+* 明確確認四項定錨：目標版本號 (`v1.3.3`)、目標語系 (`繁體中文 zh-TW`)、By-Design 豁免清單、Profile (`Profile-BackendScript`)。
+* 標註執行方式（白箱靜態推演 + Python 語法/單元驗證或 Windows 實機執行）。
 
 #### 3.2 四大維度逐項檢驗表格
-* 所有 12 項靜態測試案例（`TC-NEW-01~04`、`TC-REG-01~03`、`TC-RISK-01~03`、`TC-DEBT-01~02`）必須逐列填報，終審標籤嚴格採用四態閉環值：`[PASS]` ｜ `[PASS (By-Design)]` ｜ `[PASS (Retired)]` ｜ `[FAIL]`（若涉及補證或仲裁則填 `[🟡 未決待處置]`）。
+* 逐項列出 `TC-NEW-01` ~ `TC-DEBT-02` 共 12 項，每列包含：`案例編號`、`驗證重點`、`代碼錨點摘要`、`靜態推演結果`、`終審標籤`（嚴格使用四態標籤 `[PASS]` ｜ `[PASS (By-Design)]` ｜ `[PASS (Retired)]` ｜ `[FAIL]`，或流程待定標記 `[🟡 未決待處置]`）。
 
 #### 3.2.1 🕹️ 人類實機操作核對專區 (Manual Live Verification Area)
+
 | 實機項目編號 | 驗證操作目標 | 實體代碼對應邏輯錨點 | 實機回填要求 | 當前專區狀態 |
 | :--- | :--- | :--- | :--- | :--- |
-| **MV-01** | 冷啟動版本、標題與 2026-11 模型下拉實機驗證 | `__version__ = "1.5.4"`、`PRESET_MODELS`、`build_top_bar`、`build_tab2` | 貼回 Windows 10/11 (100%～150% DPI) 啟動截圖，確認視窗標題 `v1.5.4`、頂部與 Tab 2 模型下拉為 5 款現役模型、Tab 2「單次請求逾時(秒)」新設定預設顯示 `300.0` | 待回填 |
-| **MV-02** | `BK-154-01` 單模型 429 配額耗盡跨模型躍遷實測 | `call_gemini_api._classify_error`、`quota_exhausted_pairs` | 以真實遇 `429 GenerateRequestsPerDay`（或等效模擬異常注入）之帳號，分別測試 `vertical_first` 與 `horizontal_first` 路線，貼回狀態列與外框標題確認不封鎖帳號且成功降階至備援模型完成任務 | 待回填 |
-| **MV-03** | 真實無效金鑰 (`400`/`403`) 跳轉與全失效 Fast-Exit 實測 | `call_gemini_api` 內 `auth_failed_indices`、`valid_indices.issubset` | 帳號 1 設無效 Key、帳號 2 設有效 Key 執行雙階修復，確認瞬間躍遷帳號 2 且雙階結束碼錶歸零不回蓋；全無效 Key 確認立即 Fast-Exit 展開 `alert_banner` | 待回填 |
-| **MV-04** | 長耗時 (>120s) 任務逾時耐受與多行底欄折行實測 | `raw_sdk_call` (`timeout_seconds=300.0`)、`build_tab1` 雙層底欄 | 使用 `gemini-4-hydrogen` 或耗時 120s～250s 之請求確認不再於 120s 誤超時重試，且於 5+ 分類微創切片與 `swap_bottom_bar` 切換兩態下確認秒數前置折行清晰 | 待回填 |
-| **MV-05** | 動態重讀換檔原子寫入、Tab 2 滾輪切頁與多編碼檔案實測 | `save_and_backup_dict`、`build_tab2._on_tab_changed`、`read_file_content` | 雙階產出後以記事本 BOM 編輯 `config.json` 換檔存檔驗證 `bak/` 與 B 檔寫入（`utf-8-sig` LF）；測試觸控板微幅滾動與 `Ctrl+Tab` 切頁不誤捲；測試 GBK/Big5 讀檔與任務中關窗即時退出 | 待回填 |
+| **MV-01** | 選定空路徑或不存在檔案之 `dict1`/`dict2` 點擊「1️⃣ 僅執行階段一」，驗證 0ms 釘選紅框橫幅且 UI 保持解鎖；隨後補回正確路徑並完成 Stage 2，於頁籤 2 修改路徑並儲存後點擊「💾 備份並更新至目標字典檔」成功覆寫 | `get_selected_dict_content` / `save_and_backup_dict` 內緊鄰 `latest_cfg = self.load_config()` 處 | 回填兩階段操作截圖或事件日誌與成功產生 `.bak` 檔名 | 待回填 |
+| **MV-02** | 設定 `request_timeout_seconds`（如 `120.0`）並以 `gemini-4-hydrogen` / `gemini-3.8-flash` 執行實機請求，確認長思考不提前逾時且過短逾時（如設 `10.0` 配大型請求）能觸發退避心跳倒數；期間確認頂部帳號與模型下拉選單處於鎖定 (`DISABLED`) 狀態 | `build_tab2` `entry_request_timeout` / `raw_sdk_call` / `set_ui_locked` | 回填耗時紀錄與執期鎖定畫面截圖 | 待回填 |
+| **MV-03** | 多目標字（如 4~5 個詞）執行優化時縮窄視窗至 `1000x750`，驗證底欄狀態列自動折行且 `(已耗時: Xs)` 永遠居於首行；刻意觸發 `503`/`429` 退避時確認橘色倒數不被藍字碼錶蓋字閃爍；完成後檢查頁籤 2 歷史看板東亞字寬欄位垂直對齊 | `build_tab1` `action_status_row` / `_sleep_with_heartbeat` / `_pad_display_width` | 回填狹窄視窗狀態列與頁籤 2 歷史看板截圖 | 待回填 |
+| **MV-04** | 以純 Big5 編碼儲存之繁體測試字典執行讀取與微創更新，驗證介面載入無亂碼、寫回後為 `utf-8-sig` 且保留原始換行；於 1 秒內連點兩次存檔驗證 `bak/` 目錄產出兩個不互相覆蓋之 `.bak` 檔 | `read_file_text_multiformat` / `save_and_backup_dict` 內緊鄰 `os.urandom(2).hex()` 處 | 回填讀取截圖與 `bak/` 目錄兩筆備份檔名清單 | 待回填 |
+| **MV-05** | 於背景執行退避或計時期間直接點擊視窗右上角 `✕` 關閉程式，並測試選取未配鑰帳號點擊「⚡ 測試連通性」驗證自動切換提示 | `_on_closing` / `test_api_connection` 內緊鄰 `switched_note` 處 | 回填視窗清潔關閉無 Python 例外回溯，及測試 Toast 文案確認 | 待回填 |
 
 *專區狀態集合：`{待回填 ｜ 已回填-通過 ｜ 已回填-異常轉升格 3.3 缺陷並附 4 要素}`*
 
 #### 3.3 🚨 發現之缺陷與異常清單 (Defects & Observations)
-凡判定 `[FAIL]` 或發現實機異常者，必須附帶完整 4 要素：(1) 語意錨點（零行號）、(2) 最小復現步驟、(3) 實際行為 vs 預期行為、(4) 置信度與證據鏈。
+凡判定 `[FAIL]` 或回報異常者，必須附帶 4 要素：具體代碼位置（語意錨點，零行號）、最小復現邏輯推演、實際行為 vs 預期行為、置信度標記（🔴 / 🟡 / ⚪）。
 
 #### 3.3.1 🧬 清單外白箱代碼缺陷 (Off-List Static Vulnerabilities)
-承接 Phase 0（`0.1` 至 `0.5`）發現之任何清單外風險，在此專屬區塊詳列。
+承接 Phase 0 (0.1 至 0.5) 獨立排查結果回報於此專區。
 
 #### 3.4 最終 PASS / FAIL 簽核結論與發布建議
-* 若 3.2 表格內全量 12 項靜態測試案例均達四態閉環 `[PASS]` / `[PASS (By-Design)]` / `[PASS (Retired)]`，且無未決之 `[🟡 未決待處置]` 與 3.3/3.3.1 阻斷缺陷時，即刻簽發 **【6-A 技術手冊封存核准】**（正式解除 ENG 交付責任並允許進入交接文件產出與封存）；`3.2.1` 專區內之 `MV-01` ～ `MV-05` 獨立轉入 **【6-B 維運與動態追蹤待辦】**，不阻礙 6-A 封存。若尚存未解 `[FAIL]` 或 `[🟡 未決待處置]`，則依雙門禁 Fallback 條款退回處理。
+* **6-A 技術手冊封存**：當 3.2 表格內 12 項靜態測試案例全數為四態閉環 PASS 標籤、無未決 `[🟡 未決待處置]` 且 Phase 0 無阻斷缺陷時，直接簽發【6-A 技術手冊封存核准】，解除 ENG 交付責任。
+* **6-B 維運追蹤管理**：3.2.1 專區 `MV-01` ~ `MV-05` 獨立列管為【6-B 維運與動態追蹤待辦】，不得反向阻礙 6-A 封存。
+* **雙門禁 Fallback 回退**：若存在 `[FAIL]` 或 `[🟡 未決待處置]` 項，嚴禁簽發 6-A，依實際未決態出具「暫緩最終簽核」結論。
 
 ---
 
-## 【叁、 執行輸入區 (Data Input — 供 QA 實例執行用)】
+## 【叁、 執行輸入區 (Data Input)】
 
 ```Text
-=== TARGET_VERSION: 1.5.4 ===
-=== BASELINE_VERSION: 1.5.3 ===
-=== TARGET_LANGUAGE: 繁體中文 (zh-TW) / Python 3.10+ ===
+=== TARGET_VERSION: 1.3.3 ===
+=== BASELINE_VERSION: 1.3.2 ===
+=== TARGET_LANGUAGE: 繁體中文 (zh-TW) ===
 === PROFILE_TYPE: Profile-BackendScript ===
-=== RETIREMENT_REQUESTED: NO ===
-=== PRD_ACCEPTANCE_SUMMARY: 1. __version__ = "1.5.4" 位於前10行且緊接 sys.setrecursionlimit(5000)，標題顯示 v1.5.4；2. BK-154-01 將 429 每日/指標配額耗盡由帳號級 auth_failed_indices 移出，改採 (prof_key, current_model) 請求級 quota_exhausted_pairs 隔離並於三條重試路線正確降階或 Fast-Exit，保留 RPM 429 暫態重試與真實 400/403 帳號躍遷；3. BK-154-02 全鏈路預設請求逾時上調至 300.0s (夾限 10.0~600.0s)，PRESET_MODELS 更新為 5 款 2026-11 現役獨立配額模型並預設 3.8-flash -> 3.6-flash -> 3.5-flash-lite；4. 所有 v1.5.3 底欄折行、世代碼錶、動態換檔原子寫入、PCRE2 寬容 Linter、四階編碼讀取與滾輪切頁防護 100% 無迴歸。 ===
+=== RETIREMENT_REQUESTED: YES ===
+=== PRD_ACCEPTANCE_SUMMARY: AC-01 頭部版本與基礎啟動 / AC-02 執行前空缺字典硬阻斷 / AC-03 存檔重讀 6 鍵同步與快照保留 / AC-04 請求逾時 300s 與 2026-11 防反向升級模型階梯 / AC-05 選單連動鎖定與雜湊授權黑名單 / AC-06 底欄折行與心跳互鎖及 Big5 編碼裁決與關窗安全 ===
 === TARGET_CODE_START ===
-[請使用者於呼叫 QA 時隨附貼入《本地正則修復維護工具 v1.5.4.py》完整原始碼實體]
+請隨附上傳《審核雷達正則維護工具 v1.3.3.py》全文檔案供 QA 執行 100% 靜態白箱審查
 === TARGET_CODE_END ===
 ```
 
 ---
 
-## 【肆、 跨輪次任務切換 Hook 已就位】
-本 PM 實例已維持常駐監聽狀態：
-* 若您接下來回傳多方 QA 驗收報告（或帶異議之報告），我將立即啟動 **階段 4.5 白箱優先強制仲裁**；
-* 若 QA 全部通過（達成 6-A 核准條件），請回覆確認結果，我將依階段 5 規範為您產出包裹於 `<<< BACKLOG_START >>>` ... `<<< BACKLOG_END >>>` 內的《PM 迭代備忘錄》並指示調用專用交接檔生成指令；
-* 若您於後續直接提供 ENG 撰寫之 `v1.5.4` 技術交接檔，我將即刻執行反倒嚼核驗、底層結算等式與分階段 6-A / 6-B 簽核審查。
+*【跨輪次任務切換掛鉤 (Task Switch Hook) 已常駐就緒】：當後續收到 QA 報告（或進入階段 4.5 仲裁／階段 6 技術交接檔簽核）時，將立即依對應協議執行審查與簽核。*
