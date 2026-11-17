@@ -1,14 +1,11 @@
 # -*- coding: utf-8 -*-
 import os
 import sys
+sys.setrecursionlimit(5000)
 
 
 # 頂層版本號規範宣告 (AC-01: 於前 10 行內明確宣告)
 __version__ = "1.5.3"
-
-
-# 頂層遞迴深度防護宣告 (避免 PyInstaller 打包深度溢出)
-sys.setrecursionlimit(5000)
 
 
 import copy
@@ -154,6 +151,15 @@ class NovelRegexToolApp:
     EOF_MARKER = "=== 字典全檔輸出結束 [EOF] ==="
 
 
+    PRESET_MODELS = [
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.7-flash",
+        "gemini-3.8-flash"
+    ]
+
+
     DEFAULT_PROFILES = [
         {"name": "帳號 1 (預設主帳)", "key": "", "note": "主金鑰"},
         {"name": "帳號 2 (備用帳號 1)", "key": "", "note": "備援金鑰 1"},
@@ -225,10 +231,23 @@ class NovelRegexToolApp:
         self.var_enable_fallback = tk.BooleanVar(value=bool(self.config.get("enable_fallback", True)))
 
 
+        # 關窗生命週期防護
+        self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
+
+
         # UI 建構 (順序：頂部控制列 -> 固化常駐告警橫幅 -> 主分頁 Notebook)
         self.build_top_bar()
         self.build_alert_banner()
         self.build_notebook()
+
+
+    def _on_closing(self):
+        self.is_running = False
+        self._stop_stopwatch()
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
 
 
     # -----------------------------------------------------------------------
@@ -534,16 +553,7 @@ class NovelRegexToolApp:
         ttk.Label(self.top_frame, text="模型名稱:").grid(row=0, column=2, sticky=tk.W, padx=(10, 5))
 
 
-        preset_models = [
-            "gemini-3.6-flash",
-            "gemini-3.5-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-3.7-flash",
-            "gemini-3.8-flash"
-        ]
-
-
-        self.model_combo = ttk.Combobox(self.top_frame, values=preset_models, width=22)
+        self.model_combo = ttk.Combobox(self.top_frame, values=self.PRESET_MODELS, width=22)
         current_model = self.config.get("gemini_model", "gemini-3.6-flash")
         self.model_combo.set(current_model)
         self.model_combo.grid(row=0, column=3, padx=5, sticky=tk.W)
@@ -611,8 +621,11 @@ class NovelRegexToolApp:
         def _do_show():
             full_msg = f"🚨 【{err_title}】\n{err_detail}"
             self.lbl_alert_msg.config(text=full_msg)
-            # 掛載於 notebook 之前，確保拓撲順序正確
-            self.alert_banner.pack(fill=tk.X, padx=10, pady=(0, 5), before=self.notebook)
+            # 僅於 notebook 已建構完成時附帶 before=self.notebook，確保拓撲順序正確
+            if hasattr(self, "notebook"):
+                self.alert_banner.pack(fill=tk.X, padx=10, pady=(0, 5), before=self.notebook)
+            else:
+                self.alert_banner.pack(fill=tk.X, padx=10, pady=(0, 5))
         self.root.after(0, _do_show)
 
 
@@ -1261,27 +1274,18 @@ class NovelRegexToolApp:
         self.chk_enable_fallback.pack(side=tk.LEFT)
 
 
-        preset_models = [
-            "gemini-3.6-flash",
-            "gemini-3.5-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-3.7-flash",
-            "gemini-3.8-flash"
-        ]
-
-
         row_fb = ttk.Frame(frame_strategy)
         row_fb.pack(fill=tk.X, pady=2)
 
 
         ttk.Label(row_fb, text="第一備援模型:").pack(side=tk.LEFT, padx=(0, 4))
-        self.combo_fallback_1 = ttk.Combobox(row_fb, values=preset_models, width=20)
+        self.combo_fallback_1 = ttk.Combobox(row_fb, values=self.PRESET_MODELS, width=20)
         self.combo_fallback_1.set(self.config.get("fallback_model_1", "gemini-3.5-flash"))
         self.combo_fallback_1.pack(side=tk.LEFT, padx=(0, 16))
 
 
         ttk.Label(row_fb, text="第二備援模型:").pack(side=tk.LEFT, padx=(0, 4))
-        self.combo_fallback_2 = ttk.Combobox(row_fb, values=preset_models, width=20)
+        self.combo_fallback_2 = ttk.Combobox(row_fb, values=self.PRESET_MODELS, width=20)
         self.combo_fallback_2.set(self.config.get("fallback_model_2", "gemini-3.5-flash-lite"))
         self.combo_fallback_2.pack(side=tk.LEFT)
 
@@ -1444,11 +1448,11 @@ class NovelRegexToolApp:
 
 
     # -----------------------------------------------------------------------
-    # 【核心演算法 1】字典分組區塊解析器 (放寬標頭正則相容任意分類命名)
+    # 【核心演算法 1】字典分組區塊解析器 (放寬帶名稱三行標頭與單行相容)
     # -----------------------------------------------------------------------
     def parse_repair_dict_sections(self, dict_content: str):
         sec_pattern = re.compile(
-            r'^(#\s*={5,}\s*\r?\n#\s*\[\s*([^\]]+?)\s*\][^\r\n]*\r?\n#\s*={5,})',
+            r'^(#\s*={5,}[^\r\n]*\r?\n#\s*\[\s*([^\]]+?)\s*\][^\r\n]*\r?\n#\s*={5,}[^\r\n]*)',
             re.MULTILINE
         )
         matches = list(sec_pattern.finditer(dict_content))
@@ -1963,7 +1967,7 @@ class NovelRegexToolApp:
 
 
     # -----------------------------------------------------------------------
-    # API 連通性測試探針 (測試當前作用帳號，支援碼錶與告警橫幅)
+    # API 連通性測試探針 (優先測試頂部選定帳號，不污染 rr_counter)
     # -----------------------------------------------------------------------
     def test_api_connection(self):
         if self.is_running:
@@ -1975,15 +1979,31 @@ class NovelRegexToolApp:
         self._hide_alert_banner()
 
 
-        candidate_profiles = self.get_dispatched_candidate_profiles()
-        if not candidate_profiles:
+        profiles = self.config.get("api_profiles", [])
+        selected_idx = self.account_combo.current()
+        current_prof = None
+
+
+        if 0 <= selected_idx < len(profiles):
+            cand = profiles[selected_idx]
+            if isinstance(cand, dict) and cand.get("key", "").strip():
+                current_prof = cand
+
+
+        if current_prof is None:
+            for cand in profiles:
+                if isinstance(cand, dict) and cand.get("key", "").strip():
+                    current_prof = cand
+                    break
+
+
+        if not current_prof:
             err_txt = "尚未設定任何有效的 API Key，請至設定頁填寫！"
             Toast.show(self.root, f"⚠️ {err_txt}", bg="#f59e0b", fg="#000000")
             self._show_alert_banner("連通性測試阻斷", err_txt)
             return
 
 
-        current_prof = candidate_profiles[0]
         api_key = current_prof.get("key", "").strip()
         account_name = current_prof.get("name", "帳號")
         model_name = self.model_combo.get().strip() or self.config.get("gemini_model", "gemini-3.6-flash")
@@ -2396,13 +2416,77 @@ class NovelRegexToolApp:
     def read_file_content(self, path, desc):
         if not path or not os.path.exists(path):
             raise FileNotFoundError(f"找不到{desc}檔案：{path}")
-        for enc in ("utf-8-sig", "utf-8", "gbk", "big5"):
+
+
+        try:
+            with open(path, "rb") as f:
+                raw_bytes = f.read()
+        except OSError as e:
+            raise OSError(f"無法讀取{desc}檔案 ({path})：{str(e)}") from e
+
+
+        # 1. 先依序嚴格嘗試 utf-8-sig 與 utf-8
+        for enc in ("utf-8-sig", "utf-8"):
             try:
-                with open(path, "r", encoding=enc) as f:
-                    return f.read()
+                return raw_bytes.decode(enc)
             except UnicodeDecodeError:
                 continue
-        # 四者皆解碼失敗時，以容錯模式讀取並發出異常警示
+
+
+        # 2. 分別嚴格嘗試 gbk 與 big5 解碼
+        gbk_text = None
+        big5_text = None
+        try:
+            gbk_text = raw_bytes.decode("gbk")
+        except UnicodeDecodeError:
+            pass
+        try:
+            big5_text = raw_bytes.decode("big5")
+        except UnicodeDecodeError:
+            pass
+
+
+        if gbk_text is not None and big5_text is None:
+            return gbk_text
+        if big5_text is not None and gbk_text is None:
+            return big5_text
+
+
+        # 3. 兩者皆成功時執行零依賴啟發式評分裁決 (同分優先採用 big5)
+        if gbk_text is not None and big5_text is not None:
+            gibberish_re = re.compile(r'[\u3040-\u30ff\u0370-\u03ff\u0400-\u04ff\u2500-\u257f\ue000-\uf8ff]')
+
+
+            gbk_score = -10 * len(gibberish_re.findall(gbk_text))
+            for ch in gbk_text:
+                if '\u4e00' <= ch <= '\u9fff':
+                    try:
+                        ch.encode("gb2312")
+                        gbk_score += 2
+                    except UnicodeEncodeError:
+                        pass
+
+
+            big5_score = -10 * len(gibberish_re.findall(big5_text))
+            for ch in big5_text:
+                try:
+                    b = ch.encode("big5")
+                except UnicodeEncodeError:
+                    continue
+                if len(b) == 2:
+                    code = (b[0] << 8) | b[1]
+                    if '\u4e00' <= ch <= '\u9fff' and 0xA4 <= b[0] <= 0xC6:
+                        big5_score += 2
+                    elif 0xA140 <= code <= 0xA1FE:
+                        big5_score += 3
+
+
+            if gbk_score > big5_score:
+                return gbk_text
+            return big5_text
+
+
+        # 4. 四者皆解碼失敗時，以容錯模式讀取並發出異常警示
         self.root.after(0, lambda d=desc, p=os.path.basename(path): Toast.show(
             self.root,
             f"⚠️ {d} [{p}] 編碼異常，已以 UTF-8 容錯模式讀取（可能含遺失字元）",
@@ -2410,8 +2494,7 @@ class NovelRegexToolApp:
             bg="#f59e0b",
             fg="#000000"
         ))
-        with open(path, "r", encoding="utf-8", errors="ignore") as f:
-            return f.read()
+        return raw_bytes.decode("utf-8", errors="ignore")
 
 
     # -----------------------------------------------------------------------
@@ -2699,14 +2782,6 @@ class NovelRegexToolApp:
             return
 
 
-        def _norm_local(path_str):
-            s = str(path_str or "").strip()
-            return os.path.normpath(s) if s else ""
-
-
-        norm_fn = getattr(self, "_norm_path_or_empty", _norm_local)
-
-
         qa_output = self.txt_stage2.get("1.0", tk.END).strip()
 
 
@@ -2775,19 +2850,22 @@ class NovelRegexToolApp:
             return
 
 
-        # 重讀磁碟最新 config.json 動態更新目標字典路徑
+        # 重讀磁碟最新 config.json 動態更新路徑（嚴禁整包覆蓋 self.config，僅同步三個路徑欄位）
         latest_cfg = self.load_config()
-        self.config = latest_cfg
-        dict_path = norm_fn(latest_cfg.get("repair_dict_path", ""))
+        for p_key in ("repair_dict_path", "engineer_prompt_path", "qa_prompt_path"):
+            self.config[p_key] = self._norm_path_or_empty(latest_cfg.get(p_key, ""))
+
+
+        dict_path = self.config["repair_dict_path"]
 
 
         # 檢查 Tab 2 是否有未點擊儲存之路徑變更
         unsaved_diffs = []
-        if hasattr(self, "entry_dict_path") and norm_fn(self.entry_dict_path.get()) != dict_path:
+        if hasattr(self, "entry_dict_path") and self._norm_path_or_empty(self.entry_dict_path.get()) != dict_path:
             unsaved_diffs.append("字典路徑")
-        if hasattr(self, "entry_eng_path") and norm_fn(self.entry_eng_path.get()) != norm_fn(latest_cfg.get("engineer_prompt_path", "")):
+        if hasattr(self, "entry_eng_path") and self._norm_path_or_empty(self.entry_eng_path.get()) != self.config["engineer_prompt_path"]:
             unsaved_diffs.append("工程師提示詞路徑")
-        if hasattr(self, "entry_qa_path") and norm_fn(self.entry_qa_path.get()) != norm_fn(latest_cfg.get("qa_prompt_path", "")):
+        if hasattr(self, "entry_qa_path") and self._norm_path_or_empty(self.entry_qa_path.get()) != self.config["qa_prompt_path"]:
             unsaved_diffs.append("QA提示詞路徑")
         if unsaved_diffs:
             Toast.show(
@@ -2808,7 +2886,7 @@ class NovelRegexToolApp:
 
 
         # 比對目標路徑是否變更，若指向新目標檔則重讀再解析
-        snap_dict_path = norm_fn(self.last_task_snapshot.get("repair_dict_path", ""))
+        snap_dict_path = self._norm_path_or_empty(self.last_task_snapshot.get("repair_dict_path", ""))
         if dict_path == snap_dict_path:
             target_header = self.last_task_snapshot["original_header"]
             target_sections = self.last_task_snapshot["original_sections"]
@@ -2901,8 +2979,15 @@ class NovelRegexToolApp:
             self.root.clipboard_clear()
             self.root.clipboard_append(qa_output)
             Toast.show(self.root, "📋 QA 最終字典內容已成功複製至剪貼簿！")
-        except Exception:
-            pass
+        except Exception as e:
+            err_summary = str(e).splitlines()[0][:60] if str(e) else "未知錯誤"
+            Toast.show(
+                self.root,
+                f"⚠️ 剪貼簿寫入失敗（可能被其他程式鎖定）：{err_summary}",
+                duration=3000,
+                bg="#f59e0b",
+                fg="#000000"
+            )
 
 
 # ---------------------------------------------------------------------------
