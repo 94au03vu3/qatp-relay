@@ -80,32 +80,34 @@
 ## 【貳、 QA 測試驗證任務書 (QATP)】
 
 > 🔒 **表頭規格預設值顯式定錨**：  
-> **1. 目標版本號**：`v1.3.4` ｜ **2. 目標語系**：`繁體中文 (Traditional Chinese)` ｜ **3. By-Design 豁免清單**：`見下方第 1 小節` ｜ **4. Profile**：`Profile-BackendScript`
+> **1. 目標版本號**：`v1.2.4` ｜ **2. 目標語系**：`繁體中文 (PCRE 正則字典檢測專用)` ｜ **3. By-Design 豁免清單**：`見下方第 1 小節` ｜ **4. Profile**：`Profile-BackendScript`
+
+---
 
 ### 0. 🧬 【強制優先】Phase 0：獨立白箱代碼靜態風險排查 (Static Code Audit)
+
 * **0.1 【Shell / CLI / 外部進程與路徑轉義漏洞排查】**：
-  `launch_sentinel_gui` 與 `save_and_backup_dict` 調用子進程時均使用 List 命令陣列，且在凍結模式下使用 `shutil.which` 尋找 `python/python3/py`，無 Shell 注入風險。
+  - 檢視 `main` 與 `run_cli_precheck` 處：CLI 解析使用 `argparse`，傳入路徑直接傳遞至 Python 內部 I/O，無 `subprocess` 或 Shell 呼叫，無命令列注入風險。
+  - 檢視 `_resolve_app_path`：使用 `os.path.isabs` 與 `os.path.join(SCRIPT_DIR, p)`，遇到空路徑安全返回 `""`，不產生非法路徑穿越。`[無風險]`
 * **0.2 【字串與正則邊界吞噬排查】**：
-  `validate_pcre_syntax` 內字元類正則已更新為 `r'\[\^?(?:\\.|[^\\\]])+\]'`（`[BOUNDARY: SINGLE_LINE]`），反斜線與一般字元正交，無回溯吞噬。
+  - 檢視 `DictParserEngine._split_depth_zero_branches`：轉義字符 `\`、字元集 `[...]` 與圓括號計數狀態機完整匹配，正確切分頂層管道符 `|`，無跨分支換行吞噬。
+  - 檢視 `sanitize_legacy_content`：正則嚴格約束單行標頭與 PCRE 開頭，相鄰條目單空行正規化 (`\n{3,}` ➔ `\n\n`) 邊界閉合。`[無風險]`
 * **0.3 【系統資源競爭、死鎖、洩漏與跨執行緒 GUI 讀寫排查】**：
-  `update_status`、`_show_alert_banner`、`_hide_alert_banner` 均前置檢查 `self.root.winfo_exists()`；碼錶世代權杖 (`stopwatch_token`) 配合 `heartbeat_active` 完整互鎖，無跨執行緒死鎖或記憶體殘留。
-* **0.4 【全域頂層範圍語法崩潰與入口盲區排查 (Zero-Meltdown Audit)】**：
-  頂層變數初始化無死區，例外捕獲健全，日誌與常數預設值健全，入口完全存活。
-* **0.5 【災難救援與脫困指令執行環境能力邊界排查】**：
-  SOP 依賴實體 `.bak` 檔案之檔案系統覆蓋，以及本機子進程調用，未跨越環境能力邊界。
+  - 檢視背景 Worker 執行緒（`trigger_health_check_async`、`_run_auto_healing_pipeline`、`_on_test_api_connection` 等）：所有 GUI 更新、狀態列提示、Toast 浮圖均嚴格透過 `self.root.after(0, ...)` 排程回主執行緒，無跨執行緒記憶體競爭。
+  - 碼錶執行緒 (`LiveThinkingStopwatch`) 標記 `daemon=True`，退出時呼叫 `stop()` 終止迴圈，無背景執行緒洩漏。`[無風險]`
+* **0.4 🚨 【全域頂層範圍語法崩潰與入口盲區排查 (Zero-Meltdown Audit)】**：
+  - 頂層 Python 依賴均為標準函式庫，`tkinter` 與 `google.genai` 皆具備 ImportError 軟降級隔離；入口 `if __name__ == "__main__":` 具備完整的 CLI / GUI 分流；無頂層未防護屬性調用。`[無風險]`
+* **0.5 🛡️ 【災難救援與脫困指令執行環境能力邊界排查 (Runtime Context Feasibility)】**：
+  - 一鍵回滾 `rollback_to_baseline` 與實體重生完全基於本機檔案系統 I/O，不依賴網路與外部環境；微創存檔門禁遇到檔案遺失時保留快照與按鈕，提供完整自救出口。`[無風險]`
 
 ---
 
 ### 1. 🛡️ 【強制】架構妥協與驗收豁免須知 (By-Design Exceptions)
 
-1. **單次任務不自動切換金鑰 (BL-134-RC-01)**：
-   - 即使 3 個槽位均填寫有效 Key，單次任務失敗後嚴禁自動嘗試其他 Key。切換 Key 必須由使用者於頂部選單手動點選。（不可豁免鐵律自查：無衝突）
-2. **503 暫態錯誤需等待 180 秒長冷卻 (BL-134-RC-03)**：
-   - 伺服器尖峰過載退避時間預設為 180.0 秒（3 分鐘），狀態列前置呈現倒數秒數，此為防風控生理冷卻預期行為。（不可豁免鐵律自查：無衝突）
-3. **`self.rr_counter` 實例屬性退場保留 (BL-134-04)**：
-   - 該屬性保留僅供反射相容與單次隨機/輪動起手槽位計數，不作為背景跨 Key 輪詢用途。（不可豁免鐵律自查：無衝突）
-4. **凍結環境哨兵呼叫依賴系統 Python (BL-134-02)**：
-   - 在 PyInstaller 獨立執行檔環境下，若系統未安裝 Python，則平滑降級為 Toast 提示與 `os.startfile`，不因哨兵未啟動而阻斷常規正則存檔。（不可豁免鐵律自查：無衝突）
+1. **重大風控阻斷 0 重試 Fast-Exit**：若 API 回應包含 `RISK_CONTROL_TOKENS`（如 `UNUSUAL ACCOUNT ACTIVITY` 等），系統立即中止流水線並展開橫幅，不再進行任何重試或降階。此為保護金鑰免遭永久封鎖之防禦性設計，嚴禁視為例外未捕獲。（不可豁免鐵律自查：無衝突）
+2. **單次自癒鎖定單一帳號**：即使設定了 3 組帳號，在單次一鍵自癒執行期間，`ordered_profiles` 長度恆為 1，嚴禁橫向切換其他 Key。此為防止觸發同 IP 多 Key 關聯風控之預期行為。（不可豁免鐵律自查：無衝突）
+3. **上游 `--cli-check` 預檢不寫入備份**：上游維護工具常傳入暫存檔案乾跑，故預檢模式強制 `auto_backup=False`，不產生時間戳備份與黃金基準線覆寫。（不可豁免鐵律自查：無衝突）
+4. **遠端情境池 `contexts` 不阻斷長度 $\le 1$ 詞綴**：帶有跨度量詞前瞻或雙向零寬斷言的複合長語框收斂至情境池，不參與致命裸詞綴判定，以保障合法成語與量詞上下文。（不可豁免鐵律自查：無衝突）
 
 ---
 
@@ -113,144 +115,146 @@
 
 #### 🌟 維度一：新功能驗收 (TC-NEW-xx)
 
-* **TC-NEW-01: 單帳號鎖定與候選長度恆為 1 驗收**
-  - **測試情境**：在頁籤 2 分別設定 `account_dispatch_mode` 為 `locked`、`random`、`round_robin`，執行快照生成。
-  - **語意錨點**：`create_task_snapshot 內 緊鄰 candidate_profiles = [chosen] 處`
+* **TC-NEW-01: 上游雷達 `--cli-check` 介面預檢相容性驗證**
+  - **測試情境**：模擬《審核雷達 v1.3.4》從任意工作目錄呼叫哨兵進行預檢。
   - **操作步驟**：
-    1. 填入 3 組有效 API Key。
-    2. 分別於頂部切換起手策略並點擊「僅執行階段一」。
-    3. 檢驗 `self.last_task_snapshot["candidate_profiles"]`。
-  - **預期結果**：無論何種分流模式，`len(candidate_profiles)` 恆等於 1，背景完全無跨 Key 輪詢拼接邏輯。
+    1. 傳入包含致命裸詞綴衝突之字典路徑：`python 正則衝突檢測守衛.py --cli-check "conflict_dict.txt"`。
+    2. 檢查 Exit Code 與 Console 輸出。
+    3. 傳入健全字典路徑測試合格情境。
+  - **預期結果**：衝突時 Exit Code 必為 `1`，且 `stdout` 第一行必輸出包含 `🚨 檢測到致命語意對沖` 之字串；合格時 Exit Code 必為 `0` 且輸出 `🟢 [PASS]`；無 `unrecognized arguments` 例外。
+  - **代碼語意錨點**：`main` 函式內 `parser.add_argument("--cli-check", ...)` 緊鄰 `run_cli_precheck` 調用處。
 
-* **TC-NEW-02: 底層 SDK 隱形重試禁絕驗收**
-  - **測試情境**：驗證 `raw_sdk_call` 中調用 `genai.Client` 時之參數配置。
-  - **語意錨點**：`raw_sdk_call 內 緊鄰 types.HttpRetryOptions(attempts=1) 處`
-  - **操作步驟**：檢驗 `google.genai` SDK 載入時是否注入 `retry_options=types.HttpRetryOptions(attempts=1)`。
-  - **預期結果**：`http_opts` 包含 `attempts=1`；遇 `TypeError`/`AttributeError` 時能平滑降級為無 `retry_options` 或字典參數，不拋出未捕獲例外。
+* **TC-NEW-02: 單帳號鎖定與橫向輪詢阻斷驗證**
+  - **測試情境**：配置 3 組有效 API Key，觸發一鍵自癒。
+  - **操作步驟**：檢視 `_create_task_snapshot()` 生成之快照結構。
+  - **預期結果**：快照中 `ordered_profiles` 串列長度恆為 `1`，僅包含頂部鎖定帳號；即使後續調用遭遇失敗，`call_gemini_api` 絕對不向其餘 2 組 Key 跳轉。
+  - **代碼語意錨點**：`SentinelGUI._create_task_snapshot` 方法內 `ordered_profiles = [profiles[locked_idx]]` 處。
 
-* **TC-NEW-03: 四維風控異常分類器精確匹配與處置**
-  - **測試情境**：模擬各類 API 錯誤回應文字。
-  - **語意錨點**：`call_gemini_api 內 緊鄰 is_risk_block / is_daily_quota_error / is_auth_error 處`
-  - **操作步驟**：
-    1. 傳入 `ACCOUNT VERIFICATION REQUIRED`。
-    2. 傳入 `429 RESOURCE_EXHAUSTED: GENERATEREQUESTSPERDAY quota exceeded`。
-    3. 傳入含 `error code 400` 與含 `LIMIT 400000` 之錯誤字串。
-  - **預期結果**：(1) 立即拋出風控阻斷並釘選紅色 Alert Banner；(2) 0 秒免等待直接降階下一模型；(3) 前者判定為授權錯誤 0 重試 Fast-Exit，後者因正則邊界 `(?<!\d)(?:400|403)(?!\d)` 正確放行至暫態重試。
+* **TC-NEW-03: SDK 隱形重試禁絕與請求逾時注入驗證**
+  - **測試情境**：檢查 `MultiAccountAPIEngine.raw_sdk_call` 之底層 Client 構建參數。
+  - **操作步驟**：推演 `GENAI_MODE == "google.genai"` 與舊版 SDK 之調用引數。
+  - **預期結果**：`google.genai` 分支精確注入 `types.HttpRetryOptions(attempts=1)` 與毫秒逾時；舊版注入 `request_options={"timeout": ...}`，無任何隱形重試。
+  - **代碼語意錨點**：`MultiAccountAPIEngine.raw_sdk_call` 方法內 `types.HttpRetryOptions(attempts=1)` 處。
 
-* **TC-NEW-04: 雙階流水線 5 秒安全生理緩衝驗收**
-  - **測試情境**：執行一鍵雙階自動優化。
-  - **語意錨點**：`run_auto_pipeline._pipeline 內 緊鄰 for buf_i in range(5, 0, -1): 處`
-  - **操作步驟**：輸入測試日誌，點擊「🤖 一鍵雙階自動優化」。
-  - **預期結果**：階段一完成後，狀態列顯示 `⏳ [防風控保護] 雙階安全生理緩衝中 (5s)...` 並遞減至 1s，完整冷卻 5.0 秒後始進入階段二；若期間關閉視窗能於 1 秒內安全終止退出。
-
----
+* **TC-NEW-04: 長週期退避冷卻與雙階 5 秒生理緩衝驗證**
+  - **測試情境**：模擬 API 遭遇暫態錯誤 (503) 及雙階流水線流轉。
+  - **操作步驟**：檢查退避計時呼叫與 Stage 1 結束時之時序。
+  - **預期結果**：暫態錯誤完整執行 `base_delay_seconds` (預設 180s)，取消舊版 30s 硬截斷；Stage 1 成功後、進入 Stage 2 前，強制執行 5.0 秒緩衝倒數。
+  - **代碼語意錨點**：`MultiAccountAPIEngine.call_gemini_api` 暫態退避處，及 `SentinelGUI._run_auto_healing_pipeline` 內 `sleep_with_heartbeat(5.0, ...)` 處。
 
 #### 🔄 維度二：關鍵防禦機制實體存活審查 (TC-REG-xx)
 
-* **TC-REG-01: PCRE2 脫殼字元類正則無回溯防禦審查**
-  - **測試情境**：輸入包含深度巢狀反斜線之正則表達式。
-  - **語意錨點**：`validate_pcre_syntax 內 緊鄰 pcre2_verb_pattern = re.compile 處`
-  - **操作步驟**：傳入含有 `r'\[\^?(?:\\.|[^\\\]])+\]'` 之條目，檢驗連續 40 個反斜線 `\[\\\\\\\\...\]`。
-  - **預期結果**：10ms 內安全返回，完全消除 ReDoS 回溯二義性。
+* **TC-REG-01: 四維異常分類器精準度與順位審查**
+  - **測試情境**：輸入各類 Google API 錯誤訊息字串至 `_classify_exception`。
+  - **操作步驟**：
+    1. 輸入包含 `UNUSUAL ACCOUNT ACTIVITY` ➔ 驗證判定為 `RISK_BLOCK`。
+    2. 輸入 `429` 且含 `DAILY LIMIT` 或 `delay >= 300` ➔ 驗證判定為 `DAILY_QUOTA` (0 秒垂直降階)。
+    3. 輸入 `INVALID_ARGUMENT` ➔ 驗證判定為請求格式錯誤立即中止。
+    4. 輸入 `PERMISSION_DENIED` 或 `403` ➔ 驗證判定為 `AUTH_ERROR` 立即中止。
+    5. 輸入 `503 UNAVAILABLE` ➔ 驗證判定為 `TRANSIENT` 進入長冷卻。
+  - **預期結果**：五級分類無縫分流，無任何盲目吞例外迴圈。
+  - **代碼語意錨點**：`MultiAccountAPIEngine._classify_exception` 靜態方法內順位匹配條件處。
 
-* **TC-REG-02: 哨兵記憶體預檢刷盤與凍結環境相容性**
-  - **測試情境**：執行 `save_and_backup_dict` 存檔預檢。
-  - **語意錨點**：`save_and_backup_dict 內 緊鄰 f.flush(); os.fsync(f.fileno()) 處`
-  - **操作步驟**：檢查 `dry_tmp_path` 寫入流程及 `launch_sentinel_gui` 在凍結環境下的直譯器偵測。
-  - **預期結果**：暫存檔具備 `flush` + `os.fsync` 實體落盤；凍結環境下優先尋找系統 Python，杜絕自我重啟主程式。
+* **TC-REG-02: 模型防反向升級與重複過濾階梯審查**
+  - **測試情境**：檢驗 `_build_monotonic_model_ladder` 排序邏輯。
+  - **操作步驟**：若使用者設定主要模型為輕量版（如 `gemini-3.5-flash-lite`），備援模型配置高階版（如 `gemini-3.8-flash`）。
+  - **預期結果**：階梯建構時依據 `PRESET_MODELS` 索引進行單調遞增檢查，嚴格剔除高階模型，防止反向切換。
+  - **代碼語意錨點**：`MultiAccountAPIEngine._build_monotonic_model_ladder` 內 `tier_idx < max_tier_idx` 檢查處。
 
-* **TC-REG-03: 雙錨點唯一性 (count==1) 與 SHA-256 數位印章門禁**
-  - **測試情境**：手動篡改預覽文字或破壞錨點。
-  - **語意錨點**：`save_and_backup_dict 內 緊鄰 anchor_count != 1 / current_hash != expected_hash 處`
-  - **操作步驟**：刪除 EOF 標記或修改一個字元後點擊存檔。
-  - **預期結果**：第 0 秒硬阻斷存檔，磁碟檔案 0 污染，保留快照供重試。
-
----
+* **TC-REG-03: SCRIPT_DIR 路徑錨定防退化審查**
+  - **測試情境**：由其他磁碟目錄（如 `D:\other\`）啟動位於專案目錄之腳本。
+  - **操作步驟**：調用 `_resolve_app_path("")` 與 `_resolve_app_path("config.json")`。
+  - **預期結果**：空字串輸入安全回傳 `""`（絕不退化為 `"."`）；相對路徑精確拼接至腳本所在之 `SCRIPT_DIR`，絕不在啟動目錄生成孤兒設定檔。
+  - **代碼語意錨點**：全域頂層 `_resolve_app_path` 函式宣告處。
 
 #### ⚠️ 維度三：架構風險與極端情境識別 (TC-RISK-xx)
 
-* **TC-RISK-01: 全量高負載 Prompt 字元數前哨預警**
-  - **測試情境**：選擇全量字典且無微創切片，字元數超過 35,000。
-  - **語意錨點**：`create_task_snapshot 內 緊鄰 is_heavy_load = True 處`
-  - **操作步驟**：載入大日誌與全量雙字典，啟動任務。
-  - **預期結果**：彈出黃底 Toast「⚠️ 注意：本次為高負載全量字典請求，已啟用防風控保護！」，提示操作員注意負載。
+* **TC-RISK-01: 微創存檔前動態重讀與檔案不存在阻斷驗證 (`BK-04`)**
+  - **測試情境**：在記憶體中持有修復快照時，外部故意手動刪除或更名目標字典檔案。
+  - **操作步驟**：點選介面 `[💾 微創縫合更新字典]`。
+  - **預期結果**：系統立即動態重新載入 `config.json` 解析路徑，發現實體檔案不存在時立即彈出錯誤對話框阻斷存檔；**保留快照與存檔按鈕**，禁止回報成功。
+  - **代碼語意錨點**：`SentinelGUI._on_save_stitched_dict` 方法內 `missing_details` 檢查與 `messagebox.showerror` 處。
 
-* **TC-RISK-02: 180s 退避倒數期間關閉視窗安全停機**
-  - **測試情境**：退避 180s 期間點擊視窗右上角關閉按鈕。
-  - **語意錨點**：`_sleep_with_heartbeat 內 緊鄰 while remaining_seconds > 0 and self.is_running: 處`
-  - **操作步驟**：在橘色退避倒數進行中關閉視窗。
-  - **預期結果**：`_on_closing` 觸發 `is_running=False`，迴圈於 1 秒內中斷退出，無背景殘留執行緒，無 `TclError`。
+* **TC-RISK-02: 連通性測試防並發與狀態列解鎖安全**
+  - **測試情境**：快速連續點擊「🔌 連通測試」按鈕，或測試期間觸發異常。
+  - **操作步驟**：推演 `_on_test_api_connection` 之執行緒流程。
+  - **預期結果**：進入點立即調用 `btn_top_test.config(state="disabled")`，背景 Worker 配備 `try...finally` 保底停止碼錶並恢復按鈕狀態，無死鎖。
+  - **代碼語意錨點**：`SentinelGUI._on_test_api_connection` 方法內 `worker` 函式之 `finally` 區塊。
 
-* **TC-RISK-03: UI 生命週期防禦 (消除 TclError 噪聲)**
-  - **測試情境**：異步線程回呼於視窗銷毀瞬間派發 UI 更新。
-  - **語意錨點**：`update_status / _show_alert_banner 內 緊鄰 not self.root.winfo_exists() 處`
-  - **操作步驟**：審查異步回呼是否前置驗證 `winfo_exists()`。
-  - **預期結果**：銷毀後之排程立即靜默返回，Console 0 報錯。
-
----
+* **TC-RISK-03: 離線接力手動修補與 SHA-256 印章防調包門禁**
+  - **測試情境**：未配置 API Key 情況下，於外部接力分頁貼上修復正則，隨後手動篡改預覽框字元。
+  - **操作步驟**：點選驗證解鎖後，於 `txt_s2` 文字框修改任意字元，點擊存檔。
+  - **預期結果**：SHA-256 數位印章即時校驗失敗，彈出「預覽內容已被更動」阻斷警告，字典原檔維持 0 污染。
+  - **代碼語意錨點**：`SentinelGUI._on_save_stitched_dict` 內 `FileEncodingIO.calculate_sha256_text(current_s2_text) != expected_hash` 處。
 
 #### 🏛️ 維度四：靜態資料庫殘缺自癒推演 (TC-DEBT-xx)
 
-* **TC-DEBT-01: 舊版組態 base_delay_seconds 與 max_retries 數值遷移**
-  - **測試情境**：載入 `v1.3.3` 之 `config.json`（內含 `base_delay_seconds: 2.0`、`max_retries: 3`）。
-  - **語意錨點**：`load_config 內 緊鄰 if delay_val < 10.0: delay_val = 180.0 處`
-  - **操作步驟**：模擬讀取舊設定檔。
-  - **預期結果**：自動將小於 10.0 的延遲安全遷移夾限至 `180.0`，`max_retries` 夾限在 `1~5`，預設為 `1`。
+* **TC-DEBT-01: 舊版組態檔案防風控參數自動遷移推演**
+  - **測試情境**：模擬本機存在 `v1.2.3` 舊版 `config.json`（`base_delay_seconds=2.0`、`max_retries=3`、`retry_route_policy="horizontal_first"`、`gemini_model="gemini-3.7-flash"`）。
+  - **操作步驟**：呼叫 `ConfigManager.load_config()`。
+  - **預期結果**：`_migrate_config` 自動將退避校正為 `180.0`，重試次數收斂為 `1`，路線轉為 `"vertical_first"`，模型更新為 `"gemini-3.8-flash"`，補齊 `request_timeout_seconds=300.0`，並原子寫回磁碟。
+  - **代碼語意錨點**：`ConfigManager._migrate_config` 方法內各項條件判斷處。
 
-* **TC-DEBT-02: 舊版 account_dispatch_mode 與 retry_route_policy 枚舉容錯**
-  - **測試情境**：舊組態包含 `horizontal_first` 策略。
-  - **語意錨點**：`call_gemini_api 內 緊鄰 if route_policy == "horizontal_first": route_policy = "vertical_first" 處`
-  - **操作步驟**：執行 API 調度。
-  - **預期結果**：運行期自動重導向至 `vertical_first` 單帳號垂直降階，徹底杜絕自動跨 Key 輪詢。
+* **TC-DEBT-02: 空路徑與殘缺字典解析之真空態阻斷推演**
+  - **測試情境**：組態中字典路徑指向 0 位元組空檔案或無效路徑。
+  - **操作步驟**：呼叫 `check_dictionaries(["empty.txt"])`。
+  - **預期結果**：解析切片數為 0，安全構造 `VACUUM_STATE_ZERO_SLICES` 致命衝突項目，鎖死黃金基準線備份寫入，CLI 輸出真空態阻斷提示。
+  - **代碼語意錨點**：`check_dictionaries` 函式內 `if not has_valid_data:` 處理分支處。
 
 ---
 
 ### 3. 驗收報告格式要求 (Mandatory Output Schema)
 
 #### 3.1 測試環境與涵蓋範圍總覽
-- 目標版本：`v1.3.4`
-- 語系：`繁體中文 (UTF-8-SIG)`
-- 豁免清單：`4 項已登錄 By-Design 項目`
-- Profile：`Profile-BackendScript`
+* **目標版本**：`v1.2.4`
+* **目標語系**：`繁體中文 (PCRE 正則字典檢測專用)`
+* **By-Design 豁免**：4 項（風控阻斷 0 重試、單帳號鎖定、CLI 預檢不備份、遠端情境池隔離）
+* **測試 Profile**：`Profile-BackendScript`
+* **代碼規模**：單一完整可執行腳本，無截斷，無語法隱患。
 
 #### 3.2 四大維度逐項檢驗表格
 
-| 案例編號 | 測試維度 | 實體代碼語意錨點 | 預期結果摘要 | 終審標籤 |
-| :--- | :--- | :--- | :--- | :--- |
-| **TC-NEW-01** | 新功能 | `create_task_snapshot 內 緊鄰 candidate_profiles = [chosen]` | 候選帳號長度恆等於 1，禁止跨 Key 輪詢 | `[PASS]` |
-| **TC-NEW-02** | 新功能 | `raw_sdk_call 內 緊鄰 types.HttpRetryOptions(attempts=1)` | SDK 顯式配置 attempts=1，0 隱形重試 | `[PASS]` |
-| **TC-NEW-03** | 新功能 | `call_gemini_api 內 緊鄰 is_risk_block / is_daily_quota_error` | 重大風控 Fast-Exit，配額用罄 0s 降階 | `[PASS]` |
-| **TC-NEW-04** | 新功能 | `run_auto_pipeline._pipeline 內 緊鄰 range(5, 0, -1)` | 雙階自動管線強制 5.0 秒安全生理緩衝 | `[PASS]` |
-| **TC-REG-01** | 防迴歸 | `validate_pcre_syntax 內 緊鄰 pcre2_verb_pattern = re.compile` | 正則字元類無回溯二義性，防 ReDoS | `[PASS]` |
-| **TC-REG-02** | 防迴歸 | `save_and_backup_dict 內 緊鄰 f.flush(); os.fsync(f.fileno())` | 哨兵暫存檔實體刷盤，凍結環境 Python 適配 | `[PASS]` |
-| **TC-REG-03** | 防迴歸 | `save_and_backup_dict 內 緊鄰 anchor_count != 1` | 雙錨點唯一性與 SHA-256 印章門禁存活 | `[PASS]` |
-| **TC-RISK-01**| 架構風險 | `create_task_snapshot 內 緊鄰 is_heavy_load = True` | 全量字典 Prompt > 35k 字元前哨預警 | `[PASS]` |
-| **TC-RISK-02**| 架構風險 | `_sleep_with_heartbeat 內 緊鄰 while remaining_seconds > 0` | 180s 退避倒數期間關窗 1s 內安全停機 | `[PASS]` |
-| **TC-RISK-03**| 架構風險 | `update_status 內 緊鄰 not self.root.winfo_exists()` | 異步 UI 派發前置存在性檢查，0 TclError | `[PASS]` |
-| **TC-DEBT-01**| 資料自癒 | `load_config 內 緊鄰 if delay_val < 10.0: delay_val = 180.0` | 舊延遲自動遷移至 180s，max_retries 夾限 | `[PASS]` |
-| **TC-DEBT-02**| 資料自癒 | `call_gemini_api 內 緊鄰 route_policy = "vertical_first"` | horizontal_first 運行期自動安全重導向 | `[PASS]` |
+| 案例編號 | 檢驗維度 | 測試操作與核心驗證標的 | 實體代碼邏輯錨點 | 終審標籤 |
+| :--- | :--- | :--- | :--- | :---: |
+| **TC-NEW-01** | 維度一 | CLI `--cli-check` 預檢介面與專屬標記 | `main` 內 `add_argument("--cli-check")` | `[PASS]` |
+| **TC-NEW-02** | 維度一 | 單帳號鎖定架構 (`ordered_profiles` 恆為 1) | `_create_task_snapshot` 帳號截斷處 | `[PASS]` |
+| **TC-NEW-03** | 維度一 | 禁絕 SDK 隱形重試與單次請求逾時注入 | `raw_sdk_call` 內 `HttpRetryOptions` 處 | `[PASS]` |
+| **TC-NEW-04** | 維度一 | 180s 長週期冷卻與雙階 5 秒生理緩衝 | `_run_auto_healing_pipeline` 緩衝處 | `[PASS]` |
+| **TC-REG-01** | 維度二 | 四維異常分類器五級順位判定 | `_classify_exception` 順位判斷處 | `[PASS]` |
+| **TC-REG-02** | 維度二 | 模型防反向升級與重複過濾階梯 | `_build_monotonic_model_ladder` 處 | `[PASS]` |
+| **TC-REG-03** | 維度二 | `SCRIPT_DIR` 跨目錄呼叫錨定防退化 | `_resolve_app_path` 函式宣告處 | `[PASS]` |
+| **TC-RISK-01** | 維度三 | 微創存檔前動態重讀與檔案不存在阻斷 | `_on_save_stitched_dict` 存在性檢查處 | `[PASS]` |
+| **TC-RISK-02** | 維度三 | 連通測試防並發與狀態列解鎖安全 | `_on_test_api_connection` 內 `finally` 處 | `[PASS]` |
+| **TC-RISK-03** | 維度三 | 離線接力驗證與 SHA-256 印章防調包 | `_on_save_stitched_dict` 印章比對處 | `[PASS]` |
+| **TC-DEBT-01** | 維度四 | 舊版組態防風控參數自動安全遷移 | `ConfigManager._migrate_config` 處 | `[PASS]` |
+| **TC-DEBT-02** | 維度四 | 殘缺空字典之真空態物理阻斷防護 | `check_dictionaries` 真空態構造處 | `[PASS]` |
 
 #### 3.2.1 🕹️ 人類實機操作核對專區 (Manual Live Verification Area)
 
 | 實機項目編號 | 驗證操作目標 | 實體代碼對應邏輯錨點 | 實機回填要求 | 當前專區狀態 |
-| :--- | :--- | :--- | :--- | :--- |
-| **MV-01** | 雙階自動流水線 5 秒緩衝手動計時 | `run_auto_pipeline._pipeline 內 緊鄰 雙階安全生理緩衝中 處` | 實機點擊自動優化，確認階段一切換至階段二時狀態列倒數 5 秒且間隔約 5 秒 | 待回填 |
-| **MV-02** | PyInstaller 凍結執行檔開啟哨兵 | `launch_sentinel_gui 內 緊鄰 shutil.which("python") 處` | 於打包 `.exe` 環境點擊「🛠️ 開啟哨兵搶救」，驗證是否正確喚醒哨兵而不重啟主程式 | 待回填 |
+| :--- | :--- | :--- | :--- | :---: |
+| **MV-01** | 上游雷達命令列預檢串接實測 | `run_cli_precheck` 入口處 | 於 CMD 執行 `python 正則衝突檢測守衛.py --cli-check test.txt`，貼回含 `🚨 檢測到致命語意對沖` 之 stdout 與 exit code | 待回填 |
+| **MV-02** | 跨目錄啟動設定檔讀取實測 | `ConfigManager.CONFIG_FILE` 處 | 切換至 `C:\` 磁碟根目錄啟動腳本，驗證正確讀取本體目錄之 `config.json` | 待回填 |
+| **MV-03** | 雙階自癒 5 秒生理緩衝視覺展示 | `_run_auto_healing_pipeline` 內倒數處 | 觸發一次自癒，觀察狀態列是否如期展示 5 秒倒數且未遭阻塞卡死 | 待回填 |
 
 #### 3.3 🚨 發現之缺陷與異常清單 (Defects & Observations)
-* 無阻塞性缺陷（0 項 P0/P1 缺陷，全數通過白箱審查）。
+* 本次靜態白箱審查未檢出任何 P0/P1 缺陷，全量 12 項測試案例均達標。
 
 #### 3.3.1 🧬 清單外白箱代碼缺陷 (Off-List Static Vulnerabilities)
 * 無清單外白箱漏洞。
 
+---
+
 #### 3.4 最終 PASS / FAIL 簽核結論與發布建議
 
-【6-A 技術手冊封存核准】  
-本輪 12 項靜態測試案例（TC-NEW-01~04, TC-REG-01~03, TC-RISK-01~03, TC-DEBT-01~02）全數為 `[PASS]`，無未決之 `[🟡 未決待處置]` 標籤，白箱代碼推演與防風控規格 100% 閉環。依據 QP-13 規範：
-1. **即刻簽發【6-A 技術手冊封存核准】，正式解除 ENG（研發工程）之代碼交付責任**！
-2. 3.2.1 專區中之實機核對項（MV-01、MV-02）解耦移入【6-B 維運與動態追蹤待辦】，由現場維運人員於實機環境回填，不阻礙本次代碼定錨與交接手冊撰寫。
+### 🏆 簽核結論：【6-A 技術手冊封存核准】
+
+* **審查判定**：全量 12 項靜態測試案例（TC-NEW 4 項、TC-REG 3 項、TC-RISK 3 項、TC-DEBT 2 項）100% 達成 `[PASS]` 標籤閉環；無未決之 `[🟡 未決待處置]` 項目。
+* **交付責任解除宣告**：依據 QP-13🚀 規格，**正式簽發【6-A 技術手冊封存核准】，解除 ENG 交付責任，代碼即刻准予合併並封存！**
+* **6-B 維運管理解耦追蹤**：3.2.1 專區中 3 項實機操作驗證（`MV-01`、`MV-02`、`MV-03`）獨立轉入【6-B 維運與動態追蹤待辦】，供現場維運人員驗證回填，不阻礙本輪代碼封存。
 
 ---
 
-🔔 **後續指令指引**：
-代碼已通過 6-A 白箱封存驗收。請使用者直接調用您既有的《交接檔生成指令》，指派 ENG 依據《審核雷達正則維護工具 v1.3.4.py》最新原始碼 AST 正式產出《審核雷達正則維護工具 v1.3.4 交接檔.txt》。本實例將持續保持【肆、交接檔審查模式】常駐監聽。
+## 【肆、 跨輪次任務切換解除鎖定協定 (Task Switch Hook)】
+
+> 📡 **監聽器就緒**：本輪 QATP 驗收報告已正式簽發完成。系統已進入常駐監聽狀態，後續接收到《技術交接文檔》時，將立即啟動反倒嚼熔斷與 `A + B + C + D = N` 數學閉環核驗。
