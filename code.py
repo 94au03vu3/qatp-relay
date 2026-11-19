@@ -389,9 +389,13 @@ class ConfigManager:
 
 
     @classmethod
-    def _migrate_config(cls, config: Dict[str, Any]) -> bool:
+    def _migrate_config(cls, config: Dict[str, Any], is_legacy: Optional[bool] = None) -> bool:
         """執行舊版模型與防風控參數安全遷移收斂"""
         migrated = False
+
+
+        if is_legacy is None:
+            is_legacy = ("request_timeout_seconds" not in config) or (config.get("request_timeout_seconds") is None)
 
 
         if config.get("gemini_model") == "gemini-3.7-flash":
@@ -423,7 +427,11 @@ class ConfigManager:
             retries_val = int(config.get("max_retries", 1))
         except (TypeError, ValueError):
             retries_val = 99
-        if retries_val > 5 or retries_val < 1:
+        if is_legacy:
+            if config.get("max_retries") != 1:
+                config["max_retries"] = 1
+            migrated = True
+        elif retries_val > 5 or retries_val < 1:
             config["max_retries"] = 1
             migrated = True
 
@@ -449,6 +457,7 @@ class ConfigManager:
     def load_config(cls) -> Dict[str, Any]:
         config = json.loads(json.dumps(DEFAULT_CONFIG))
         need_save = False
+        is_legacy = False
 
 
         if os.path.exists(cls.CONFIG_FILE):
@@ -456,6 +465,7 @@ class ConfigManager:
                 content = FileEncodingIO.read_file(cls.CONFIG_FILE)
                 data = json.loads(content)
                 if isinstance(data, dict):
+                    is_legacy = ("request_timeout_seconds" not in data) or (data.get("request_timeout_seconds") is None)
                     missing_keys = [k for k in DEFAULT_CONFIG if k not in data]
                     cls.deep_merge(DEFAULT_CONFIG, data)
                     config = data
@@ -493,7 +503,7 @@ class ConfigManager:
             need_save = True
 
 
-        if cls._migrate_config(config):
+        if cls._migrate_config(config, is_legacy=is_legacy):
             need_save = True
 
 
