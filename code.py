@@ -1,76 +1,42 @@
 # -*- coding: utf-8 -*-
-__version__ = "1.3.3"
-"""
-小說審核雷達正則維護工具 v1.3.3 (存檔組態閉環、可調請求逾時、模型調優與同源實戰加固版)
-- 雙階正則優化流水線 (雷達工程師提案 ➔ 雷達 QA 複決審核)
-- 具備指數退避重試 (Exponential Backoff + Full Jitter) 與多階模型備援
-- 支援雙字典對照切換、時間戳自動 .bak 備份 (含同秒防撞) 與雙重原子替換 (os.replace + fsync)
-- 支援日誌檔案拖曳載入 (TkinterDnD 平滑降級相容)
-- 全線程安全 (Thread-Safe) 派發與空內容防清空寫入阻斷
-- 🔑 v1.0.4 ~ v1.3.2 核心防迴歸繼承：錨點物理唯一性門禁 (count == 1)、SHA-256 數位印章防調包、
-  第 0 秒本機極速硬阻斷 (0ms)、記憶體微創切片與原地縫合、固化告警橫幅、哨兵記憶體原子預檢門禁、
-  微創縫合多區塊去重置換、頁籤 2 寬度動態貼合、全域滾輪穿透、路徑反斜線正規化、快速開啟檢驗、
-  世代隔離碼錶、PCRE2 回溯控制動詞安全置換與致命黑名單、歷史看板滾輪隔離。
-- 🌟 v1.3.3 重大升級與強化：
-  1. 【BL-new-01 存檔重讀閉環與原子強化】：執行前零秒攔截空/缺目標字典；存檔前重讀 config.json
-     選擇性同步 6 鍵、未儲存路徑差異警示、切片磁碟目標檢驗及失敗快照保留；雙重寫入補齊 flush/fsync。
-  2. 【BL-new-02 可調逾時與 2026-11 模型階梯】：新增 request_timeout_seconds (預設 300s，10~600s)，
-     共用 PRESET_MODELS 並汰除重路由模型、實作防反向升級過濾及執行期頂部選單連動鎖定。
-  3. 【BL-new-03 同源實戰加固】：底欄雙層動態折行且耗時前置；碼錶/退避心跳互鎖；404/429 授權誤差隔離；
-     零依賴 GBK/Big5 啟發式裁決；WM_DELETE_WINDOW 安全停機與剪貼簿/橫幅防護。
-  4. 【BL-next-01~06 技術債收斂】：API Key 雜湊黑名單、測試帳號降級明示、主執行緒快照提交、
-     歷史看板東亞字寬對齊、同秒備份防撞及 Toast 銷毀存在性檢查。
-"""
-
-
-import copy
 import os
 import sys
-
-
-# 🛡️ 遞迴深度防護宣告 (防止 PyInstaller 打包深度溢出)
 sys.setrecursionlimit(5000)
 
 
-import hashlib
+# 頂層版本號規範宣告 (AC-01: 於前 10 行內明確宣告)
+__version__ = "1.5.5"
+
+
+import copy
 import json
 import re
 import shutil
 import threading
 import time
 import random
-import subprocess
-import unicodedata
+import hashlib
 from datetime import datetime
+from collections import OrderedDict
 import tkinter as tk
 from tkinter import ttk, scrolledtext, filedialog
 
 
 # ---------------------------------------------------------------------------
-# 0. 執行路徑與備份目錄解析 (路徑一律 Windows 反斜線正規化)
+# 0. 取得工具腳本所在的絕對路徑與 bak 資料夾路徑
 # ---------------------------------------------------------------------------
 if getattr(sys, 'frozen', False):
-    SCRIPT_DIR = os.path.normpath(os.path.dirname(sys.executable))
+    SCRIPT_DIR = os.path.dirname(sys.executable)
 else:
-    SCRIPT_DIR = os.path.normpath(os.path.dirname(os.path.abspath(__file__)))
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-TOOL_BAK_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, "bak"))
-
-
-# ---------------------------------------------------------------------------
-# 1. 動態相容載入：TkinterDnD 拖曳模組
-# ---------------------------------------------------------------------------
-HAS_DND = False
-try:
-    from tkinterdnd2 import TkinterDnD, DND_FILES
-    HAS_DND = True
-except ImportError:
-    HAS_DND = False
+# 固定的 bak 備份目錄 (位於工具同級 bak 資料夾)
+TOOL_BAK_DIR = os.path.join(SCRIPT_DIR, "bak")
 
 
 # ---------------------------------------------------------------------------
-# 2. 動態相容載入：Gemini 官方 SDK (優先 google.genai，降級相容 google.generativeai)
+# 1. 嘗試導入 Gemini 官方 SDK (google-genai 或 google-generativeai)
 # ---------------------------------------------------------------------------
 GENAI_MODE = None
 try:
@@ -85,12 +51,53 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# 3. Toast 吐司通知元件 (無阻塞、置頂、自動銷毀浮圖)
+# 策略圖解文字規格庫 (Strategy Descriptions - v1.5.5 單帳號防風控版)
+# ---------------------------------------------------------------------------
+DISPATCH_DESCRIPTIONS = {
+    "locked": (
+        "🔒【單帳號單選鎖定 (2026-11 防風控唯一合規)】\n"
+        "• 調度邏輯：嚴格僅使用頂部「作用中帳號」目前選定的單一帳號發送請求，背景絕不自動跳轉其他帳號。\n"
+        "• ⚠️ 2026-11 防風控規範：同 IP 禁止自動跨多 Free Key 輪詢；建議單帳號階梯降階，其餘帳號槽位僅供手動切換備用。"
+    ),
+    "random": (
+        "🎲【隨機均攤 (已降級為單帳號生效)】\n"
+        "• 調度邏輯：為符合防風控規範，已徹底下線多 Key 自動輪詢；目前與「單帳號單選鎖定」相同，僅鎖定單一帳號執行。\n"
+        "• ⚠️ 2026-11 防風控規範：同 IP 禁止自動跨多 Free Key 輪詢；建議單帳號階梯降階。"
+    ),
+    "round_robin": (
+        "🔄【依序輪動 (已降級為單帳號生效)】\n"
+        "• 調度邏輯：為符合防風控規範，已徹底下線多 Key 自動輪詢；目前與「單帳號單選鎖定」相同，僅鎖定單一帳號執行。\n"
+        "• ⚠️ 2026-11 防風控規範：同 IP 禁止自動跨多 Free Key 輪詢；建議單帳號階梯降階。"
+    )
+}
+
+
+RETRY_ROUTE_DESCRIPTIONS = {
+    "vertical_first": (
+        "🛡️【單帳號垂直降階優先：3.8 ➔ 冷卻180s ➔ 3.6 ➔ 冷卻180s ➔ 3.5-lite (推薦)】\n"
+        "• 流程：在鎖定之單一帳號內依序穿透主力與備援模型；單階梯預設僅試 1 次，遇暫態 503/RPM 限流先長冷卻 (預設 180s) 後降階。\n"
+        "• ⚠️ 2026-11 防風控規範：同 IP 禁止自動跨多 Free Key 輪詢；建議單帳號階梯降階，不作高頻重複轟炸。"
+    ),
+    "quality_locked": (
+        "🚀【品質優先不降：鎖定主模型，失敗長退避】\n"
+        "• 流程：僅於鎖定之單一帳號內嘗試主要模型 (嚴禁切換備援模型)，若設定次數 > 1 則以長週期退避等待後重試。\n"
+        "• ⚠️ 2026-11 防風控規範：同 IP 禁止自動跨多 Free Key 輪詢；單帳號單模型直球對決以確保極致正則品質。"
+    ),
+    "horizontal_first": (
+        "⚡【橫向擴展 (已收斂為單帳號主模型)】\n"
+        "• 流程：因同 IP 跨帳號自動秒切已下線，本路線已收斂為僅於單一鎖定帳號嘗試主要模型。\n"
+        "• ⚠️ 2026-11 防風控規範：同 IP 禁止自動跨多 Free Key 輪詢；建議單帳號階梯降階 (vertical_first)。"
+    )
+}
+
+
+# ---------------------------------------------------------------------------
+# 2. Toast 吐司通知類別 (無阻塞、自動消失浮圖)
 # ---------------------------------------------------------------------------
 class Toast:
     @staticmethod
-    def show(root, message, duration=1800, bg="#1e1e2e", fg="#ffffff"):
-        """在視窗下方中央彈出非阻塞 Toast 提示 (必須由主執行緒呼叫)"""
+    def show(root, message, duration=1500, bg="#1e1e2e", fg="#ffffff"):
+        """在 UI 視窗下方彈出非阻塞式的 Toast 訊息浮圖"""
         try:
             top = tk.Toplevel(root)
             top.overrideredirect(True)
@@ -108,8 +115,7 @@ class Toast:
                 fg=fg,
                 font=("Microsoft YaHei UI", 10, "bold"),
                 padx=16,
-                pady=8,
-                justify=tk.CENTER
+                pady=8
             )
             lbl.pack()
 
@@ -131,33 +137,18 @@ class Toast:
             top.geometry(f"+{x}+{y}")
 
 
-            def _safe_destroy():
-                try:
-                    if top.winfo_exists():
-                        top.destroy()
-                except Exception:
-                    pass
-
-
-            root.after(duration, _safe_destroy)
+            root.after(duration, top.destroy)
         except Exception:
             pass
 
 
 # ---------------------------------------------------------------------------
-# 4. 主應用程式類別 (Stage 3 雷達正則專用維護工具)
+# 3. 主應用程式 GUI 類別 (v1.5.5 單帳號防風控、長週期冷卻與字元集回溯修補版)
 # ---------------------------------------------------------------------------
-class RadarRegexToolApp:
-    CONFIG_FILE = os.path.normpath(os.path.join(SCRIPT_DIR, "config.json"))
-    ANCHOR_TEXT = "=== 以下為優化後之完整 PCRE 正則字典條目 ==="
+class NovelRegexToolApp:
+    CONFIG_FILE = os.path.join(SCRIPT_DIR, "config.json")
+    ANCHOR_TEXT = "=== 以下為優化後之完整正則修復條目 ==="
     EOF_MARKER = "=== 字典全檔輸出結束 [EOF] ==="
-
-
-    COLOR_SAVE_NORMAL = "#059669"   # 翡翠綠
-    COLOR_SAVE_WARNING = "#dc2626"  # 告警紅
-
-
-    ENTRY_BLOCK_REGEX = re.compile(r'(?ms)^;\s*\[(?:\d+[\.、\s]*)?([^\]\s\-]+)[^\]]*\].*?(?=(?:^;\s*\[|\Z))')
 
 
     PRESET_MODELS = [
@@ -165,14 +156,8 @@ class RadarRegexToolApp:
         "gemini-3.8-flash",
         "gemini-3.6-flash",
         "gemini-3.5-flash-lite",
-        "gemini-3.1-flash-lite",
+        "gemini-3.1-flash-lite"
     ]
-
-
-    RETIRED_MODEL_ALIAS = {
-        "gemini-3.7-flash": "gemini-3.8-flash",
-        "gemini-3.5-flash": "gemini-3.6-flash",
-    }
 
 
     DEFAULT_PROFILES = [
@@ -183,171 +168,81 @@ class RadarRegexToolApp:
 
 
     DEFAULT_CONFIG = {
-        "api_profiles": DEFAULT_PROFILES,
-        "account_dispatch_mode": "random",        # "random", "round_robin", "locked"
-        "retry_route_policy": "horizontal_first",  # "horizontal_first", "quality_locked", "vertical_first"
+        "api_profiles": [
+            {"name": "帳號 1 (預設主帳)", "key": "", "note": "主金鑰"},
+            {"name": "帳號 2 (備用帳號 1)", "key": "", "note": "備援金鑰 1"},
+            {"name": "帳號 3 (備用帳號 2)", "key": "", "note": "備援金鑰 2"}
+        ],
+        "account_dispatch_mode": "locked",
+        "retry_route_policy": "vertical_first",
         "locked_account_index": 0,
         "gemini_model": "gemini-3.8-flash",
         "fallback_model_1": "gemini-3.6-flash",
         "fallback_model_2": "gemini-3.5-flash-lite",
-        "max_retries": 3,
-        "base_delay_seconds": 2.0,
+        "max_retries": 1,
+        "base_delay_seconds": 180.0,
         "request_timeout_seconds": 300.0,
         "enable_fallback": True,
         "swap_bottom_bar": False,
         "enable_click_to_copy": False,
         "enable_clear_and_paste": False,
-        "dict_path_1": os.path.normpath(os.path.join(SCRIPT_DIR, "正則查找字典.txt")),
-        "dict_path_2": os.path.normpath(os.path.join(SCRIPT_DIR, "正則查找字典2.txt")),
-        "radar_engineer_prompt_path": os.path.normpath(os.path.join(SCRIPT_DIR, "階段三雷達工程師提示詞.txt")),
-        "radar_qa_prompt_path": os.path.normpath(os.path.join(SCRIPT_DIR, "階段三雷達QA提示詞.txt")),
-        "api_key": "",
-        "enable_collision_sentinel": True,
-        "sentinel_script_path": os.path.normpath(os.path.join(SCRIPT_DIR, "正則衝突檢測守衛.py"))
-    }
-
-
-    DISPATCH_DESCRIPTIONS = {
-        "random": (
-            "🎲【隨機均攤分流 (推薦)】\n"
-            "• 調度邏輯：每次點擊任務時，從所有已填入 API Key 的有效帳號中，完全隨機挑選 1 組帳號起手。\n"
-            "• 適用場景：擁有多組免費 Tier 帳號，能最大化分散請求並發，平攤每日配額消耗，極難觸發單一帳號 503/429 尖峰排隊。"
-        ),
-        "round_robin": (
-            "🔄【依序輪動分流 (公平排程)】\n"
-            "• 調度邏輯：內部維護循環計數器，任務 A 用帳號 1 ➔ 任務 B 用帳號 2 ➔ 任務 C 用帳號 3 ➔ 循環往復。\n"
-            "• 適用場景：維護任務節奏密集、想要絕對平均耗盡各帳號每分鐘 RPM/TPM 配額的場景。"
-        ),
-        "locked": (
-            "🔒【固定鎖定指定帳號】\n"
-            "• 調度邏輯：始終優先以「帳號名稱」下拉選單目前選定的帳號起手發送。\n"
-            "• 適用場景：擁有 1 組主要付費的高速 Tier 帳號，其餘帳號僅作為緊急保底備援時使用。"
-        )
-    }
-
-
-    RETRY_ROUTE_DESCRIPTIONS = {
-        "horizontal_first": (
-            "⚡【橫向擴展優先：A主 ➔ B主 ➔ C主 ➔ 降階備援 (極限守護主模型品質)】\n"
-            "• 流程：帳號1(3.8) 遇阻 ➔ 帳號2(3.8) 遇阻 ➔ 帳號3(3.8) 遇阻 ➔ 全員失敗始切換 帳號1(3.6) 降階。\n"
-            "• 優勢：絕不輕易向降階模型妥協！只要任何一個備用帳號的主模型有空檔就立即完成，品質最高。"
-        ),
-        "quality_locked": (
-            "🚀【品質優先不降：全帳號持續輪流重試主要模型 (嚴禁降階)】\n"
-            "• 流程：帳號1(3.8) ➔ 帳號2(3.8) ➔ 帳號3(3.8) ➔ 退避重試輪動... (模型永遠鎖死 3.8，絕不切換 3.6/3.5-lite)。\n"
-            "• 優勢：追求極致 PCRE 正則嚴密品質，寧可遭遇退避等待也絕不接受次級模型生成的正則條目。"
-        ),
-        "vertical_first": (
-            "🛡️【帳號穿透優先：A主 ➔ A副1 ➔ A副2 ➔ B主 ➔ B副... (單帳號深度穿透)】\n"
-            "• 流程：帳號1(3.8) 遇阻 ➔ 帳號1(3.6) 遇阻 ➔ 帳號1(3.5-lite) 耗盡 ➔ 始切換 帳號2(3.8) 重新來過。\n"
-            "• 優勢：傳統保守策略，盡可能集中在單一帳號內完成模型階梯切換，適合主帳號配額充足但偶發特定模型 503 之場景。"
-        )
+        "repair_dict_path": r"E:\備份\Desktop\Node.js\JS專案腳本\小說繁化轉換\本地正則修復\嚴格正則修復字典.txt",
+        "engineer_prompt_path": r"E:\備份\Desktop\Node.js\JS專案腳本\小說繁化轉換\本地正則修復\字典工程師專用維護提示詞.txt",
+        "qa_prompt_path": r"E:\備份\Desktop\Node.js\JS專案腳本\小說繁化轉換\本地正則修復\字典維護QA提示詞.txt",
+        "api_key": ""
     }
 
 
     def __init__(self, root):
         self.root = root
-        dnd_title_suffix = " (支援拖曳)" if HAS_DND else " (未安裝拖曳庫)"
-        self.root.title(
-            f"小說審核雷達正則維護工具 v{__version__} - 階段三審核專用 "
-            f"(碼錶隔離、請求逾時與雙階閉環加固版){dnd_title_suffix}"
-        )
+        self.root.title(f"本地正則修復維護工具 v{__version__}")
         self.root.geometry("1200x950")
         self.root.minsize(1000, 750)
 
 
         self.default_font = ("Microsoft YaHei UI", 9)
         self.bold_font = ("Microsoft YaHei UI", 9, "bold")
-        self.code_font = ("Consolas", 9)
 
 
-        # 狀態與選擇變數
-        self.selected_dict_for_ai = tk.StringVar(value="dict1")
+        # 實例狀態與互斥旗標
+        self.is_running = False
+        self.last_task_snapshot = None
+        self.rr_counter = 0  # 依序輪動計數器 (保留實例屬性相容性)
 
 
-        # 載入與校正組態
+        # 碼錶世代隔離相關實例屬性
+        self.stopwatch_running = False
+        self.stopwatch_start_time = 0.0
+        self.stopwatch_prefix = ""
+        self.stopwatch_detail = ""
+        self.stopwatch_token = 0
+        self.stopwatch_after_id = None
+        self.heartbeat_active = False
+
+
+        # 載入設定
         self.config = self.load_config()
 
 
-        # 介面變數
+        # UI 狀態變數綁定
         self.var_click_to_copy = tk.BooleanVar(value=bool(self.config.get("enable_click_to_copy", False)))
         self.var_clear_and_paste = tk.BooleanVar(value=bool(self.config.get("enable_clear_and_paste", False)))
         self.var_swap_bottom_bar = tk.BooleanVar(value=bool(self.config.get("swap_bottom_bar", False)))
         self.var_enable_fallback = tk.BooleanVar(value=bool(self.config.get("enable_fallback", True)))
-        self.var_enable_sentinel = tk.BooleanVar(value=bool(self.config.get("enable_collision_sentinel", True)))
 
 
-        # 多帳號內部計數器
-        self.rr_counter = 0
+        # 關窗生命週期防護
+        self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
 
 
-        # 互斥鎖、任務快照與抗焦慮碼錶 / 心跳互鎖狀態
-        self.is_running = False
-        self.heartbeat_active = False
-        self.stopwatch_running = False
-        self.stopwatch_token = 0
-        self.stopwatch_after_id = None
-        self.last_task_snapshot = None
-        self.history_logs = []
-
-
-        # 控制項引用
-        self.top_frame = None
-        self.alert_banner = None
-        self.lbl_alert_msg = None
-        self.btn_sentinel_launch = None
-
-
-        self.account_combo = None
-        self.model_combo = None
-        self.test_btn = None
-        self.btn_auto = None
-        self.btn_clear = None
-        self.chk_clear_and_paste = None
-        self.chk_click_to_copy = None
-        self.btn_s1 = None
-        self.btn_s2 = None
-        self.btn_save = None
-        self.btn_copy = None
-        self.lbl_status = None
-        self.action_bar = None
-        self.action_btn_row = None
-        self.action_status_row = None
-
-
-        self.frame_s1 = None
-        self.frame_s2 = None
-        self.txt_history = None
-        self.tab2_canvas = None
-        self.tab2_scrollable_frame = None
-        self.entry_request_timeout = None
-
-
-        # 頁籤 2 畫布視窗參照
-        self.canvas_window = None
-
-
-        # 頁籤 2 多帳號輸入元件暫存清單
-        self.profile_entries = []
-
-
-        # 啟動時自動清理殘留暫存檔
-        self.cleanup_orphan_tmp_files()
-
-
-        # UI 建構
+        # UI 建構 (順序：頂部控制列 -> 固化常駐告警橫幅 -> 主分頁 Notebook)
         self.build_top_bar()
         self.build_alert_banner()
         self.build_notebook()
 
 
-        # 視窗安全關閉協議 (WM_DELETE_WINDOW)
-        self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
-
-
     def _on_closing(self):
         self.is_running = False
-        self.heartbeat_active = False
         self._stop_stopwatch()
         try:
             self.root.destroy()
@@ -355,195 +250,310 @@ class RadarRegexToolApp:
             pass
 
 
+    # -----------------------------------------------------------------------
+    # 路徑正規化輔助規則
+    # -----------------------------------------------------------------------
     @staticmethod
-    def _norm_path_or_empty(raw_path: str) -> str:
-        """安全路徑正規化：空字串維持為空字串，非空則轉標準反斜線 (UX-02)"""
-        s = str(raw_path or "").strip()
-        return os.path.normpath(s) if s else ""
-
-
-    @staticmethod
-    def _pad_display_width(text: str, width: int) -> str:
-        """依東亞字元寬度截斷並以半形空白補齊固定欄寬 (BL-next-04)"""
-        s = str(text or "")
-        out_chars = []
-        cur_w = 0
-        for ch in s:
-            w = 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
-            if cur_w + w > width:
-                break
-            out_chars.append(ch)
-            cur_w += w
-        return "".join(out_chars) + (" " * max(0, width - cur_w))
+    def _norm_path_or_empty(path_str) -> str:
+        s = str(path_str or "").strip()
+        if not s:
+            return ""
+        return os.path.normpath(s)
 
 
     # -----------------------------------------------------------------------
-    # 設定檔讀寫 (config.json) - 深拷貝、UTF-8-SIG 相容與雙重原子置換
+    # 碼錶控制器演算法 (stopwatch_token 世代隔離 + 主線程 after(0) 序列化)
+    # -----------------------------------------------------------------------
+    def _format_stopwatch_text(self, elapsed: int) -> str:
+        base = f"{self.stopwatch_prefix} (已耗時: {elapsed}s)"
+        if self.stopwatch_detail:
+            return f"{base} | {self.stopwatch_detail}"
+        return base
+
+
+    def _start_stopwatch(self, desc_prefix: str, detail_info: str = ""):
+        self.stopwatch_token += 1
+        my_token = self.stopwatch_token
+        self.stopwatch_running = True
+        self.stopwatch_start_time = time.time()
+        self.stopwatch_prefix = desc_prefix
+        self.stopwatch_detail = detail_info
+        self.heartbeat_active = False
+
+
+        def _init_on_main():
+            if not self.stopwatch_running or my_token != self.stopwatch_token:
+                return
+            if self.stopwatch_after_id is not None:
+                try:
+                    self.root.after_cancel(self.stopwatch_after_id)
+                except Exception:
+                    pass
+                self.stopwatch_after_id = None
+            try:
+                self.lbl_status.config(text=self._format_stopwatch_text(0), fg="#2563eb")
+                self.stopwatch_after_id = self.root.after(1000, lambda t=my_token: self._stopwatch_tick(t))
+            except Exception:
+                pass
+
+
+        self.root.after(0, _init_on_main)
+
+
+    def _stopwatch_tick(self, my_token: int):
+        if not self.stopwatch_running or my_token != self.stopwatch_token:
+            return
+        if not self.heartbeat_active:
+            elapsed = int(time.time() - self.stopwatch_start_time)
+            try:
+                self.lbl_status.config(text=self._format_stopwatch_text(elapsed), fg="#2563eb")
+            except Exception:
+                pass
+        if self.stopwatch_running and my_token == self.stopwatch_token:
+            try:
+                self.stopwatch_after_id = self.root.after(1000, lambda t=my_token: self._stopwatch_tick(t))
+            except Exception:
+                pass
+
+
+    def _stop_stopwatch(self):
+        self.stopwatch_running = False
+        self.stopwatch_token += 1
+        self.heartbeat_active = False
+
+
+        def _cancel_on_main():
+            if self.stopwatch_after_id is not None:
+                try:
+                    self.root.after_cancel(self.stopwatch_after_id)
+                except Exception:
+                    pass
+                self.stopwatch_after_id = None
+
+
+        self.root.after(0, _cancel_on_main)
+
+
+    # -----------------------------------------------------------------------
+    # 退避心跳控制器演算法 (秒數前置可視化，徹底消除介面假死感)
+    # -----------------------------------------------------------------------
+    def _sleep_with_heartbeat(self, total_seconds: float, stage_name: str, model_name: str, attempt: int, max_retries: int, action_label: str = "即將重試"):
+        rem = int(total_seconds)
+        frac = total_seconds - rem
+        self.heartbeat_active = True
+        try:
+            while rem > 0:
+                if not self.is_running:
+                    return
+                self.update_status(
+                    f"⏳ [{stage_name}] 退避倒數: {rem}s... {action_label} ({attempt}/{max_retries}) | 模型 {model_name} 繁忙",
+                    fg_color="#d97706"
+                )
+                time.sleep(1.0)
+                rem -= 1
+            if frac > 0 and self.is_running:
+                time.sleep(frac)
+        finally:
+            self.heartbeat_active = False
+
+
+    # -----------------------------------------------------------------------
+    # 設定檔讀寫 (config.json) - 18 鍵深層相容矩陣補全 + BOM 相容 + 原子置換
     # -----------------------------------------------------------------------
     def load_config(self):
         cfg = copy.deepcopy(self.DEFAULT_CONFIG)
         if os.path.exists(self.CONFIG_FILE):
             try:
                 with open(self.CONFIG_FILE, "r", encoding="utf-8-sig") as f:
-                    disk_cfg = json.load(f)
-                    if isinstance(disk_cfg, dict):
-                        for key, val in disk_cfg.items():
-                            cfg[key] = val
+                    loaded = json.load(f)
+                    if isinstance(loaded, dict):
+                        for key in self.DEFAULT_CONFIG.keys():
+                            if key in loaded:
+                                cfg[key] = loaded[key]
             except Exception:
                 pass
 
 
-        # 元素級深層驗證 api_profiles
+        # 相容舊版 api_key ➔ profiles[0]
         raw_profiles = cfg.get("api_profiles", [])
-        if not isinstance(raw_profiles, list):
-            raw_profiles = []
+        profiles = []
+        if isinstance(raw_profiles, list):
+            for idx, item in enumerate(raw_profiles[:3]):
+                default_p = self.DEFAULT_PROFILES[idx]
+                if isinstance(item, dict):
+                    profiles.append({
+                        "name": str(item.get("name", default_p["name"]) or default_p["name"]).strip(),
+                        "key": str(item.get("key", "") or "").strip(),
+                        "note": str(item.get("note", default_p["note"]) or "")
+                    })
+                else:
+                    profiles.append(copy.deepcopy(default_p))
 
 
-        normalized_profiles = []
-        for i, p in enumerate(raw_profiles[:3]):
-            if not isinstance(p, dict):
-                p = {}
-            normalized_profiles.append({
-                "name": str(p.get("name") or f"帳號 {i+1}").strip(),
-                "key": str(p.get("key") or "").strip(),
-                "note": str(p.get("note") or "").strip()
-            })
+        if not profiles:
+            profiles = copy.deepcopy(self.DEFAULT_PROFILES)
 
 
-        while len(normalized_profiles) < 3:
-            idx = len(normalized_profiles) + 1
-            normalized_profiles.append({"name": f"帳號 {idx}", "key": "", "note": f"備用金鑰 {idx-1}"})
+        while len(profiles) < 3:
+            idx = len(profiles)
+            profiles.append(copy.deepcopy(self.DEFAULT_PROFILES[idx]))
 
 
-        legacy_key = str(cfg.get("api_key") or "").strip()
-        if legacy_key and not normalized_profiles[0]["key"]:
-            normalized_profiles[0]["key"] = legacy_key
+        # 若舊版僅有 api_key 且 profiles[0].key 為空，自動同步
+        legacy_key = str(cfg.get("api_key", "") or "").strip()
+        if legacy_key and not profiles[0].get("key", "").strip():
+            profiles[0]["key"] = legacy_key
 
 
-        cfg["api_profiles"] = normalized_profiles
-        cfg["api_key"] = normalized_profiles[0]["key"]
+        cfg["api_profiles"] = profiles[:3]
+        cfg["api_key"] = profiles[0].get("key", "")
 
 
-        # 舊重路由模型遷移
-        if str(cfg.get("fallback_model_1", "")).strip() == "gemini-3.7-flash":
-            cfg["fallback_model_1"] = "gemini-3.6-flash"
-        if str(cfg.get("fallback_model_2", "")).strip() == "gemini-3.5-flash":
-            cfg["fallback_model_2"] = "gemini-3.5-flash-lite"
-
-
-        # 數值 Clamp 防護
-        try:
-            cfg["max_retries"] = max(1, min(10, int(cfg.get("max_retries", 3))))
-        except Exception:
-            cfg["max_retries"] = 3
-
-
-        try:
-            cfg["base_delay_seconds"] = max(0.1, min(30.0, float(cfg.get("base_delay_seconds", 2.0))))
-        except Exception:
-            cfg["base_delay_seconds"] = 2.0
-
-
-        try:
-            cfg["request_timeout_seconds"] = max(10.0, min(600.0, float(cfg.get("request_timeout_seconds", 300.0))))
-        except Exception:
-            cfg["request_timeout_seconds"] = 300.0
-
-
+        # 驗證模式與模型枚舉合法性 (v1.5.5 預設回退 locked / vertical_first)
+        if cfg.get("account_dispatch_mode") not in ["random", "round_robin", "locked"]:
+            cfg["account_dispatch_mode"] = "locked"
+        if cfg.get("retry_route_policy") not in ["horizontal_first", "quality_locked", "vertical_first"]:
+            cfg["retry_route_policy"] = "vertical_first"
         try:
             cfg["locked_account_index"] = max(0, min(2, int(cfg.get("locked_account_index", 0))))
         except Exception:
             cfg["locked_account_index"] = 0
 
 
-        # 枚舉防護
-        if cfg.get("account_dispatch_mode") not in ["random", "round_robin", "locked"]:
-            cfg["account_dispatch_mode"] = "random"
-        if cfg.get("retry_route_policy") not in ["horizontal_first", "quality_locked", "vertical_first"]:
-            cfg["retry_route_policy"] = "horizontal_first"
+        if not isinstance(cfg.get("gemini_model"), str) or not cfg.get("gemini_model", "").strip():
+            cfg["gemini_model"] = "gemini-3.8-flash"
+        else:
+            cfg["gemini_model"] = cfg["gemini_model"].strip()
 
 
-        # 5 大路徑安全正規化 (空路徑保持 ""，非空轉反斜線)
-        for path_k in ["dict_path_1", "dict_path_2", "radar_engineer_prompt_path", "radar_qa_prompt_path", "sentinel_script_path"]:
-            cfg[path_k] = self._norm_path_or_empty(cfg.get(path_k, ""))
+        if not isinstance(cfg.get("fallback_model_1"), str):
+            cfg["fallback_model_1"] = "gemini-3.6-flash"
+        else:
+            cfg["fallback_model_1"] = cfg["fallback_model_1"].strip()
+
+
+        if not isinstance(cfg.get("fallback_model_2"), str):
+            cfg["fallback_model_2"] = "gemini-3.5-flash-lite"
+        else:
+            cfg["fallback_model_2"] = cfg["fallback_model_2"].strip()
+
+
+        try:
+            cfg["max_retries"] = max(1, min(5, int(cfg.get("max_retries", 1))))
+        except Exception:
+            cfg["max_retries"] = 1
+
+
+        try:
+            delay_val = float(cfg.get("base_delay_seconds", 180.0))
+            cfg["base_delay_seconds"] = max(10.0, min(600.0, delay_val))
+        except Exception:
+            cfg["base_delay_seconds"] = 180.0
+
+
+        try:
+            timeout_val = float(cfg.get("request_timeout_seconds", 300.0))
+            cfg["request_timeout_seconds"] = max(10.0, min(600.0, timeout_val))
+        except Exception:
+            cfg["request_timeout_seconds"] = 300.0
+
+
+        for b_key, b_def in [
+            ("enable_fallback", True),
+            ("swap_bottom_bar", False),
+            ("enable_click_to_copy", False),
+            ("enable_clear_and_paste", False)
+        ]:
+            val = cfg.get(b_key, b_def)
+            cfg[b_key] = bool(val) if isinstance(val, (bool, int)) else b_def
+
+
+        for p_key in ("repair_dict_path", "engineer_prompt_path", "qa_prompt_path"):
+            raw_p = cfg.get(p_key, "")
+            cfg[p_key] = self._norm_path_or_empty(raw_p if isinstance(raw_p, str) else "")
 
 
         return cfg
 
 
     def save_config(self):
-        tmp_cfg_path = self.CONFIG_FILE + ".tmp"
+        cfg_dir = os.path.dirname(self.CONFIG_FILE) or SCRIPT_DIR
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        random_id = f"{random.randint(1000, 9999)}"
+        temp_cfg_path = os.path.join(cfg_dir, f"{os.path.basename(self.CONFIG_FILE)}.tmp_{timestamp}_{random_id}")
+
+
         try:
-            with open(tmp_cfg_path, "w", encoding="utf-8") as f:
+            # 保持 profiles[0].key 與 api_key 雙向同步
+            if self.config.get("api_profiles") and len(self.config["api_profiles"]) > 0:
+                self.config["api_key"] = self.config["api_profiles"][0].get("key", "").strip()
+
+
+            os.makedirs(cfg_dir, exist_ok=True)
+            with open(temp_cfg_path, "w", encoding="utf-8", newline="\n") as f:
                 json.dump(self.config, f, ensure_ascii=False, indent=2)
+                f.write("\n")
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(tmp_cfg_path, self.CONFIG_FILE)
+
+
+            os.replace(temp_cfg_path, self.CONFIG_FILE)
         except Exception as e:
-            Toast.show(self.root, f"❌ 設定檔儲存失敗: {str(e)}", bg="#ef4444", fg="#ffffff")
+            Toast.show(self.root, f"❌ 設定檔儲存失敗: {str(e)}", bg="#f38ba8", fg="#11111b")
         finally:
-            if os.path.exists(tmp_cfg_path):
+            if os.path.exists(temp_cfg_path):
                 try:
-                    os.remove(tmp_cfg_path)
+                    os.remove(temp_cfg_path)
                 except Exception:
                     pass
 
 
-    def get_active_profiles(self) -> list[dict]:
-        profiles = self.config.get("api_profiles", [])
-        valid = [p for p in profiles if isinstance(p, dict) and p.get("key", "").strip()]
-        return valid
+    def _warn_unsaved_path_diffs(self, reference_cfg: dict):
+        """比對 Tab 2 路徑輸入框與磁碟/已儲存設定是否有未儲存差異"""
+        try:
+            if not (hasattr(self, "entry_dict_path") and hasattr(self, "entry_eng_path") and hasattr(self, "entry_qa_path")):
+                return
+            checks = [
+                ("修復字典路徑", self.entry_dict_path.get(), reference_cfg.get("repair_dict_path", "")),
+                ("工程師提示詞路徑", self.entry_eng_path.get(), reference_cfg.get("engineer_prompt_path", "")),
+                ("QA 提示詞路徑", self.entry_qa_path.get(), reference_cfg.get("qa_prompt_path", ""))
+            ]
+            diffs = []
+            for label, ui_val, cfg_val in checks:
+                if self._norm_path_or_empty(ui_val) != self._norm_path_or_empty(cfg_val):
+                    diffs.append(label)
+            if diffs:
+                Toast.show(
+                    self.root,
+                    f"⚠️ 偵測到設定頁「{', '.join(diffs)}」尚未點擊儲存！\n本次操作將以已儲存之 config.json 為準。",
+                    duration=2800,
+                    bg="#f59e0b",
+                    fg="#000000"
+                )
+        except Exception:
+            pass
 
 
     # -----------------------------------------------------------------------
-    # 臨時檔清理器
-    # -----------------------------------------------------------------------
-    def cleanup_orphan_tmp_files(self):
-        def _cleanup():
-            now = time.time()
-            target_dirs = {SCRIPT_DIR}
-            for k in ["dict_path_1", "dict_path_2"]:
-                p = self._norm_path_or_empty(self.config.get(k, ""))
-                if p and os.path.exists(os.path.dirname(p)):
-                    target_dirs.add(os.path.dirname(p))
-
-
-            for d in target_dirs:
-                if not os.path.exists(d):
-                    continue
-                try:
-                    for f in os.listdir(d):
-                        if f.endswith(".tmp") or ".sentinel_dryrun.tmp" in f or ".tmp_" in f:
-                            fp = os.path.join(d, f)
-                            if os.path.isfile(fp):
-                                try:
-                                    if now - os.path.getmtime(fp) > 600:
-                                        os.remove(fp)
-                                except Exception:
-                                    pass
-                except Exception:
-                    pass
-
-
-        threading.Thread(target=_cleanup, daemon=True).start()
-
-
-    # -----------------------------------------------------------------------
-    # 模組 1：頂部控制列
+    # UI Component 1: 頂部固定列 (支援手動切換鎖定帳號)
     # -----------------------------------------------------------------------
     def build_top_bar(self):
-        self.top_frame = ttk.LabelFrame(self.root, text="🔑 Gemini API 帳號調度與模型設定", padding=10)
+        self.top_frame = ttk.LabelFrame(self.root, text="🔑 Gemini API 帳號與模型設定 (單帳號鎖定模式)", padding=10)
         self.top_frame.pack(fill=tk.X, padx=10, pady=5)
 
 
-        ttk.Label(self.top_frame, text="作用帳號:").grid(row=0, column=0, sticky=tk.W, padx=5)
-        self.account_combo = ttk.Combobox(self.top_frame, width=28, state="readonly")
-        self.refresh_top_account_combo()
+        ttk.Label(self.top_frame, text="作用中帳號:").grid(row=0, column=0, sticky=tk.W, padx=5)
+
+
+        self.account_combo = ttk.Combobox(self.top_frame, width=30, state="readonly")
+        self.update_top_account_combo_values()
         self.account_combo.grid(row=0, column=1, padx=5, sticky=tk.W)
         self.account_combo.bind("<<ComboboxSelected>>", self.on_top_account_selected)
 
 
-        ttk.Label(self.top_frame, text="主要模型:").grid(row=0, column=2, sticky=tk.W, padx=(10, 5))
+        ttk.Label(self.top_frame, text="模型名稱:").grid(row=0, column=2, sticky=tk.W, padx=(10, 5))
+
+
         self.model_combo = ttk.Combobox(self.top_frame, values=self.PRESET_MODELS, width=22)
         current_model = self.config.get("gemini_model", "gemini-3.8-flash")
         self.model_combo.set(current_model)
@@ -564,30 +574,86 @@ class RadarRegexToolApp:
         sdk_lbl.grid(row=0, column=6, padx=10)
 
 
-    def refresh_top_account_combo(self):
-        profiles = self.config.get("api_profiles", [])
-        mode = self.config.get("account_dispatch_mode", "random")
+    # -----------------------------------------------------------------------
+    # UI Component 1.5: 固化常駐告警橫幅容器及其生命週期狀態機
+    # -----------------------------------------------------------------------
+    def build_alert_banner(self):
+        self.alert_banner = tk.Frame(
+            self.root,
+            bg="#fef2f2",
+            highlightbackground="#f87171",
+            highlightthickness=1
+        )
+        self.lbl_alert_msg = tk.Label(
+            self.alert_banner,
+            text="",
+            bg="#fef2f2",
+            fg="#991b1b",
+            font=self.bold_font,
+            justify=tk.LEFT,
+            anchor="w",
+            wraplength=1000
+        )
+        self.lbl_alert_msg.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 5), pady=6)
 
 
-        mode_tags = {
-            "random": "[🎲隨機起手]",
-            "round_robin": "[🔄輪動起手]",
-            "locked": "[🔒固定鎖定]"
-        }
-        tag = mode_tags.get(mode, "")
+        self.btn_close_alert = tk.Button(
+            self.alert_banner,
+            text="✕",
+            bg="#fef2f2",
+            fg="#991b1b",
+            activebackground="#fee2e2",
+            font=self.bold_font,
+            relief=tk.FLAT,
+            bd=0,
+            padx=8,
+            pady=2,
+            cursor="hand2",
+            command=self._hide_alert_banner
+        )
+        self.btn_close_alert.pack(side=tk.RIGHT, padx=(5, 10), pady=6)
 
 
-        items = []
-        for i, p in enumerate(profiles):
-            name = p.get("name", f"帳號 {i+1}").strip()
-            key = p.get("key", "").strip()
-            status_str = "已配鑰" if key else "未配鑰"
-            items.append(f"{i+1}. {name} ({status_str}) {tag}")
+        # 預設完全收合隱藏，物理高度為 0
+        self.alert_banner.pack_forget()
 
 
-        self.account_combo.config(values=items)
-        locked_idx = self.config.get("locked_account_index", 0)
-        if 0 <= locked_idx < len(items):
+    def _show_alert_banner(self, err_title: str, err_detail: str):
+        def _do_show():
+            full_msg = f"🚨 【{err_title}】\n{err_detail}"
+            self.lbl_alert_msg.config(text=full_msg)
+            # 僅於 notebook 已建構完成時附帶 before=self.notebook，確保拓撲順序正確
+            if hasattr(self, "notebook"):
+                self.alert_banner.pack(fill=tk.X, padx=10, pady=(0, 5), before=self.notebook)
+            else:
+                self.alert_banner.pack(fill=tk.X, padx=10, pady=(0, 5))
+        self.root.after(0, _do_show)
+
+
+    def _hide_alert_banner(self):
+        def _do_hide():
+            self.alert_banner.pack_forget()
+        self.root.after(0, _do_hide)
+
+
+    def get_account_display_labels(self):
+        labels = []
+        dispatch_mode = self.config.get("account_dispatch_mode", "locked")
+        mode_tag = "🔒鎖定" if dispatch_mode == "locked" else ("🎲單帳" if dispatch_mode == "random" else "🔄單帳")
+
+
+        for idx, p in enumerate(self.config.get("api_profiles", [])):
+            name = p.get("name", f"帳號 {idx+1}")
+            has_key = "✅有Key" if p.get("key", "").strip() else "❌無Key"
+            labels.append(f"{idx+1}. {name} [{has_key}] ({mode_tag})")
+        return labels
+
+
+    def update_top_account_combo_values(self):
+        labels = self.get_account_display_labels()
+        self.account_combo["values"] = labels
+        locked_idx = max(0, min(2, int(self.config.get("locked_account_index", 0))))
+        if 0 <= locked_idx < len(labels):
             self.account_combo.current(locked_idx)
 
 
@@ -599,134 +665,17 @@ class RadarRegexToolApp:
 
 
     def save_top_config(self):
-        self.on_top_account_selected()
-        self.config["gemini_model"] = self.model_combo.get().strip()
+        idx = self.account_combo.current()
+        if idx >= 0:
+            self.config["locked_account_index"] = idx
+        self.config["gemini_model"] = self.model_combo.get().strip() or "gemini-3.8-flash"
         self.save_config()
-        Toast.show(self.root, f"✅ 頂部模型 [{self.config['gemini_model']}] 與帳號索引已儲存！")
+        self.update_top_account_combo_values()
+        Toast.show(self.root, f"✅ 頂部設定已儲存！當前鎖定帳號 [{idx+1}]，模型 [{self.config['gemini_model']}]")
 
 
     # -----------------------------------------------------------------------
-    # 模組 1.5：固化常駐告警橫幅
-    # -----------------------------------------------------------------------
-    def build_alert_banner(self):
-        self.alert_banner = tk.Frame(
-            self.root,
-            bg="#fef2f2",
-            highlightbackground="#f87171",
-            highlightthickness=1,
-            padx=10,
-            pady=6
-        )
-
-
-        lbl_icon = tk.Label(self.alert_banner, text="🚨", bg="#fef2f2", font=("Segoe UI Emoji", 12))
-        lbl_icon.pack(side=tk.LEFT, padx=(4, 6))
-
-
-        self.lbl_alert_msg = tk.Label(
-            self.alert_banner,
-            text="",
-            bg="#fef2f2",
-            fg="#b91c1c",
-            font=self.bold_font,
-            justify=tk.LEFT,
-            wraplength=880
-        )
-        self.lbl_alert_msg.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-
-        btn_close = tk.Button(
-            self.alert_banner,
-            text="✕",
-            bg="#fef2f2",
-            fg="#7f1d1d",
-            font=("Microsoft YaHei UI", 10, "bold"),
-            relief=tk.FLAT,
-            bd=0,
-            cursor="hand2",
-            command=self._hide_alert_banner
-        )
-        btn_close.pack(side=tk.RIGHT, padx=4)
-
-
-        self.btn_sentinel_launch = tk.Button(
-            self.alert_banner,
-            text="🛠️ 開啟哨兵搶救",
-            bg="#dc2626",
-            fg="#ffffff",
-            font=self.bold_font,
-            relief=tk.RAISED,
-            padx=8,
-            pady=2,
-            command=self.launch_sentinel_gui
-        )
-
-
-    def _show_alert_banner(self, message: str, show_sentinel: bool = False):
-        def _do():
-            if self.alert_banner is None or self.lbl_alert_msg is None:
-                return
-            try:
-                if not self.alert_banner.winfo_exists():
-                    return
-            except Exception:
-                return
-
-
-            self.lbl_alert_msg.config(text=message)
-            if show_sentinel and self.btn_sentinel_launch is not None:
-                self.btn_sentinel_launch.pack(side=tk.RIGHT, padx=6)
-            elif self.btn_sentinel_launch is not None:
-                self.btn_sentinel_launch.pack_forget()
-
-
-            if self.top_frame is not None:
-                try:
-                    if self.top_frame.winfo_exists() and self.top_frame.winfo_manager():
-                        self.alert_banner.pack(fill=tk.X, padx=10, pady=(0, 5), after=self.top_frame)
-                        return
-                except Exception:
-                    pass
-            self.alert_banner.pack(fill=tk.X, padx=10, pady=(0, 5))
-
-
-        try:
-            self.root.after(0, _do)
-        except Exception:
-            pass
-
-
-    def _hide_alert_banner(self):
-        def _do():
-            if self.alert_banner is None:
-                return
-            try:
-                if self.alert_banner.winfo_exists():
-                    self.alert_banner.pack_forget()
-            except Exception:
-                pass
-
-
-        try:
-            self.root.after(0, _do)
-        except Exception:
-            pass
-
-
-    def launch_sentinel_gui(self):
-        sentinel_path = self._norm_path_or_empty(self.config.get("sentinel_script_path", ""))
-        if sentinel_path and os.path.exists(sentinel_path):
-            try:
-                subprocess.Popen([sys.executable, sentinel_path])
-                Toast.show(self.root, "🛠️ 已啟動正則衝突哨兵 GUI！", bg="#2563eb", fg="#ffffff")
-            except Exception as e:
-                Toast.show(self.root, f"❌ 無法啟動哨兵: {str(e)}", bg="#ef4444", fg="#ffffff")
-        else:
-            Toast.show(self.root, "⚠️ 找不到衝突哨兵腳本，請至設定頁確認路徑。", bg="#f59e0b", fg="#000000")
-
-
-    # -----------------------------------------------------------------------
-    # 模組 2：Notebook 主頁籤控制器
+    # UI Component 2: Notebook 主頁籤佈局
     # -----------------------------------------------------------------------
     def build_notebook(self):
         self.notebook = ttk.Notebook(self.root)
@@ -734,30 +683,17 @@ class RadarRegexToolApp:
 
 
         self.tab1 = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab1, text="📝 雙階雷達正則優化與一鍵覆蓋")
+        self.notebook.add(self.tab1, text="📝 雙階正則修復與一鍵字典覆蓋")
         self.build_tab1(self.tab1)
 
 
         self.tab2 = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab2, text="⚙️ 多帳號矩陣、調度重試與路徑設定")
+        self.notebook.add(self.tab2, text="⚙️ 預設路徑與單帳號階梯管理")
         self.build_tab2(self.tab2)
 
 
-        # 頁籤切換時主動綁定/解除全域滾輪事件
-        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
-
-
-    def _on_tab_changed(self, event=None):
-        sel = self.notebook.select()
-        idx = self.notebook.index(sel) if sel else -1
-        if idx == 1:
-            self._bind_global_mousewheel()
-        else:
-            self._unbind_global_mousewheel()
-
-
     # -----------------------------------------------------------------------
-    # 模組 3：頁籤 1 (Stage 3 作業區)
+    # 頁籤 1: 核心維護作業區 (黃金動線與雙層流式底欄佈局)
     # -----------------------------------------------------------------------
     def build_tab1(self, parent):
         paned = ttk.PanedWindow(parent, orient=tk.VERTICAL)
@@ -765,73 +701,26 @@ class RadarRegexToolApp:
 
 
         top_box = ttk.Frame(paned)
-        paned.add(top_box, weight=2)
+        paned.add(top_box, weight=1)
 
 
-        frame_dict_select = ttk.LabelFrame(
-            top_box,
-            text="1. 選擇搭配送給 AI 對照之原始字典檔 (任務開始時快照鎖定，支援局部微創切片對照)",
-            padding=6
-        )
-        frame_dict_select.pack(fill=tk.X, pady=(0, 5))
+        lbl_log = ttk.Label(top_box, text="📋 請貼上「全局詳細正則搜尋結果」日誌內容：", font=self.bold_font)
+        lbl_log.pack(anchor=tk.W, pady=(0, 2))
 
 
-        def on_dict_radio_change():
-            self.set_save_btn_alert(False)
-
-
-        ttk.Radiobutton(
-            frame_dict_select,
-            text="帶入【字典檔 1】對照",
-            variable=self.selected_dict_for_ai,
-            value="dict1",
-            command=on_dict_radio_change
-        ).pack(side=tk.LEFT, padx=15)
-
-
-        ttk.Radiobutton(
-            frame_dict_select,
-            text="帶入【字典檔 2】對照",
-            variable=self.selected_dict_for_ai,
-            value="dict2",
-            command=on_dict_radio_change
-        ).pack(side=tk.LEFT, padx=15)
-
-
-        ttk.Radiobutton(
-            frame_dict_select,
-            text="不附帶字典檔 (僅發送日誌)",
-            variable=self.selected_dict_for_ai,
-            value="none",
-            command=on_dict_radio_change
-        ).pack(side=tk.LEFT, padx=15)
-
-
-        dnd_tip = "（可直接拖曳 .txt 日誌檔至下方文字框）" if HAS_DND else ""
-        lbl_log = ttk.Label(
-            top_box,
-            text=f"2. 請貼上或拖曳「全局詳細正則搜尋結果」日誌或上下文錯字句子：{dnd_tip}",
-            font=self.bold_font
-        )
-        lbl_log.pack(anchor=tk.W, pady=(2, 2))
-
-
-        self.txt_log = scrolledtext.ScrolledText(top_box, height=7, font=self.code_font)
+        self.txt_log = scrolledtext.ScrolledText(top_box, height=6, font=("Consolas", 9))
         self.txt_log.pack(fill=tk.BOTH, expand=True)
 
 
-        if HAS_DND:
-            self.txt_log.drop_target_register(DND_FILES)
-            self.txt_log.dnd_bind('<<Drop>>', self.on_log_file_drop)
-
-
+        # 作業區黃金動線按鈕列
         btn_frame = ttk.Frame(top_box)
         btn_frame.pack(fill=tk.X, pady=5)
 
 
+        # 1. 一鍵雙階按鈕
         self.btn_auto = tk.Button(
             btn_frame,
-            text="🤖 一鍵雙階自動優化 (雷達ENG ➔ 雷達QA)",
+            text="🤖 一鍵雙階自動修復 (工程師 ➔ QA)",
             bg="#2563eb",
             fg="#ffffff",
             font=self.bold_font,
@@ -842,6 +731,7 @@ class RadarRegexToolApp:
         self.btn_auto.pack(side=tk.LEFT, padx=(5, 3))
 
 
+        # 2. 清空日誌按鈕 (緊鄰一鍵修復)
         self.btn_clear = tk.Button(
             btn_frame,
             text="🗑️ 清空日誌",
@@ -855,6 +745,7 @@ class RadarRegexToolApp:
         self.btn_clear.pack(side=tk.LEFT, padx=(3, 4))
 
 
+        # 3. 清空即貼上勾選框
         self.chk_clear_and_paste = ttk.Checkbutton(
             btn_frame,
             text="📋 清空即貼上",
@@ -864,17 +755,22 @@ class RadarRegexToolApp:
         self.chk_clear_and_paste.pack(side=tk.LEFT, padx=(2, 6))
 
 
-        ttk.Separator(btn_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4, pady=2)
+        # 4. 垂直分隔線
+        sep = ttk.Separator(btn_frame, orient=tk.VERTICAL)
+        sep.pack(side=tk.LEFT, fill=tk.Y, padx=4, pady=2)
 
 
-        self.btn_s1 = ttk.Button(btn_frame, text="1️⃣ 僅執行階段一 (雷達ENG提案)", command=self.run_stage1_thread)
+        # 5. 階段一按鈕
+        self.btn_s1 = ttk.Button(btn_frame, text="1️⃣ 僅執行階段一 (工程師提案)", command=self.run_stage1_thread)
         self.btn_s1.pack(side=tk.LEFT, padx=2)
 
 
-        self.btn_s2 = ttk.Button(btn_frame, text="2️⃣ 僅執行階段二 (雷達QA審核)", command=lambda: self.run_stage2_thread())
+        # 6. 階段二按鈕
+        self.btn_s2 = ttk.Button(btn_frame, text="2️⃣ 僅執行階段二 (QA審核)", command=self.run_stage2_thread)
         self.btn_s2.pack(side=tk.LEFT, padx=2)
 
 
+        # 7. 點擊預覽框即複製 (調試模式) - 靠右對齊防止擠壓
         self.chk_click_to_copy = ttk.Checkbutton(
             btn_frame,
             text="📋 點擊預覽框即複製 (調試)",
@@ -892,50 +788,50 @@ class RadarRegexToolApp:
         preview_paned.pack(fill=tk.BOTH, expand=True)
 
 
-        self.frame_s1 = ttk.LabelFrame(preview_paned, text="階段一：雷達工程師提案預覽 (Stage 1)")
+        self.frame_s1 = ttk.LabelFrame(preview_paned, text="階段一：工程師修復提案預覽 (Stage 1)")
         preview_paned.add(self.frame_s1, weight=1)
 
 
-        self.txt_stage1 = scrolledtext.ScrolledText(self.frame_s1, font=self.code_font, wrap=tk.WORD)
+        self.txt_stage1 = scrolledtext.ScrolledText(self.frame_s1, font=("Consolas", 9), wrap=tk.WORD)
         self.txt_stage1.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         self.txt_stage1.bind("<ButtonRelease-1>", lambda event: self.on_preview_box_click(event, self.txt_stage1, "階段一工程師提案", "s1"))
 
 
-        self.frame_s2 = ttk.LabelFrame(preview_paned, text="階段二：雷達 QA 審核與最終字典條目 (Stage 2 - 直通寫入來源)")
+        self.frame_s2 = ttk.LabelFrame(preview_paned, text="階段二：QA 審核與最終字典條目 (Stage 2 - 直通寫入來源)")
         preview_paned.add(self.frame_s2, weight=1)
 
 
-        self.txt_stage2 = scrolledtext.ScrolledText(self.frame_s2, font=self.code_font, wrap=tk.WORD)
+        self.txt_stage2 = scrolledtext.ScrolledText(self.frame_s2, font=("Consolas", 9), wrap=tk.WORD)
         self.txt_stage2.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         self.txt_stage2.bind("<ButtonRelease-1>", lambda event: self.on_preview_box_click(event, self.txt_stage2, "階段二 QA 審核字典", "s2"))
 
 
-        # 底欄雙層結構：上排按鈕列 + 下排全寬動態折行狀態列 (UX-bottom-01)
+        # 底欄雙層流式動作列 (UX-bottom-01: 上排按鈕列 + 下排獨立多行狀態列)
         self.action_bar = ttk.Frame(bottom_box)
         self.action_bar.pack(fill=tk.X, pady=5)
 
 
         self.action_btn_row = ttk.Frame(self.action_bar)
-        self.action_btn_row.pack(fill=tk.X)
+        self.action_status_row = ttk.Frame(self.action_bar)
 
 
         self.btn_save = tk.Button(
             self.action_btn_row,
-            text="💾 備份並更新至目標字典檔",
-            bg=self.COLOR_SAVE_NORMAL,
+            text="💾 備份並更新至《嚴格正則修復字典.txt》",
+            bg="#059669",
             fg="#ffffff",
             font=self.bold_font,
             relief=tk.RAISED,
-            padx=14, pady=5,
+            padx=12, pady=5,
             command=self.save_and_backup_dict
         )
 
 
-        self.btn_copy = ttk.Button(self.action_btn_row, text="📋 複製 QA 最終字典內容", command=self.copy_qa_result)
-
-
-        self.action_status_row = ttk.Frame(self.action_bar)
-        self.action_status_row.pack(fill=tk.X, pady=(4, 0))
+        self.btn_copy = ttk.Button(
+            self.action_btn_row,
+            text="📋 複製 QA 最終字典內容",
+            command=self.copy_qa_result
+        )
 
 
         self.lbl_status = tk.Label(
@@ -945,51 +841,50 @@ class RadarRegexToolApp:
             fg="#4b5563",
             anchor="w",
             justify=tk.LEFT,
-            wraplength=1100
-        )
-        self.lbl_status.pack(fill=tk.X, expand=True)
-        self.action_status_row.bind(
-            "<Configure>",
-            lambda e: self.lbl_status.config(wraplength=max(320, e.width - 24))
+            wraplength=1120
         )
 
 
+        def _on_status_row_configure(event):
+            new_wrap = max(320, event.width - 24)
+            self.lbl_status.config(wraplength=new_wrap)
+
+
+        self.action_status_row.bind("<Configure>", _on_status_row_configure)
+
+
+        # 依設定進行底欄鏡像排版
         self.repack_bottom_bar()
 
 
     def repack_bottom_bar(self):
-        for widget in [self.btn_save, self.btn_copy]:
-            if widget is not None:
-                widget.pack_forget()
+        """依據 swap_bottom_bar 開關動態重排上排按鈕左右對齊側；狀態列恆在下方獨立折行"""
+        for w in [self.action_btn_row, self.action_status_row, self.btn_save, self.btn_copy, self.lbl_status]:
+            w.pack_forget()
 
 
-        is_swapped = self.var_swap_bottom_bar.get()
-        if not is_swapped:
-            self.btn_save.pack(side=tk.RIGHT, padx=5)
-            self.btn_copy.pack(side=tk.RIGHT, padx=5)
-        else:
-            self.btn_save.pack(side=tk.LEFT, padx=5)
+        self.action_btn_row.pack(side=tk.TOP, fill=tk.X, pady=(0, 3))
+        self.action_status_row.pack(side=tk.TOP, fill=tk.X, expand=True)
+
+
+        if self.var_swap_bottom_bar.get():
+            # 鏡像模式：按鈕靠左排列 ([btn_save] [btn_copy])
+            self.btn_save.pack(side=tk.LEFT, padx=(5, 5))
             self.btn_copy.pack(side=tk.LEFT, padx=5)
-
-
-    def handle_clear_log_action(self):
-        self.txt_log.delete("1.0", tk.END)
-        self.set_save_btn_alert(False)
-
-
-        if self.var_clear_and_paste.get():
-            try:
-                raw_text = self.root.clipboard_get()
-                clipboard_text = self.sanitize_invisible_chars(raw_text)
-                if clipboard_text and clipboard_text.strip():
-                    self.txt_log.insert("1.0", clipboard_text)
-                    Toast.show(self.root, "📋 已清空並自動貼上剪貼簿內容！", duration=1200, bg="#2563eb", fg="#ffffff")
-                else:
-                    Toast.show(self.root, "🗑️ 已清空日誌 (剪貼簿無文字內容)", duration=1200)
-            except Exception:
-                Toast.show(self.root, "🗑️ 已清空日誌 (讀取剪貼簿失敗或無內容)", duration=1200)
         else:
-            Toast.show(self.root, "🗑️ 已清空日誌內容", duration=1000)
+            # 標準模式：按鈕靠右排列 ([btn_copy] [btn_save])
+            self.btn_save.pack(side=tk.RIGHT, padx=(5, 5))
+            self.btn_copy.pack(side=tk.RIGHT, padx=5)
+
+
+        self.lbl_status.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6, pady=(2, 0))
+
+
+    def on_swap_bottom_bar_toggled(self):
+        self.config["swap_bottom_bar"] = self.var_swap_bottom_bar.get()
+        self.repack_bottom_bar()
+        self.save_config()
+        Toast.show(self.root, "🔄 底部按鈕列佈局已即時切換！", duration=1200)
 
 
     def on_clear_and_paste_toggled(self):
@@ -1002,386 +897,436 @@ class RadarRegexToolApp:
         self.save_config()
 
 
+    def handle_clear_log_action(self):
+        """清空日誌並依勾選狀態執行剪貼簿自動貼上"""
+        self.txt_log.delete("1.0", tk.END)
+        if self.var_clear_and_paste.get():
+            try:
+                clip_text = self.root.clipboard_get()
+                if clip_text and clip_text.strip():
+                    self.txt_log.insert("1.0", clip_text)
+                    Toast.show(self.root, "📋 已清空並自動貼上剪貼簿內容！", duration=1200, bg="#2563eb", fg="#ffffff")
+                else:
+                    Toast.show(self.root, "🗑️ 已清空日誌 (剪貼簿無文字內容)", duration=1200)
+            except Exception:
+                Toast.show(self.root, "🗑️ 已清空日誌 (剪貼簿無文字或讀取失敗)", duration=1200)
+        else:
+            Toast.show(self.root, "🗑️ 已清空日誌內容", duration=1000)
+
+
+    # -----------------------------------------------------------------------
+    # 預覽框外框標題重置方法
+    # -----------------------------------------------------------------------
+    def reset_preview_headers(self, s1=True, s2=True):
+        if s1 and hasattr(self, "frame_s1"):
+            self.root.after(0, lambda: self.frame_s1.config(text="階段一：工程師修復提案預覽 (Stage 1)"))
+        if s2 and hasattr(self, "frame_s2"):
+            self.root.after(0, lambda: self.frame_s2.config(text="階段二：QA 審核與最終字典條目 (Stage 2 - 直通寫入來源)"))
+
+
+    # -----------------------------------------------------------------------
+    # 調試模式「點選即複製」Meta 注入引擎核心 (含帳號資訊與剪貼簿容錯)
+    # -----------------------------------------------------------------------
     def on_preview_box_click(self, event, widget: scrolledtext.ScrolledText, box_title: str, stage_key: str):
         try:
             if not self.var_click_to_copy.get():
                 return
+
+
             content = widget.get("1.0", tk.END).strip()
             if not content or content.startswith("❌ 執行失敗"):
                 return
 
 
             meta = {}
-            active_targets = []
             if self.last_task_snapshot:
-                meta_key = "s1_meta" if stage_key == "s1" else "s2_meta"
-                meta = self.last_task_snapshot.get(meta_key, {})
-                active_targets = self.last_task_snapshot.get("active_targets", [])
+                meta_key = f"{stage_key}_meta"
+                if meta_key in self.last_task_snapshot:
+                    meta = self.last_task_snapshot[meta_key]
 
 
-            actual_account = meta.get("actual_account", "未知帳號")
-            actual_model = meta.get("actual_model", "未知模型")
-            elapsed_time = meta.get("elapsed_time", "0.0")
-            is_fallback = meta.get("is_fallback", False)
-            fallback_str = "⚠️ 是 (觸發模型備援降階)" if is_fallback else "否 (主要模型直出)"
-            active_targets_str = "、".join(active_targets) if active_targets else "無 / 全量"
+            account_name = meta.get("account_name", "未知帳號") if isinstance(meta, dict) else "未知帳號"
+            actual_model = meta.get("actual_model", "未知") if isinstance(meta, dict) else "未知"
+            elapsed_time = meta.get("elapsed_time", "0.0") if isinstance(meta, dict) else "0.0"
+            is_fallback = meta.get("is_fallback", False) if isinstance(meta, dict) else False
+            fallback_str = "⚠️ 是 (主要模型過載降階)" if is_fallback else "否 (主要模型直接命中)"
 
 
-            debug_header = (
-                "================================================================================\n"
-                "【調試排查資訊】\n"
+            sliced_info = "全量字典模式"
+            if self.last_task_snapshot and self.last_task_snapshot.get("is_sliced", False):
+                active_secs = self.last_task_snapshot.get("active_sections", [])
+                sliced_info = f"微創切片模式 [{', '.join(active_secs)}]"
+
+
+            meta_header = (
+                f"{'=' * 80}\n"
+                f"【調試排查資訊】\n"
                 f"角色階段：{box_title}\n"
-                f"執行帳號：{actual_account}\n"
+                f"執行帳號：{account_name}\n"
                 f"執行模型：{actual_model}\n"
                 f"通訊耗時：{elapsed_time}s\n"
                 f"備援降級：{fallback_str}\n"
-                f"優化標的：{active_targets_str}\n"
-                "================================================================================\n\n"
+                f"處理範圍：{sliced_info}\n"
+                f"{'=' * 80}\n\n"
             )
+            full_debug_text = meta_header + content
 
 
-            full_payload = debug_header + content
             self.root.clipboard_clear()
-            self.root.clipboard_append(full_payload)
-            Toast.show(self.root, f"📋 已自動複製【{box_title}】調試內容 (含 Meta 標頭)！", duration=1200, bg="#2563eb", fg="#ffffff")
+            self.root.clipboard_append(full_debug_text)
+            Toast.show(
+                self.root,
+                f"📋 已自動複製【{box_title}】調試內容 (含 Meta 標頭)！",
+                duration=1200,
+                bg="#2563eb",
+                fg="#ffffff"
+            )
         except Exception:
             pass
 
 
-    def on_log_file_drop(self, event):
-        try:
-            files = self.root.tk.splitlist(event.data)
-            if files:
-                file_path = files[0].strip('{}')
-                if os.path.isfile(file_path):
-                    raw_content = self.read_file_text_multiformat(file_path)
-                    content = self.sanitize_invisible_chars(raw_content)
-                    self.txt_log.delete("1.0", tk.END)
-                    self.txt_log.insert("1.0", content)
-                    self.set_save_btn_alert(False)
-                    Toast.show(self.root, f"✅ 已成功載入日誌檔：{os.path.basename(file_path)}")
-                else:
-                    Toast.show(self.root, "⚠️ 拖曳目標非有效文字檔案", bg="#f59e0b", fg="#000000")
-        except Exception as e:
-            Toast.show(self.root, f"❌ 讀取拖曳檔案失敗: {str(e)}", bg="#ef4444", fg="#ffffff")
-
-
     # -----------------------------------------------------------------------
-    # 模組 4：頁籤 2 (多帳號矩陣、路徑、偏好、調試歷史看板與滾輪穿透)
+    # 頁籤 2: 預設路徑與單帳號階梯管理 (含高精度觸控板保底、Linux 相容與長冷卻設定)
     # -----------------------------------------------------------------------
     def build_tab2(self, parent):
-        outer_container = ttk.Frame(parent, padding=8)
-        outer_container.pack(fill=tk.BOTH, expand=True)
+        tab2_canvas = tk.Canvas(parent, highlightthickness=0)
+        v_scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=tab2_canvas.yview)
+        scrollable_frame = ttk.Frame(tab2_canvas, padding=(8, 4, 8, 4))
 
 
-        self.tab2_canvas = tk.Canvas(outer_container, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(outer_container, orient="vertical", command=self.tab2_canvas.yview)
-        self.tab2_scrollable_frame = ttk.Frame(self.tab2_canvas)
-
-
-        self.tab2_scrollable_frame.bind(
+        scrollable_frame.bind(
             "<Configure>",
-            lambda e: self.tab2_canvas.configure(scrollregion=self.tab2_canvas.bbox("all"))
+            lambda e: tab2_canvas.configure(scrollregion=tab2_canvas.bbox("all"))
         )
 
 
-        # 🌟 內外寬度等齊契約
-        self.canvas_window = self.tab2_canvas.create_window((0, 0), window=self.tab2_scrollable_frame, anchor="nw")
-        self.tab2_canvas.bind("<Configure>", lambda event: self.tab2_canvas.itemconfig(self.canvas_window, width=event.width))
+        canvas_window = tab2_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
 
 
-        self.tab2_canvas.configure(xscrollcommand=None, yscrollcommand=scrollbar.set)
-        self.tab2_canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        def _on_canvas_configure(e):
+            tab2_canvas.itemconfig(canvas_window, width=e.width)
+        tab2_canvas.bind("<Configure>", _on_canvas_configure)
 
 
-        # 🌟 滑鼠滾輪全域穿透：掛載邊界監聽
-        outer_container.bind("<Enter>", lambda e: self._bind_global_mousewheel())
-        outer_container.bind("<Leave>", lambda e: self._unbind_global_mousewheel())
+        tab2_canvas.configure(yscrollcommand=v_scrollbar.set)
 
 
-        # 區塊 1: 3 組 API Key
-        frame_accounts = ttk.LabelFrame(self.tab2_scrollable_frame, text="🔑 Gemini API 多組金鑰與帳號矩陣管理 (支援 3 組帳號輪動備援)", padding=10)
-        frame_accounts.pack(fill=tk.X, padx=5, pady=4)
+        # 滑鼠滾輪事件綁定 (含高精度觸控板 ±1 保底、Linux Button-4/5 與頁籤主動解綁防護)
+        def _on_mousewheel(event):
+            try:
+                if self.notebook.select() != str(parent):
+                    return
+            except tk.TclError:
+                return
 
 
-        ttk.Label(frame_accounts, text="序號 / 帳號暱稱", font=self.bold_font).grid(row=0, column=0, sticky=tk.W, padx=4, pady=2)
-        ttk.Label(frame_accounts, text="Gemini API Key (金鑰遮罩)", font=self.bold_font).grid(row=0, column=1, sticky=tk.W, padx=4, pady=2)
-        ttk.Label(frame_accounts, text="備註說明", font=self.bold_font).grid(row=0, column=2, sticky=tk.W, padx=4, pady=2)
+            if getattr(event, "num", None) == 4:
+                step = -1
+            elif getattr(event, "num", None) == 5:
+                step = 1
+            else:
+                delta = getattr(event, "delta", 0)
+                if delta == 0:
+                    return
+                step = int(-1 * (delta / 120))
+                if step == 0:
+                    step = -1 if delta > 0 else 1
 
 
-        self.profile_entries = []
-        profiles = self.config.get("api_profiles", self.DEFAULT_PROFILES)
-        for i in range(3):
-            p = profiles[i] if i < len(profiles) else {"name": f"帳號 {i+1}", "key": "", "note": ""}
+            tab2_canvas.yview_scroll(step, "units")
 
 
-            e_name = ttk.Entry(frame_accounts, width=18)
-            e_name.insert(0, p.get("name", f"帳號 {i+1}"))
-            e_name.grid(row=i+1, column=0, padx=4, pady=3, sticky=tk.W)
+        def _bind_tab2_wheel(event=None):
+            tab2_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            tab2_canvas.bind_all("<Button-4>", _on_mousewheel)
+            tab2_canvas.bind_all("<Button-5>", _on_mousewheel)
 
 
-            e_key = ttk.Entry(frame_accounts, width=44, show="*")
-            e_key.insert(0, p.get("key", ""))
-            e_key.grid(row=i+1, column=1, padx=4, pady=3, sticky=tk.EW)
+        def _unbind_tab2_wheel(event=None):
+            tab2_canvas.unbind_all("<MouseWheel>")
+            tab2_canvas.unbind_all("<Button-4>")
+            tab2_canvas.unbind_all("<Button-5>")
 
 
-            e_note = ttk.Entry(frame_accounts, width=28)
-            e_note.insert(0, p.get("note", ""))
-            e_note.grid(row=i+1, column=2, padx=4, pady=3, sticky=tk.EW)
+        parent.bind("<Enter>", _bind_tab2_wheel)
+        parent.bind("<Leave>", _unbind_tab2_wheel)
 
 
-            self.profile_entries.append((e_name, e_key, e_note))
+        def _on_tab_changed(event=None):
+            try:
+                if self.notebook.select() != str(parent):
+                    _unbind_tab2_wheel()
+            except tk.TclError:
+                pass
 
 
-        frame_accounts.columnconfigure(1, weight=1)
+        self.notebook.bind("<<NotebookTabChanged>>", _on_tab_changed, add="+")
 
 
-        # 區塊 2: 檔案路徑設定
-        frame_paths = ttk.LabelFrame(self.tab2_scrollable_frame, text="📂 字典、AI 提示詞與衝突哨兵路徑設定 (支援一鍵開啟檢驗)", padding=10)
-        frame_paths.pack(fill=tk.X, padx=5, pady=4)
+        tab2_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
 
-        # 1. 字典檔 1
-        ttk.Label(frame_paths, text="1. 《正則查找字典.txt (字典檔 1)》路徑:", font=self.bold_font).grid(row=0, column=0, columnspan=3, sticky=tk.W, pady=2)
-        self.entry_dict_1 = ttk.Entry(frame_paths)
-        self.entry_dict_1.insert(0, self.config.get("dict_path_1", ""))
-        self.entry_dict_1.grid(row=1, column=0, sticky=tk.EW, padx=(4, 2), pady=2)
-        ttk.Button(frame_paths, text="瀏覽...", width=8, command=lambda: self.browse_file(self.entry_dict_1)).grid(row=1, column=1, padx=2)
-        ttk.Button(frame_paths, text="📂 開啟", width=8, command=lambda: self.open_file_path(self.entry_dict_1, "字典檔 1")).grid(row=1, column=2, padx=2)
+        # 1. 字典與 AI 提示詞路徑
+        frame_paths = ttk.LabelFrame(scrollable_frame, text="📂 字典與 AI 提示詞檔案路徑設定", padding=6)
+        frame_paths.pack(fill=tk.X, padx=5, pady=2)
 
 
-        # 2. 字典檔 2
-        ttk.Label(frame_paths, text="2. 《正則查找字典2.txt (字典檔 2)》路徑:", font=self.bold_font).grid(row=2, column=0, columnspan=3, sticky=tk.W, pady=(6, 2))
-        self.entry_dict_2 = ttk.Entry(frame_paths)
-        self.entry_dict_2.insert(0, self.config.get("dict_path_2", ""))
-        self.entry_dict_2.grid(row=3, column=0, sticky=tk.EW, padx=(4, 2), pady=2)
-        ttk.Button(frame_paths, text="瀏覽...", width=8, command=lambda: self.browse_file(self.entry_dict_2)).grid(row=3, column=1, padx=2)
-        ttk.Button(frame_paths, text="📂 開啟", width=8, command=lambda: self.open_file_path(self.entry_dict_2, "字典檔 2")).grid(row=3, column=2, padx=2)
+        ttk.Label(frame_paths, text="1. 《嚴格正則修復字典.txt》路徑:", font=self.bold_font).grid(row=0, column=0, sticky=tk.W, pady=1)
+        self.entry_dict_path = ttk.Entry(frame_paths, width=80)
+        self.entry_dict_path.insert(0, self.config.get("repair_dict_path", ""))
+        self.entry_dict_path.grid(row=1, column=0, sticky=tk.EW, padx=4, pady=1)
+        btn_b1 = ttk.Button(frame_paths, text="瀏覽...", command=lambda: self.browse_file(self.entry_dict_path))
+        btn_b1.grid(row=1, column=1, padx=4)
 
 
-        # 3. ENG 提示詞
-        ttk.Label(frame_paths, text="3. 《階段三雷達工程師提示詞.txt》路徑:", font=self.bold_font).grid(row=4, column=0, columnspan=3, sticky=tk.W, pady=(6, 2))
-        self.entry_eng_prompt = ttk.Entry(frame_paths)
-        self.entry_eng_prompt.insert(0, self.config.get("radar_engineer_prompt_path", ""))
-        self.entry_eng_prompt.grid(row=5, column=0, sticky=tk.EW, padx=(4, 2), pady=2)
-        ttk.Button(frame_paths, text="瀏覽...", width=8, command=lambda: self.browse_file(self.entry_eng_prompt)).grid(row=5, column=1, padx=2)
-        ttk.Button(frame_paths, text="📂 開啟", width=8, command=lambda: self.open_file_path(self.entry_eng_prompt, "雷達工程師提示詞")).grid(row=5, column=2, padx=2)
+        ttk.Label(frame_paths, text="2. 《字典工程師專用維護提示詞.txt》路徑:", font=self.bold_font).grid(row=2, column=0, sticky=tk.W, pady=(4, 1))
+        self.entry_eng_path = ttk.Entry(frame_paths, width=80)
+        self.entry_eng_path.insert(0, self.config.get("engineer_prompt_path", ""))
+        self.entry_eng_path.grid(row=3, column=0, sticky=tk.EW, padx=4, pady=1)
+        btn_b2 = ttk.Button(frame_paths, text="瀏覽...", command=lambda: self.browse_file(self.entry_eng_path))
+        btn_b2.grid(row=3, column=1, padx=4)
 
 
-        # 4. QA 提示詞
-        ttk.Label(frame_paths, text="4. 《階段三雷達QA提示詞.txt》路徑:", font=self.bold_font).grid(row=6, column=0, columnspan=3, sticky=tk.W, pady=(6, 2))
-        self.entry_qa_prompt = ttk.Entry(frame_paths)
-        self.entry_qa_prompt.insert(0, self.config.get("radar_qa_prompt_path", ""))
-        self.entry_qa_prompt.grid(row=7, column=0, sticky=tk.EW, padx=(4, 2), pady=2)
-        ttk.Button(frame_paths, text="瀏覽...", width=8, command=lambda: self.browse_file(self.entry_qa_prompt)).grid(row=7, column=1, padx=2)
-        ttk.Button(frame_paths, text="📂 開啟", width=8, command=lambda: self.open_file_path(self.entry_qa_prompt, "雷達 QA 提示詞")).grid(row=7, column=2, padx=2)
-
-
-        # 5. 衝突哨兵
-        ttk.Label(frame_paths, text="5. 《正則衝突檢測守衛.py (語意對沖哨兵)》路徑:", font=self.bold_font).grid(row=8, column=0, columnspan=3, sticky=tk.W, pady=(6, 2))
-        self.entry_sentinel_path = ttk.Entry(frame_paths)
-        self.entry_sentinel_path.insert(0, self.config.get("sentinel_script_path", ""))
-        self.entry_sentinel_path.grid(row=9, column=0, sticky=tk.EW, padx=(4, 2), pady=2)
-        ttk.Button(frame_paths, text="瀏覽...", width=8, command=lambda: self.browse_file(self.entry_sentinel_path, [("Python files", "*.py"), ("All files", "*.*")])).grid(row=9, column=1, padx=2)
-        ttk.Button(frame_paths, text="📂 開啟", width=8, command=lambda: self.open_file_path(self.entry_sentinel_path, "語意對沖哨兵腳本")).grid(row=9, column=2, padx=2)
+        ttk.Label(frame_paths, text="3. 《字典維護QA提示詞.txt》路徑:", font=self.bold_font).grid(row=4, column=0, sticky=tk.W, pady=(4, 1))
+        self.entry_qa_path = ttk.Entry(frame_paths, width=80)
+        self.entry_qa_path.insert(0, self.config.get("qa_prompt_path", ""))
+        self.entry_qa_path.grid(row=5, column=0, sticky=tk.EW, padx=4, pady=1)
+        btn_b3 = ttk.Button(frame_paths, text="瀏覽...", command=lambda: self.browse_file(self.entry_qa_path))
+        btn_b3.grid(row=5, column=1, padx=4)
 
 
         frame_paths.columnconfigure(0, weight=1)
 
 
-        # 區塊 3: 多帳號調度與重試策略
-        frame_dispatch = ttk.LabelFrame(self.tab2_scrollable_frame, text="🔄 多帳號負載均衡調度與退避重試策略 (含即時導覽看板)", padding=10)
-        frame_dispatch.pack(fill=tk.X, padx=5, pady=6)
+        # 2. 多帳號 3x3 矩陣管理 (僅供手動切換備用，禁止自動跨多 Key 輪詢)
+        frame_accounts = ttk.LabelFrame(
+            scrollable_frame,
+            text="🔑 Gemini API 金鑰儲存槽 (僅供介面手動切換，嚴禁同 IP 背景自動跨多 Key 輪詢)",
+            padding=6
+        )
+        frame_accounts.pack(fill=tk.X, padx=5, pady=2)
 
 
-        d1_box = ttk.Frame(frame_dispatch)
-        d1_box.pack(fill=tk.X, pady=3)
+        ttk.Label(frame_accounts, text="帳號名稱", font=self.bold_font).grid(row=0, column=0, sticky=tk.W, padx=4, pady=1)
+        ttk.Label(frame_accounts, text="API Key (遮罩保護)", font=self.bold_font).grid(row=0, column=1, sticky=tk.W, padx=4, pady=1)
+        ttk.Label(frame_accounts, text="備註說明", font=self.bold_font).grid(row=0, column=2, sticky=tk.W, padx=4, pady=1)
 
 
-        ttk.Label(d1_box, text="起手分流策略 (Initial Dispatch):", font=self.bold_font).pack(side=tk.LEFT, padx=(0, 6))
-        self.combo_dispatch_mode = ttk.Combobox(
-            d1_box,
-            values=[
-                "random (🎲 隨機均攤：隨機挑選有效帳號發起任務)",
-                "round_robin (🔄 依序輪動：平攤帳號配額，逐次遞增)",
-                "locked (🔒 固定鎖定：始終以指定之優先帳號起手)"
-            ],
-            width=48,
+        self.account_entries = []
+        profiles = self.config.get("api_profiles", self.DEFAULT_PROFILES)
+
+
+        for i in range(3):
+            prof = profiles[i] if i < len(profiles) else self.DEFAULT_PROFILES[i]
+
+
+            ent_name = ttk.Entry(frame_accounts, width=20)
+            ent_name.insert(0, prof.get("name", f"帳號 {i+1}"))
+            ent_name.grid(row=i+1, column=0, padx=4, pady=2, sticky=tk.W)
+
+
+            ent_key = ttk.Entry(frame_accounts, width=44, show="*")
+            ent_key.insert(0, prof.get("key", ""))
+            ent_key.grid(row=i+1, column=1, padx=4, pady=2, sticky=tk.EW)
+
+
+            ent_note = ttk.Entry(frame_accounts, width=26)
+            ent_note.insert(0, prof.get("note", ""))
+            ent_note.grid(row=i+1, column=2, padx=4, pady=2, sticky=tk.W)
+
+
+            self.account_entries.append({
+                "name": ent_name,
+                "key": ent_key,
+                "note": ent_note
+            })
+
+
+        frame_accounts.columnconfigure(1, weight=1)
+
+
+        # 3. 調度與重試策略面板
+        frame_strategy = ttk.LabelFrame(
+            scrollable_frame,
+            text="🛡️ 防風控單帳號鎖定與長週期階梯退避策略 (含即時導覽看板)",
+            padding=6
+        )
+        frame_strategy.pack(fill=tk.X, padx=5, pady=2)
+
+
+        # 3.1 起手分流選單
+        row_dispatch = ttk.Frame(frame_strategy)
+        row_dispatch.pack(fill=tk.X, pady=1)
+        ttk.Label(row_dispatch, text="起手分流策略:", font=self.bold_font).pack(side=tk.LEFT, padx=(0, 6))
+
+
+        dispatch_options = [
+            ("🔒 單帳號單選鎖定 (2026-11 防風控唯一合規)", "locked"),
+            ("🎲 隨機均攤 (已降級為單帳號生效)", "random"),
+            ("🔄 依序輪動 (已降級為單帳號生效)", "round_robin")
+        ]
+        self.dispatch_opt_map = {opt[0]: opt[1] for opt in dispatch_options}
+        self.dispatch_rev_map = {opt[1]: opt[0] for opt in dispatch_options}
+
+
+        self.combo_dispatch = ttk.Combobox(
+            row_dispatch,
+            values=[opt[0] for opt in dispatch_options],
+            width=50,
             state="readonly"
         )
-        mode_val = self.config.get("account_dispatch_mode", "random")
-        if mode_val == "round_robin":
-            self.combo_dispatch_mode.current(1)
-        elif mode_val == "locked":
-            self.combo_dispatch_mode.current(2)
-        else:
-            self.combo_dispatch_mode.current(0)
-        self.combo_dispatch_mode.pack(side=tk.LEFT)
-        self.combo_dispatch_mode.bind("<<ComboboxSelected>>", self.on_dispatch_mode_changed)
+        current_disp = self.config.get("account_dispatch_mode", "locked")
+        self.combo_dispatch.set(self.dispatch_rev_map.get(current_disp, dispatch_options[0][0]))
+        self.combo_dispatch.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.combo_dispatch.bind("<<ComboboxSelected>>", self.on_dispatch_mode_changed)
 
 
-        self.card_dispatch = tk.Frame(frame_dispatch, bg="#f8fafc", highlightbackground="#cbd5e1", highlightthickness=1, padx=8, pady=6)
-        self.card_dispatch.pack(fill=tk.X, pady=(4, 8))
-        self.lbl_card_dispatch = tk.Label(self.card_dispatch, text="", bg="#f8fafc", fg="#334155", justify=tk.LEFT, font=self.default_font)
-        self.lbl_card_dispatch.pack(anchor=tk.W)
+        # 起手策略即時說明看板
+        card_disp_frame = tk.Frame(frame_strategy, bg="#f8fafc", highlightbackground="#cbd5e1", highlightthickness=1)
+        card_disp_frame.pack(fill=tk.X, padx=2, pady=1)
+        self.lbl_card_dispatch = tk.Label(
+            card_disp_frame,
+            text="",
+            bg="#f8fafc",
+            fg="#1e293b",
+            font=self.default_font,
+            justify=tk.LEFT,
+            anchor="w",
+            padx=8, pady=3
+        )
+        self.lbl_card_dispatch.pack(fill=tk.X)
 
 
-        d2_box = ttk.Frame(frame_dispatch)
-        d2_box.pack(fill=tk.X, pady=3)
+        # 3.2 遇阻重試路線選單
+        row_retry = ttk.Frame(frame_strategy)
+        row_retry.pack(fill=tk.X, pady=1)
+        ttk.Label(row_retry, text="遇阻重試路線:", font=self.bold_font).pack(side=tk.LEFT, padx=(0, 6))
 
 
-        ttk.Label(d2_box, text="遇阻重試路線 (Retry Route Policy):", font=self.bold_font).pack(side=tk.LEFT, padx=(0, 6))
-        self.combo_retry_policy = ttk.Combobox(
-            d2_box,
-            values=[
-                "horizontal_first (⚡ 橫向擴展優先：A主➔B主➔C主➔降階備援 【推薦】)",
-                "quality_locked (🚀 品質優先不降：全帳號持續重試主模型，嚴禁降階)",
-                "vertical_first (🛡️ 帳號穿透優先：A主➔A副 ➔ B主➔B副...)"
-            ],
-            width=54,
+        route_options = [
+            ("🛡️ 單帳號垂直降階優先 (3.8 ➔ 冷卻180s ➔ 3.6 ➔ 冷卻180s ➔ 3.5-lite)", "vertical_first"),
+            ("🚀 品質優先不降 (鎖定主模型，失敗長退避)", "quality_locked"),
+            ("⚡ 橫向擴展 (已收斂為單帳號主模型)", "horizontal_first")
+        ]
+        self.route_opt_map = {opt[0]: opt[1] for opt in route_options}
+        self.route_rev_map = {opt[1]: opt[0] for opt in route_options}
+
+
+        self.combo_route = ttk.Combobox(
+            row_retry,
+            values=[opt[0] for opt in route_options],
+            width=56,
             state="readonly"
         )
-        policy_val = self.config.get("retry_route_policy", "horizontal_first")
-        if policy_val == "quality_locked":
-            self.combo_retry_policy.current(1)
-        elif policy_val == "vertical_first":
-            self.combo_retry_policy.current(2)
-        else:
-            self.combo_retry_policy.current(0)
-        self.combo_retry_policy.pack(side=tk.LEFT)
-        self.combo_retry_policy.bind("<<ComboboxSelected>>", self.on_retry_policy_changed)
+        current_route = self.config.get("retry_route_policy", "vertical_first")
+        self.combo_route.set(self.route_rev_map.get(current_route, route_options[0][0]))
+        self.combo_route.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.combo_route.bind("<<ComboboxSelected>>", self.on_retry_route_changed)
 
 
-        self.card_retry = tk.Frame(frame_dispatch, bg="#f8fafc", highlightbackground="#cbd5e1", highlightthickness=1, padx=8, pady=6)
-        self.card_retry.pack(fill=tk.X, pady=(4, 8))
-        self.lbl_card_retry = tk.Label(self.card_retry, text="", bg="#f8fafc", fg="#334155", justify=tk.LEFT, font=self.default_font)
-        self.lbl_card_retry.pack(anchor=tk.W)
+        # 重試路線即時說明看板
+        card_route_frame = tk.Frame(frame_strategy, bg="#f8fafc", highlightbackground="#cbd5e1", highlightthickness=1)
+        card_route_frame.pack(fill=tk.X, padx=2, pady=1)
+        self.lbl_card_retry = tk.Label(
+            card_route_frame,
+            text="",
+            bg="#f8fafc",
+            fg="#1e293b",
+            font=self.default_font,
+            justify=tk.LEFT,
+            anchor="w",
+            padx=8, pady=3
+        )
+        self.lbl_card_retry.pack(fill=tk.X)
 
 
-        self.update_dispatch_card_text()
-        self.update_retry_card_text()
+        self.refresh_strategy_cards()
 
 
-        p_box = ttk.Frame(frame_dispatch)
-        p_box.pack(fill=tk.X, pady=4)
+        # 3.3 重試參數、請求逾時與備援模型
+        row_params = ttk.Frame(frame_strategy)
+        row_params.pack(fill=tk.X, pady=2)
 
 
-        ttk.Label(p_box, text="單一重試輪次上限:").pack(side=tk.LEFT, padx=(0, 4))
-        self.entry_max_retries = ttk.Spinbox(p_box, from_=1, to=10, width=5)
-        self.entry_max_retries.set(str(self.config.get("max_retries", 3)))
-        self.entry_max_retries.pack(side=tk.LEFT, padx=(0, 15))
+        ttk.Label(row_params, text="單一階梯最大嘗試次數:").pack(side=tk.LEFT, padx=(0, 4))
+        self.entry_max_retries = ttk.Spinbox(row_params, from_=1, to=5, width=5)
+        self.entry_max_retries.set(str(self.config.get("max_retries", 1)))
+        self.entry_max_retries.pack(side=tk.LEFT, padx=(0, 14))
 
 
-        ttk.Label(p_box, text="基礎退避延遲 (秒):").pack(side=tk.LEFT, padx=(0, 4))
-        self.entry_base_delay = ttk.Spinbox(p_box, from_=0.1, to=30.0, increment=0.5, width=5)
-        self.entry_base_delay.set(str(self.config.get("base_delay_seconds", 2.0)))
-        self.entry_base_delay.pack(side=tk.LEFT, padx=(0, 15))
+        ttk.Label(row_params, text="長週期冷卻退避(秒):").pack(side=tk.LEFT, padx=(0, 4))
+        self.entry_base_delay = ttk.Spinbox(row_params, from_=10.0, to=600.0, increment=10.0, width=6)
+        self.entry_base_delay.set(str(self.config.get("base_delay_seconds", 180.0)))
+        self.entry_base_delay.pack(side=tk.LEFT, padx=(0, 14))
 
 
-        ttk.Label(p_box, text="單次請求逾時(秒):").pack(side=tk.LEFT, padx=(0, 4))
-        self.entry_request_timeout = ttk.Spinbox(p_box, from_=10.0, to=600.0, increment=10.0, width=6)
+        ttk.Label(row_params, text="單次請求逾時(秒):").pack(side=tk.LEFT, padx=(0, 4))
+        self.entry_request_timeout = ttk.Spinbox(row_params, from_=10.0, to=600.0, increment=10.0, width=6)
         self.entry_request_timeout.set(str(self.config.get("request_timeout_seconds", 300.0)))
-        self.entry_request_timeout.pack(side=tk.LEFT)
-
-
-        fb_opt_box = ttk.Frame(frame_dispatch)
-        fb_opt_box.pack(fill=tk.X, pady=(2, 4))
+        self.entry_request_timeout.pack(side=tk.LEFT, padx=(0, 14))
 
 
         self.chk_enable_fallback = ttk.Checkbutton(
-            fb_opt_box,
-            text="啟用模型階梯備援 (主要模型過載耗盡時切換備用模型)",
+            row_params,
+            text="啟用模型階梯備援",
             variable=self.var_enable_fallback
         )
         self.chk_enable_fallback.pack(side=tk.LEFT)
 
 
-        fb_box = ttk.Frame(frame_dispatch)
-        fb_box.pack(fill=tk.X, pady=4)
+        row_fb = ttk.Frame(frame_strategy)
+        row_fb.pack(fill=tk.X, pady=2)
 
 
-        ttk.Label(fb_box, text="第一備援模型:").pack(side=tk.LEFT, padx=(0, 5))
-        self.combo_fallback_1 = ttk.Combobox(fb_box, values=self.PRESET_MODELS, width=22)
+        ttk.Label(row_fb, text="第一備援模型:").pack(side=tk.LEFT, padx=(0, 4))
+        self.combo_fallback_1 = ttk.Combobox(row_fb, values=self.PRESET_MODELS, width=20)
         self.combo_fallback_1.set(self.config.get("fallback_model_1", "gemini-3.6-flash"))
-        self.combo_fallback_1.pack(side=tk.LEFT, padx=(0, 20))
+        self.combo_fallback_1.pack(side=tk.LEFT, padx=(0, 16))
 
 
-        ttk.Label(fb_box, text="第二備援模型:").pack(side=tk.LEFT, padx=(0, 5))
-        self.combo_fallback_2 = ttk.Combobox(fb_box, values=self.PRESET_MODELS, width=22)
+        ttk.Label(row_fb, text="第二備援模型:").pack(side=tk.LEFT, padx=(0, 4))
+        self.combo_fallback_2 = ttk.Combobox(row_fb, values=self.PRESET_MODELS, width=20)
         self.combo_fallback_2.set(self.config.get("fallback_model_2", "gemini-3.5-flash-lite"))
         self.combo_fallback_2.pack(side=tk.LEFT)
 
 
-        # 區塊 4: 偏好設定
-        frame_pref = ttk.LabelFrame(self.tab2_scrollable_frame, text="⚙️ 使用者操作偏好與哨兵門禁設定", padding=10)
-        frame_pref.pack(fill=tk.X, padx=5, pady=6)
+        # 4. 使用者偏好設定面板
+        frame_pref = ttk.LabelFrame(scrollable_frame, text="⚙️ 使用者操作偏好設定 (即時生效與持久化)", padding=6)
+        frame_pref.pack(fill=tk.X, padx=5, pady=2)
 
 
-        self.chk_enable_sentinel = ttk.Checkbutton(
+        chk_swap = ttk.Checkbutton(
             frame_pref,
-            text="🛡️ 啟用存檔前「衝突哨兵記憶體預檢門禁」(偵測到致命對沖時阻斷覆寫，磁碟 0 污染)",
-            variable=self.var_enable_sentinel
-        )
-        self.chk_enable_sentinel.pack(anchor=tk.W, pady=2)
-
-
-        self.chk_swap_bar = ttk.Checkbutton(
-            frame_pref,
-            text="🔀 底部動作列佈局左右對調 (將【備份並更新至目標字典檔】等按鈕置於左側，狀態列居下全寬顯示)",
+            text="🔀 底部動作按鈕左右對調 (將【備份並更新至《嚴格正則修復字典.txt》】等按鈕置於左側，狀態列恆於下方獨立顯示)",
             variable=self.var_swap_bottom_bar,
             command=self.on_swap_bottom_bar_toggled
         )
-        self.chk_swap_bar.pack(anchor=tk.W, pady=2)
+        chk_swap.pack(anchor=tk.W, pady=1)
 
 
-        self.chk_default_paste = ttk.Checkbutton(
+        chk_cp_paste = ttk.Checkbutton(
             frame_pref,
             text="📋 預設啟用「清空即貼上剪貼簿」功能 (點擊清空日誌按鈕時，自動將剪貼簿文字貼入日誌框)",
             variable=self.var_clear_and_paste,
             command=self.on_clear_and_paste_toggled
         )
-        self.chk_default_paste.pack(anchor=tk.W, pady=2)
+        chk_cp_paste.pack(anchor=tk.W, pady=1)
 
 
-        self.chk_default_copy = ttk.Checkbutton(
+        chk_pref_copy = ttk.Checkbutton(
             frame_pref,
-            text="📋 預設啟用「點擊預覽框即複製」調試模式 (單擊預覽框瞬間複製全量文字，頂部自動注入排查 Meta 標頭)",
+            text="📋 預設啟用「點擊預覽框即複製」調試模式 (單擊預覽框瞬間複製全量文字含 Meta 標頭，專供外部 AI 診斷)",
             variable=self.var_click_to_copy,
             command=self.on_click_to_copy_toggled
         )
-        self.chk_default_copy.pack(anchor=tk.W, pady=2)
+        chk_pref_copy.pack(anchor=tk.W, pady=1)
 
 
-        # 區塊 5: 調試滾動歷史紀錄看板 (獨立滾輪隔離 + 東亞字寬對齊)
-        frame_history = ttk.LabelFrame(self.tab2_scrollable_frame, text="📊 最近優化與調度歷史紀錄 (最新 20 筆滾動監控)", padding=10)
-        frame_history.pack(fill=tk.X, padx=5, pady=6)
-
-
-        self.txt_history = scrolledtext.ScrolledText(frame_history, height=8, font=self.code_font)
-        self.txt_history.pack(fill=tk.BOTH, expand=True)
-        header_row = (
-            f"{self._pad_display_width('時間戳記', 25)} | "
-            f"{self._pad_display_width('標的字詞', 12)} | "
-            f"{self._pad_display_width('作用帳號', 14)} | "
-            f"{self._pad_display_width('調用模型', 22)} | "
-            f"{self._pad_display_width('耗時', 7)} | "
-            f"{self._pad_display_width('狀態', 10)} | "
-            f"哨兵檢核\n"
-        )
-        self.txt_history.insert(tk.END, header_row)
-        self.txt_history.insert(tk.END, "-" * 116 + "\n")
-
-
-        self.txt_history.bind("<MouseWheel>", self._on_history_wheel)
-        self.txt_history.bind("<Button-4>", self._on_history_wheel)
-        self.txt_history.bind("<Button-5>", self._on_history_wheel)
-
-
-        # 儲存全域設定按鈕
+        # 5. 儲存按鈕
         btn_save_all = tk.Button(
-            self.tab2_scrollable_frame,
-            text="💾 儲存所有帳號、路徑與調度設定",
+            scrollable_frame,
+            text="💾 儲存所有路徑與防風控設定",
             bg="#2563eb",
             fg="#ffffff",
             font=self.bold_font,
@@ -1389,672 +1334,629 @@ class RadarRegexToolApp:
             relief=tk.RAISED,
             command=self.save_all_settings
         )
-        btn_save_all.pack(anchor=tk.W, padx=5, pady=12)
+        btn_save_all.pack(anchor=tk.W, padx=5, pady=(6, 15))
 
 
-    # -----------------------------------------------------------------------
-    # 滑鼠滾輪全域穿透機制與歷史看板獨立滾動隔離
-    # -----------------------------------------------------------------------
-    def _on_history_wheel(self, event):
-        """歷史看板獨立滾輪處理：手動驅動內部捲動並截斷冒泡至外層畫布"""
-        if self.txt_history is None:
-            return "break"
-        if getattr(event, "num", None) == 4:
-            self.txt_history.yview_scroll(-2, "units")
-        elif getattr(event, "num", None) == 5:
-            self.txt_history.yview_scroll(2, "units")
-        elif getattr(event, "delta", 0) != 0:
-            step = int(-1 * (event.delta / 120))
-            if step == 0:
-                step = -1 if event.delta > 0 else 1
-            self.txt_history.yview_scroll(step, "units")
-        return "break"
+    def refresh_strategy_cards(self):
+        disp_key = self.dispatch_opt_map.get(self.combo_dispatch.get(), "locked")
+        self.lbl_card_dispatch.config(text=DISPATCH_DESCRIPTIONS.get(disp_key, ""))
 
 
-    def _bind_global_mousewheel(self):
-        self.root.bind_all("<MouseWheel>", self._on_global_mousewheel)
-        self.root.bind_all("<Button-4>", self._on_global_mousewheel_up)
-        self.root.bind_all("<Button-5>", self._on_global_mousewheel_down)
-
-
-    def _unbind_global_mousewheel(self):
-        self.root.unbind_all("<MouseWheel>")
-        self.root.unbind_all("<Button-4>")
-        self.root.unbind_all("<Button-5>")
-
-
-    def _on_global_mousewheel(self, event):
-        if event.widget is self.txt_history:
-            return
-        if self.tab2_canvas is not None:
-            if getattr(event, "delta", 0) != 0:
-                step = int(-1 * (event.delta / 120))
-                if step == 0:
-                    step = -1 if event.delta > 0 else 1
-                self.tab2_canvas.yview_scroll(step, "units")
-
-
-    def _on_global_mousewheel_up(self, event):
-        if event.widget is self.txt_history:
-            return
-        if self.tab2_canvas is not None:
-            self.tab2_canvas.yview_scroll(-2, "units")
-
-
-    def _on_global_mousewheel_down(self, event):
-        if event.widget is self.txt_history:
-            return
-        if self.tab2_canvas is not None:
-            self.tab2_canvas.yview_scroll(2, "units")
-
-
-    # -----------------------------------------------------------------------
-    # 檔案開啟檢驗與瀏覽器
-    # -----------------------------------------------------------------------
-    def open_file_path(self, entry_widget: ttk.Entry, role_name: str):
-        """調用系統關聯程式開啟實體檔案進行內容檢驗"""
-        target_path = entry_widget.get().strip()
-        if not target_path:
-            Toast.show(self.root, f"⚠️ 未設定【{role_name}】路徑！", duration=2000, bg="#f59e0b", fg="#000000")
-            return
-
-
-        norm_path = self._norm_path_or_empty(target_path)
-        if not norm_path or not os.path.exists(norm_path):
-            Toast.show(self.root, f"❌ 檔案不存在：{norm_path}", duration=3000, bg="#ef4444", fg="#ffffff")
-            self.update_status(f"❌ 找不到實體檔案：{norm_path}", fg_color="#dc2626")
-            return
-
-
-        try:
-            if hasattr(os, "startfile"):
-                os.startfile(norm_path)
-            elif sys.platform == "darwin":
-                subprocess.Popen(["open", norm_path])
-            else:
-                subprocess.Popen(["xdg-open", norm_path])
-            Toast.show(self.root, f"📂 已開啟【{role_name}】進行檢驗！", duration=2000, bg="#2563eb", fg="#ffffff")
-        except Exception as e:
-            Toast.show(self.root, f"❌ 開啟失敗: {str(e)}", duration=3000, bg="#ef4444", fg="#ffffff")
-
-
-    def browse_file(self, entry_widget, filetypes=None):
-        if filetypes is None:
-            filetypes = [("Text files", "*.txt"), ("All files", "*.*")]
-        filename = filedialog.askopenfilename(filetypes=filetypes)
-        if filename:
-            normalized_path = self._norm_path_or_empty(filename)
-            entry_widget.delete(0, tk.END)
-            entry_widget.insert(0, normalized_path)
-
-
-    def append_history_log(self, record: dict):
-        self.history_logs.append(record)
-        if len(self.history_logs) > 20:
-            self.history_logs.pop(0)
-
-
-        def _do():
-            if self.txt_history is not None:
-                try:
-                    if not self.txt_history.winfo_exists():
-                        return
-                except Exception:
-                    return
-                default_ts = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
-                t_str = self._pad_display_width(str(record.get("time") or default_ts), 25)
-                targets = self._pad_display_width(record.get("targets", "無/全量"), 12)
-                acc = self._pad_display_width(record.get("account", "未知"), 14)
-                model = self._pad_display_width(record.get("model", "未知"), 22)
-                elapsed = self._pad_display_width(record.get("elapsed", "0s"), 7)
-                status = self._pad_display_width(record.get("status", "完成"), 10)
-                sentinel = record.get("sentinel", "未檢驗")
-
-
-                row = f"{t_str} | {targets} | {acc} | {model} | {elapsed} | {status} | {sentinel}\n"
-                self.txt_history.insert(tk.END, row)
-                self.txt_history.see(tk.END)
-
-
-        try:
-            self.root.after(0, _do)
-        except Exception:
-            pass
+        route_key = self.route_opt_map.get(self.combo_route.get(), "vertical_first")
+        self.lbl_card_retry.config(text=RETRY_ROUTE_DESCRIPTIONS.get(route_key, ""))
 
 
     def on_dispatch_mode_changed(self, event=None):
-        self.update_dispatch_card_text()
-
-
-    def update_dispatch_card_text(self):
-        idx = self.combo_dispatch_mode.current()
-        modes = ["random", "round_robin", "locked"]
-        selected_mode = modes[idx] if 0 <= idx < len(modes) else "random"
-        text = self.DISPATCH_DESCRIPTIONS.get(selected_mode, "")
-        self.lbl_card_dispatch.config(text=text)
-
-
-    def on_retry_policy_changed(self, event=None):
-        self.update_retry_card_text()
-
-
-    def update_retry_card_text(self):
-        idx = self.combo_retry_policy.current()
-        policies = ["horizontal_first", "quality_locked", "vertical_first"]
-        selected_policy = policies[idx] if 0 <= idx < len(policies) else "horizontal_first"
-        text = self.RETRY_ROUTE_DESCRIPTIONS.get(selected_policy, "")
-        self.lbl_card_retry.config(text=text)
-
-
-    def on_swap_bottom_bar_toggled(self):
-        self.config["swap_bottom_bar"] = self.var_swap_bottom_bar.get()
+        disp_key = self.dispatch_opt_map.get(self.combo_dispatch.get(), "locked")
+        self.config["account_dispatch_mode"] = disp_key
+        self.refresh_strategy_cards()
+        self.update_top_account_combo_values()
         self.save_config()
-        self.repack_bottom_bar()
+
+
+    def on_retry_route_changed(self, event=None):
+        route_key = self.route_opt_map.get(self.combo_route.get(), "vertical_first")
+        self.config["retry_route_policy"] = route_key
+        self.refresh_strategy_cards()
+        self.save_config()
+
+
+    def browse_file(self, entry_widget):
+        filename = filedialog.askopenfilename(filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+        if filename:
+            entry_widget.delete(0, tk.END)
+            entry_widget.insert(0, filename)
 
 
     def save_all_settings(self):
+        self.config["repair_dict_path"] = self._norm_path_or_empty(self.entry_dict_path.get())
+        self.config["engineer_prompt_path"] = self._norm_path_or_empty(self.entry_eng_path.get())
+        self.config["qa_prompt_path"] = self._norm_path_or_empty(self.entry_qa_path.get())
+
+
+        # 儲存 3 組帳號矩陣
         new_profiles = []
-        for i, (e_name, e_key, e_note) in enumerate(self.profile_entries):
+        for i, ent_dict in enumerate(self.account_entries):
             new_profiles.append({
-                "name": e_name.get().strip() or f"帳號 {i+1}",
-                "key": e_key.get().strip(),
-                "note": e_note.get().strip()
+                "name": ent_dict["name"].get().strip() or f"帳號 {i+1}",
+                "key": ent_dict["key"].get().strip(),
+                "note": ent_dict["note"].get().strip()
             })
         self.config["api_profiles"] = new_profiles
         self.config["api_key"] = new_profiles[0]["key"]
 
 
-        # 5 大路徑安全正規化 (空路徑保持 ""，非空轉反斜線)
-        self.config["dict_path_1"] = self._norm_path_or_empty(self.entry_dict_1.get())
-        self.config["dict_path_2"] = self._norm_path_or_empty(self.entry_dict_2.get())
-        self.config["radar_engineer_prompt_path"] = self._norm_path_or_empty(self.entry_eng_prompt.get())
-        self.config["radar_qa_prompt_path"] = self._norm_path_or_empty(self.entry_qa_prompt.get())
-        self.config["sentinel_script_path"] = self._norm_path_or_empty(self.entry_sentinel_path.get())
-        self.config["enable_collision_sentinel"] = self.var_enable_sentinel.get()
-
-
-        dispatch_modes = ["random", "round_robin", "locked"]
-        d_idx = self.combo_dispatch_mode.current()
-        self.config["account_dispatch_mode"] = dispatch_modes[d_idx] if 0 <= d_idx < len(dispatch_modes) else "random"
-
-
-        retry_policies = ["horizontal_first", "quality_locked", "vertical_first"]
-        r_idx = self.combo_retry_policy.current()
-        self.config["retry_route_policy"] = retry_policies[r_idx] if 0 <= r_idx < len(retry_policies) else "horizontal_first"
+        # 策略設定
+        self.config["account_dispatch_mode"] = self.dispatch_opt_map.get(self.combo_dispatch.get(), "locked")
+        self.config["retry_route_policy"] = self.route_opt_map.get(self.combo_route.get(), "vertical_first")
 
 
         try:
-            self.config["max_retries"] = max(1, min(10, int(self.entry_max_retries.get())))
-        except Exception:
-            self.config["max_retries"] = 3
+            self.config["max_retries"] = max(1, min(5, int(self.entry_max_retries.get())))
+        except ValueError:
+            self.config["max_retries"] = 1
+        self.entry_max_retries.set(str(self.config["max_retries"]))
 
 
         try:
-            self.config["base_delay_seconds"] = max(0.1, min(30.0, float(self.entry_base_delay.get())))
-        except Exception:
-            self.config["base_delay_seconds"] = 2.0
+            delay_val = float(self.entry_base_delay.get())
+            self.config["base_delay_seconds"] = max(10.0, min(600.0, delay_val))
+        except ValueError:
+            self.config["base_delay_seconds"] = 180.0
+        self.entry_base_delay.set(str(self.config["base_delay_seconds"]))
 
 
         try:
-            self.config["request_timeout_seconds"] = max(10.0, min(600.0, float(self.entry_request_timeout.get())))
-        except Exception:
+            timeout_val = float(self.entry_request_timeout.get())
+            self.config["request_timeout_seconds"] = max(10.0, min(600.0, timeout_val))
+        except ValueError:
             self.config["request_timeout_seconds"] = 300.0
+        self.entry_request_timeout.set(str(self.config["request_timeout_seconds"]))
 
 
         self.config["enable_fallback"] = self.var_enable_fallback.get()
         self.config["fallback_model_1"] = self.combo_fallback_1.get().strip()
         self.config["fallback_model_2"] = self.combo_fallback_2.get().strip()
         self.config["swap_bottom_bar"] = self.var_swap_bottom_bar.get()
-        self.config["enable_click_to_copy"] = self.var_click_to_copy.get()
         self.config["enable_clear_and_paste"] = self.var_clear_and_paste.get()
+        self.config["enable_click_to_copy"] = self.var_click_to_copy.get()
 
 
         self.save_config()
-        self.refresh_top_account_combo()
-        Toast.show(self.root, "✅ 所有帳號、正規化路徑、逾時、哨兵預檢與偏好設定已成功更新！")
-
-
-    def _warn_unsaved_path_diffs(self, disk_cfg: dict | None = None) -> bool:
-        """比對頁籤 2 輸入框路徑與磁碟已儲存 config.json 差異，若有未儲存變更則提示警告"""
-        if disk_cfg is None:
-            disk_cfg = self.load_config()
-
-
-        pairs = [
-            (getattr(self, "entry_dict_1", None), "dict_path_1"),
-            (getattr(self, "entry_dict_2", None), "dict_path_2"),
-            (getattr(self, "entry_eng_prompt", None), "radar_engineer_prompt_path"),
-            (getattr(self, "entry_qa_prompt", None), "radar_qa_prompt_path"),
-            (getattr(self, "entry_sentinel_path", None), "sentinel_script_path"),
-        ]
-        for widget, key in pairs:
-            if widget is not None:
-                try:
-                    if widget.winfo_exists():
-                        ui_val = self._norm_path_or_empty(widget.get())
-                        disk_val = self._norm_path_or_empty(disk_cfg.get(key, ""))
-                        if ui_val != disk_val:
-                            Toast.show(
-                                self.root,
-                                "⚠️ 偵測到設定頁路徑有未儲存變更，本次操作將以已儲存之 config.json 為準！",
-                                duration=2800,
-                                bg="#f59e0b",
-                                fg="#000000"
-                            )
-                            return True
-                except Exception:
-                    pass
-        return False
+        self.update_top_account_combo_values()
+        Toast.show(self.root, "✅ 檔案路徑、單帳號鎖定槽位與防風控長退避設定已儲存！")
 
 
     # -----------------------------------------------------------------------
-    # 線程安全狀態更新、UI 鎖死與視覺告警控制
+    # UI 鎖定與狀態線程安全函式 (含頂部下拉選單連動鎖定)
     # -----------------------------------------------------------------------
-    def update_status(self, text, fg_color="#2563eb"):
-        def _apply():
-            if self.lbl_status is not None:
-                try:
-                    if self.lbl_status.winfo_exists():
-                        self.lbl_status.config(text=text, fg=fg_color)
-                except Exception:
-                    pass
-
-
-        try:
-            self.root.after(0, _apply)
-        except Exception:
-            pass
-
-
     def set_ui_locked(self, locked: bool):
         self.is_running = locked
+        btn_state = tk.DISABLED if locked else tk.NORMAL
+        account_state = tk.DISABLED if locked else "readonly"
+        model_state = tk.DISABLED if locked else tk.NORMAL
 
 
-        def _apply_lock():
-            state = tk.DISABLED if locked else tk.NORMAL
-            for btn in [self.btn_auto, self.btn_clear, self.btn_s1, self.btn_s2, self.btn_save, self.test_btn]:
-                if btn is not None:
-                    try:
-                        if btn.winfo_exists():
-                            btn.config(state=state)
-                    except Exception:
-                        pass
+        self.root.after(0, lambda: self.btn_auto.config(state=btn_state))
+        self.root.after(0, lambda: self.btn_clear.config(state=btn_state))
+        self.root.after(0, lambda: self.btn_s1.config(state=btn_state))
+        self.root.after(0, lambda: self.btn_s2.config(state=btn_state))
+        self.root.after(0, lambda: self.btn_save.config(state=btn_state))
+        self.root.after(0, lambda: self.test_btn.config(state=btn_state))
+        self.root.after(0, lambda: self.account_combo.config(state=account_state))
+        self.root.after(0, lambda: self.model_combo.config(state=model_state))
 
 
-            if self.account_combo is not None:
-                try:
-                    if self.account_combo.winfo_exists():
-                        self.account_combo.config(state=tk.DISABLED if locked else "readonly")
-                except Exception:
-                    pass
+    def update_status(self, text, fg_color="#2563eb"):
+        self.root.after(0, lambda: self.lbl_status.config(text=text, fg=fg_color))
 
 
-            if self.model_combo is not None:
-                try:
-                    if self.model_combo.winfo_exists():
-                        self.model_combo.config(state=tk.DISABLED if locked else tk.NORMAL)
-                except Exception:
-                    pass
+    # -----------------------------------------------------------------------
+    # 【核心演算法 1】字典分組區塊解析器 (放寬帶名稱三行標頭與單行相容)
+    # -----------------------------------------------------------------------
+    def parse_repair_dict_sections(self, dict_content: str):
+        sec_pattern = re.compile(
+            r'^(#\s*={5,}[^\r\n]*\r?\n#\s*\[\s*([^\]]+?)\s*\][^\r\n]*\r?\n#\s*={5,}[^\r\n]*)',
+            re.MULTILINE
+        )
+        matches = list(sec_pattern.finditer(dict_content))
 
 
-        try:
-            self.root.after(0, _apply_lock)
-        except Exception:
-            pass
+        if not matches:
+            fallback_pattern = re.compile(
+                r'^(#\s*\[\s*([^\]]+?)\s*\][^\r\n]*)',
+                re.MULTILINE
+            )
+            matches = list(fallback_pattern.finditer(dict_content))
 
 
-    def set_save_btn_alert(self, is_alert: bool):
-        if self.btn_save is not None:
-            color = self.COLOR_SAVE_WARNING if is_alert else self.COLOR_SAVE_NORMAL
-            try:
-                self.btn_save.config(bg=color)
-            except Exception:
-                pass
+        if not matches:
+            return "", OrderedDict([("__ALL__", dict_content)])
 
 
-    @staticmethod
-    def sanitize_invisible_chars(raw_text: str) -> str:
-        if not raw_text:
-            return ""
-        return re.sub(r'[\u200b\ufeff\u200e\u200f]', '', raw_text)
+        header_text = dict_content[:matches[0].start()]
+        sections_map = OrderedDict()
 
 
-    @staticmethod
-    def _score_cjk_text(text: str, is_big5: bool) -> int:
-        """零依賴啟發式評分：針對 GBK 與 Big5 同時解碼成功時裁決繁簡文字合法性"""
-        score = 0
-        trad_punct = set("「」『』，。：；？！（）【】、")
-        trad_markers = set("體國學發這為們說時會對裡過麼當進種還點條目標詞字審核正則查找字典邏輯錯誤檔案路徑")
-        for ch in text:
-            code = ord(ch)
-            if 0x3040 <= code <= 0x30FF:
-                score -= 5
-            elif (0x0400 <= code <= 0x04FF) or (0x2500 <= code <= 0x257F):
-                score -= 6
-            elif 0xE000 <= code <= 0xF8FF:
-                score -= 8
-            elif (code < 32 and ch not in ("\r", "\n", "\t")) or code == 127:
-                score -= 10
-            elif ch in trad_punct:
-                score += 3
-            elif 0x4E00 <= code <= 0x9FFF:
-                score += 1
-                if is_big5:
-                    try:
-                        b = ch.encode("big5")
-                        if len(b) == 2 and 0xA4 <= b[0] <= 0xC6:
-                            score += 1
-                    except Exception:
-                        score -= 1
-                    if ch in trad_markers:
-                        score += 2
-                else:
-                    try:
-                        ch.encode("gb2312")
-                        score += 1
-                    except Exception:
-                        score -= 1
-        return score
+        for i, m in enumerate(matches):
+            sec_name = m.group(2).strip()
+            start_pos = m.start()
+            end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(dict_content)
+            sections_map[sec_name] = dict_content[start_pos:end_pos]
 
 
-    def read_file_text_multiformat(self, path: str) -> str:
-        if not path or not os.path.exists(path):
-            raise FileNotFoundError(f"找不到檔案：{path}")
+        return header_text, sections_map
 
 
-        try:
-            with open(path, 'rb') as f:
-                raw_bytes = f.read()
-        except OSError as e:
-            raise FileNotFoundError(f"無法讀取檔案 {path}: {e}") from e
+    # -----------------------------------------------------------------------
+    # 【核心演算法 2】目標分類自動嗅探引擎
+    # -----------------------------------------------------------------------
+    def detect_active_repair_sections(self, log_content: str, sections_keys: list):
+        if not log_content or not sections_keys:
+            return []
 
 
-        for enc in ('utf-8-sig', 'utf-8'):
-            try:
-                return raw_bytes.decode(enc)
-            except (UnicodeDecodeError, UnicodeError):
+        target_chars = set()
+
+
+        for line in log_content.splitlines():
+            line_str = line.strip()
+            if not line_str or line_str.startswith("#"):
                 continue
 
 
-        decoded_gbk = None
-        decoded_big5 = None
-        try:
-            decoded_gbk = raw_bytes.decode('gbk')
-        except (UnicodeDecodeError, UnicodeError):
-            pass
-        try:
-            decoded_big5 = raw_bytes.decode('big5')
-        except (UnicodeDecodeError, UnicodeError):
-            pass
+            delim = None
+            for d in ["<>", "->", "➔", "=>"]:
+                if d in line_str:
+                    delim = d
+                    break
 
 
-        if decoded_gbk is not None and decoded_big5 is None:
-            return decoded_gbk
-        if decoded_big5 is not None and decoded_gbk is None:
-            return decoded_big5
-        if decoded_gbk is not None and decoded_big5 is not None:
-            score_big5 = self._score_cjk_text(decoded_big5, is_big5=True)
-            score_gbk = self._score_cjk_text(decoded_gbk, is_big5=False)
-            return decoded_big5 if score_big5 >= score_gbk else decoded_gbk
+            if delim:
+                parts = line_str.split(delim, 1)
+                left_chars = set(re.findall(r'[\u4e00-\u9fa5]', parts[0]))
+                right_chars = set(re.findall(r'[\u4e00-\u9fa5]', parts[1]))
+                target_chars.update(left_chars | right_chars)
 
 
-        decoded_lossy = raw_bytes.decode('utf-8', errors='ignore')
-        if hasattr(self, "root") and self.root is not None:
-            try:
-                if self.root.winfo_exists():
-                    fname = os.path.basename(path)
-                    self.root.after(0, lambda fn=fname: Toast.show(
-                        self.root,
-                        f"⚠️ 檔案 [{fn}] 含無法識別之編碼字元，已採容錯讀取（請核對內容）",
-                        duration=3000,
-                        bg="#f59e0b",
-                        fg="#000000"
-                    ))
-            except Exception:
-                pass
-        return decoded_lossy
+        if not target_chars:
+            target_chars.update(re.findall(r'[\u4e00-\u9fa5]', log_content))
+
+
+        if not target_chars:
+            return []
+
+
+        matched_sections = []
+        for sec_name in sections_keys:
+            if sec_name == "__ALL__":
+                continue
+            sec_chars = set(re.findall(r'[\u4e00-\u9fa5]', sec_name))
+            if sec_chars & target_chars:
+                matched_sections.append(sec_name)
+
+
+        return matched_sections
 
 
     # -----------------------------------------------------------------------
-    # 提示詞自適應嗅探與字典目標字解析
+    # 【核心演算法 3】記憶體微創切片器
+    # -----------------------------------------------------------------------
+    def slice_repair_sections(self, sections_map: OrderedDict, active_sections: list, header_text: str):
+        if not active_sections or "__ALL__" in sections_map:
+            full_text = header_text + "".join(sections_map.values())
+            return full_text, False
+
+
+        sliced_parts = []
+        slice_header = (
+            "# ==============================================================================\n"
+            "# 【微創切片模式】本次僅載入與錯字相關之目標分類區塊（其餘無關分類已由本機隔離保護）\n"
+            f"# 目標分類清單：[{', '.join(active_sections)}]\n"
+            "# 請僅針對以下目標分類進行正則審查、覆蓋優化或排序，並完整輸出以下區塊之全貌：\n"
+            "# ==============================================================================\n\n"
+        )
+        sliced_parts.append(slice_header)
+
+
+        for sec in active_sections:
+            if sec in sections_map:
+                sliced_parts.append(sections_map[sec])
+
+
+        return "".join(sliced_parts), True
+
+
+    # -----------------------------------------------------------------------
+    # 【核心演算法 4】存檔靜態語法檢查防線
+    # (PCRE2 記憶體寬容臨時中和 + 7 項致命黑名單 + 消除反斜線二義性脫殼)
+    # -----------------------------------------------------------------------
+    def validate_dict_syntax(self, dict_text: str):
+        current_section = "預設分類"
+        seen_patterns = set()
+
+
+        for line_num, line in enumerate(dict_text.splitlines(), start=1):
+            raw_line = line.strip()
+            if not raw_line or raw_line.startswith("#") or raw_line.startswith(";"):
+                if raw_line.startswith("#") and ("[" in raw_line and "]" in raw_line or "嚴格修復" in raw_line):
+                    current_section = raw_line
+                    seen_patterns.clear()
+                continue
+
+
+            if "<>" not in raw_line:
+                continue
+
+
+            parts = raw_line.split("<>", 1)
+            pattern_str = parts[0].strip()
+
+
+            # 防線 A：中括號字元集脫殼清洗與省略號硬阻斷 (消除反斜線二義性回溯)
+            cleaned_pattern = re.sub(r'\[\^?(?:\\.|[^\\\]])+\]', '', pattern_str)
+
+
+            if "..." in cleaned_pattern or "…" in cleaned_pattern:
+                return False, f"正則 Pattern 包含非法省略號「{pattern_str}」(第 {line_num} 行)！模型偷懶輸出殘破規則。"
+
+
+            # 防線 B：同一分類區塊內重複規則檢查
+            if pattern_str in seen_patterns:
+                return False, f"在分類「{current_section}」中偵測到重複正則規則「{pattern_str}」(第 {line_num} 行)！模型覆蓋失敗產生冗餘。"
+            seen_patterns.add(pattern_str)
+
+
+            # 防線 C：正則編譯預檢 (PCRE2 記憶體臨時寬容中和，字典實體 0 污染)
+            python_compatible_pattern = re.sub(
+                r'\\x\{([0-9a-fA-F]{1,6})\}',
+                lambda m: f'\\u{m.group(1).zfill(4)}' if len(m.group(1)) <= 4 else f'\\U{m.group(1).zfill(8)}',
+                pattern_str
+            )
+            python_compatible_pattern = re.sub(
+                r'\(\*(?:SKIP|FAIL|PRUNE|COMMIT|ACCEPT|F)\)',
+                '(?:)',
+                python_compatible_pattern
+            )
+            python_compatible_pattern = re.sub(
+                r'(?<!\\)\\K',
+                '(?:)',
+                python_compatible_pattern
+            )
+            python_compatible_pattern = re.sub(
+                r'(?<!\\)\\[pP]\{[^{}\r\n]+\}',
+                '.',
+                python_compatible_pattern
+            )
+
+
+            try:
+                re.compile(python_compatible_pattern)
+            except re.error as e:
+                err_msg = str(e)
+                err_lower = err_msg.lower()
+
+
+                # 放行特例：PCRE2 合法之不定長逆序環視
+                if "look-behind requires fixed-width pattern" in err_lower:
+                    continue
+
+
+                # 7 項致命語法錯誤黑名單嚴格裁決
+                fatal_tokens = (
+                    "unterminated subpattern",
+                    "unbalanced parenthesis",
+                    "missing )",
+                    "unterminated character set",
+                    "bad character range",
+                    "bad escape",
+                    "nothing to repeat",
+                    "unknown extension",
+                    "unknown group name",
+                    "invalid group reference",
+                    "bad character in group name",
+                    "missing >",
+                    "missing group name"
+                )
+                if any(tok in err_lower for tok in fatal_tokens):
+                    return False, f"正則語法編譯錯誤「{pattern_str}」(第 {line_num} 行): {err_msg}"
+
+
+                if "multiple repeat" in err_lower:
+                    # 僅當確定為單純 PCRE2 佔有量詞 [+*?]+ 且非空量詞堆疊時容忍 (例如 Python 3.10 環境)
+                    has_possessive = bool(re.search(r'(?<![+*?\\])[+*?]\+', pattern_str))
+                    has_illegal_stack = bool(re.search(r'(?<!\\)(?:\*\*|\?\?|\+\+\+|\*\+?\*|\?\+?\?|[+*?]{3,})', pattern_str))
+                    if has_possessive and not has_illegal_stack:
+                        continue
+                    return False, f"正則語法編譯錯誤「{pattern_str}」(第 {line_num} 行): {err_msg}"
+
+
+                # 其餘未歸類之 re.error 採保守阻斷
+                return False, f"正則語法編譯錯誤「{pattern_str}」(第 {line_num} 行): {err_msg}"
+
+
+        return True, ""
+
+
+    # -----------------------------------------------------------------------
+    # 【核心演算法 5】記憶體原地原子縫合器 (雙重分類數量守恆物理熔斷門禁)
+    # -----------------------------------------------------------------------
+    def stitch_repair_sections(self, original_header: str, original_sections: OrderedDict,
+                               active_sections: list, ai_output_text: str, is_sliced: bool):
+        if is_sliced and "__ALL__" in original_sections:
+            raise Exception("微創縫合阻斷：目標字典檔案不含任何分類區塊標頭，無法匹配切片區塊，已終止寫入！")
+
+
+        _, ai_sections_map = self.parse_repair_dict_sections(ai_output_text)
+
+
+        if not is_sliced or "__ALL__" in original_sections:
+            if len(ai_sections_map) < len(original_sections):
+                raise Exception(
+                    f"全量覆蓋阻斷：AI 輸出分類數 ({len(ai_sections_map)}) 少於原字典分類數 ({len(original_sections)})！"
+                    f"檢測到模型偷懶截斷，已終止覆蓋以防壞檔。"
+                )
+            return ai_output_text
+
+
+        new_sections = OrderedDict(original_sections)
+
+
+        for sec_name in active_sections:
+            if sec_name in ai_sections_map:
+                new_sections[sec_name] = ai_sections_map[sec_name]
+            else:
+                matched = False
+                sec_clean = sec_name.replace(" ", "")
+                for ai_sec_key, ai_sec_val in ai_sections_map.items():
+                    if ai_sec_key.replace(" ", "") == sec_clean:
+                        new_sections[sec_name] = ai_sec_val
+                        matched = True
+                        break
+                if not matched:
+                    raise Exception(f"AI 輸出遺失目標分類區塊「{sec_name}」，縫合中斷以防壞檔！")
+
+
+        if len(new_sections) != len(original_sections):
+            raise Exception(
+                f"微創縫合異常：原字典分類數 ({len(original_sections)}) 與縫合後分類數 ({len(new_sections)}) 不一致！"
+                f"已觸發物理熔斷阻斷寫入！"
+            )
+
+
+        return original_header + "".join(new_sections.values())
+
+
+    # -----------------------------------------------------------------------
+    # 提示詞雙軌自適應路徑嗅探引擎
     # -----------------------------------------------------------------------
     def resolve_prompt_path(self, configured_path: str, role_type: str) -> str:
         if configured_path and os.path.isfile(configured_path):
-            return self._norm_path_or_empty(configured_path)
+            return configured_path
 
 
+        search_dir = ""
         if configured_path and os.path.isdir(configured_path):
             search_dir = configured_path
         elif configured_path:
             search_dir = os.path.dirname(configured_path)
-            if not search_dir:
-                search_dir = SCRIPT_DIR
-        else:
+
+
+        if not search_dir or not os.path.exists(search_dir):
             search_dir = SCRIPT_DIR
 
 
-        search_dir = os.path.normpath(search_dir)
-        if not os.path.exists(search_dir) or not os.path.isdir(search_dir):
+        if not os.path.isdir(search_dir):
             raise FileNotFoundError(f"找不到提示詞搜尋目錄：{search_dir}")
 
 
-        try:
-            all_txts = [
-                f for f in os.listdir(search_dir)
-                if os.path.isfile(os.path.join(search_dir, f)) and f.lower().endswith('.txt')
-            ]
-        except OSError as e:
-            raise FileNotFoundError(f"無法讀取提示詞目錄 [{search_dir}]: {e}") from e
-
-
         candidate_files = []
-        for f in all_txts:
-            f_upper = f.upper()
-            if role_type == "eng":
-                if ("工程師" in f or "ENG" in f_upper) and ("拓荒" not in f):
-                    candidate_files.append(f)
-            elif role_type == "qa":
-                if ("QA" in f_upper) or ("審查員" in f):
-                    candidate_files.append(f)
+        try:
+            for entry in os.listdir(search_dir):
+                full_p = os.path.join(search_dir, entry)
+                if os.path.isfile(full_p) and entry.lower().endswith(".txt"):
+                    candidate_files.append(entry)
+        except Exception as e:
+            raise FileNotFoundError(f"掃描提示詞目錄 [{search_dir}] 失敗: {str(e)}")
 
 
-        if not candidate_files:
+        role_type_lower = role_type.lower()
+        matched_files = []
+        for fname in candidate_files:
+            fn_upper = fname.upper()
+            if role_type_lower == "eng":
+                if "工程師" in fname or "ENG" in fn_upper:
+                    matched_files.append(fname)
+            elif role_type_lower == "qa":
+                if "QA" in fn_upper or "審查員" in fname:
+                    matched_files.append(fname)
+
+
+        if not matched_files:
             raise FileNotFoundError(f"在目錄 [{search_dir}] 中找不到匹配的 {role_type.upper()} 提示詞檔案！")
 
 
-        def get_version_score(filename: str):
-            full_p = os.path.join(search_dir, filename)
-            v_match = re.search(r'(?:v|V)?(\d+(?:\.\d+)+)', filename)
+        def score_file(fname):
+            full_path = os.path.join(search_dir, fname)
+            mtime = os.path.getmtime(full_path)
+            v_match = re.search(r'(?:v|V)?(\d+(?:\.\d+)+)', fname)
             if v_match:
-                try:
-                    num_parts = tuple(int(x) for x in v_match.group(1).split('.'))
-                    return (3, num_parts, os.path.getmtime(full_p))
-                except Exception:
-                    pass
-
-
-            d_match = re.search(r'(\d{8})', filename)
+                ver_tuple = tuple(int(x) for x in v_match.group(1).split("."))
+                return (3, ver_tuple, mtime)
+            d_match = re.search(r'(\d{8})', fname)
             if d_match:
-                try:
-                    d_int = int(d_match.group(1))
-                    return (2, (d_int,), os.path.getmtime(full_p))
-                except Exception:
-                    pass
+                date_int = int(d_match.group(1))
+                return (2, (date_int,), mtime)
+            return (1, (), mtime)
 
 
-            return (1, (), os.path.getmtime(full_p))
+        matched_files.sort(key=score_file, reverse=True)
+        best_file_name = matched_files[0]
+        best_file_path = self._norm_path_or_empty(os.path.join(search_dir, best_file_name))
 
 
-        candidate_files.sort(key=get_version_score, reverse=True)
-        best_file = candidate_files[0]
-        best_full_path = self._norm_path_or_empty(os.path.abspath(os.path.join(search_dir, best_file)))
+        config_key = "engineer_prompt_path" if role_type_lower == "eng" else "qa_prompt_path"
+        current_cfg = self._norm_path_or_empty(self.config.get(config_key, ""))
 
 
-        cfg_key = "radar_engineer_prompt_path" if role_type == "eng" else "radar_qa_prompt_path"
-        old_path = self._norm_path_or_empty(self.config.get(cfg_key, ""))
-
-
-        if old_path != best_full_path:
-            self.config[cfg_key] = best_full_path
+        if best_file_path != current_cfg:
+            self.config[config_key] = best_file_path
             self.save_config()
 
 
-            if role_type == "eng" and hasattr(self, 'entry_eng_prompt'):
-                self.entry_eng_prompt.delete(0, tk.END)
-                self.entry_eng_prompt.insert(0, best_full_path)
-            elif role_type == "qa" and hasattr(self, 'entry_qa_prompt'):
-                self.entry_qa_prompt.delete(0, tk.END)
-                self.entry_qa_prompt.insert(0, best_full_path)
+            if role_type_lower == "eng" and hasattr(self, "entry_eng_path"):
+                self.root.after(0, lambda p=best_file_path: (
+                    self.entry_eng_path.delete(0, tk.END),
+                    self.entry_eng_path.insert(0, p)
+                ))
+            elif role_type_lower == "qa" and hasattr(self, "entry_qa_path"):
+                self.root.after(0, lambda p=best_file_path: (
+                    self.entry_qa_path.delete(0, tk.END),
+                    self.entry_qa_path.insert(0, p)
+                ))
 
 
-            Toast.show(self.root, f"💡 提示詞已自動適配最新版：\n[{best_file}]", duration=2500, bg="#2563eb", fg="#ffffff")
+            self.root.after(0, lambda fn=best_file_name: Toast.show(
+                self.root,
+                f"💡 提示詞已自動適配最新版：\n[{fn}]",
+                duration=2500,
+                bg="#2563eb",
+                fg="#ffffff"
+            ))
 
 
-        return best_full_path
-
-
-    @staticmethod
-    def parse_dict_targets(dict_content: str) -> set[str]:
-        targets = set()
-        if not dict_content:
-            return targets
-
-
-        headers = re.findall(r';\s*\[\s*(?:\d+[\.、\s]*)?([^\]\s\-]+)', dict_content)
-        for h in headers:
-            h_clean = h.strip()
-            if h_clean:
-                targets.add(h_clean)
-
-
-        tails = re.findall(r'\|\s*([^\|\(\)\*\s\$\^\r\n]+)\s*$', dict_content, re.MULTILINE)
-        for t in tails:
-            t_clean = t.strip()
-            if t_clean:
-                targets.add(t_clean)
-
-
-        return targets
-
-
-    @staticmethod
-    def extract_log_targets(log_text: str) -> list[str]:
-        if not log_text:
-            return []
-        matches = re.findall(r'目標詞[:：]\s*([^\s(（\r\n]+)', log_text)
-        seen = set()
-        ordered_targets = []
-        for m in matches:
-            t = m.strip()
-            if t and t not in seen:
-                seen.add(t)
-                ordered_targets.append(t)
-        return ordered_targets
-
-
-    @classmethod
-    def detect_active_targets(cls, log_text: str, dict_content: str) -> list[str]:
-        if not log_text:
-            return []
-
-
-        track1_targets = cls.extract_log_targets(log_text)
-        if track1_targets:
-            return track1_targets
-
-
-        dict_targets = cls.parse_dict_targets(dict_content)
-        if not dict_targets:
-            return []
-
-
-        lines = [line.strip() for line in log_text.splitlines() if line.strip()]
-        total_lines = len(lines)
-        if total_lines == 0:
-            return []
-
-
-        hits = []
-        for word in dict_targets:
-            line_count = sum(1 for line in lines if word in line)
-            if line_count >= 1:
-                if total_lines < 3:
-                    hits.append((word, line_count))
-                elif (line_count / total_lines >= 0.15) or (line_count >= 3):
-                    hits.append((word, line_count))
-
-
-        if hits:
-            hits.sort(key=lambda x: x[1], reverse=True)
-            return [item[0] for item in hits]
-
-
-        return sorted(list(dict_targets))
-
-
-    @classmethod
-    def parse_dict_blocks(cls, dict_content: str) -> tuple[str, dict[str, str]]:
-        if not dict_content:
-            return "", {}
-
-
-        first_block = re.search(r'(?m)^;\s*\[', dict_content)
-        header_comment = dict_content[:first_block.start()] if first_block else ""
-
-
-        blocks_map = {}
-        for m in cls.ENTRY_BLOCK_REGEX.finditer(dict_content):
-            t_key = m.group(1).strip()
-            if t_key:
-                if t_key in blocks_map:
-                    blocks_map[t_key] += "\n\n" + m.group(0).strip()
-                else:
-                    blocks_map[t_key] = m.group(0).strip()
-
-
-        return header_comment, blocks_map
-
-
-    @classmethod
-    def slice_dict_blocks(cls, dict_content: str, active_targets: list[str]) -> str:
-        if not dict_content or not active_targets:
-            return dict_content
-
-
-        _, blocks_map = cls.parse_dict_blocks(dict_content)
-        sliced_blocks = []
-        for t in active_targets:
-            if t in blocks_map:
-                sliced_blocks.append(blocks_map[t].strip())
-
-
-        if not sliced_blocks:
-            return dict_content
-
-
-        k = len(sliced_blocks)
-        joined_blocks = "\n\n".join(sliced_blocks)
-        header_tag = f"; === 【對照原始字典局部切片 (共 {k} 組目標字)】 ===\n"
-        return header_tag + joined_blocks + "\n"
+        return best_file_path
 
 
     # -----------------------------------------------------------------------
-    # 底層 API 呼叫 (原樣透傳模型名稱 + 可調請求逾時軟降級)
+    # 【v1.5.5 核心演算法 6】單帳號鎖定候選清單產生器 (徹底下線多 Key 自動輪詢)
     # -----------------------------------------------------------------------
-    def raw_sdk_call(self, api_key: str, model_name: str, prompt_text: str, timeout_seconds: float = 300.0) -> str:
+    def get_dispatched_candidate_profiles(self):
+        all_profiles = self.config.get("api_profiles", [])
+        valid_profiles = []
+        for idx, p in enumerate(all_profiles):
+            key = p.get("key", "").strip()
+            if key:
+                prof_copy = p.copy()
+                prof_copy["original_index"] = idx
+                valid_profiles.append(prof_copy)
+
+
+        if not valid_profiles:
+            return []
+
+
+        locked_idx = max(0, min(2, int(self.config.get("locked_account_index", 0))))
+        for p in valid_profiles:
+            if p["original_index"] == locked_idx:
+                return [p]
+
+
+        return [valid_profiles[0]]
+
+
+    # -----------------------------------------------------------------------
+    # 任務快照封裝演算法 (Main Thread 完成切片與單帳號鎖定凍結，Worker 0 處 UI 讀取)
+    # -----------------------------------------------------------------------
+    def create_task_snapshot(self):
+        self._warn_unsaved_path_diffs(self.config)
+
+
+        eng_prompt_path = self.resolve_prompt_path(self.config.get("engineer_prompt_path", ""), "eng")
+        qa_prompt_path = self.resolve_prompt_path(self.config.get("qa_prompt_path", ""), "qa")
+        repair_dict_path = self._norm_path_or_empty(self.config.get("repair_dict_path", ""))
+        log_content = self.txt_log.get("1.0", tk.END).strip()
+
+
+        dict_full_content = self.read_file_content(repair_dict_path, "嚴格正則修復字典")
+        orig_header, orig_sections = self.parse_repair_dict_sections(dict_full_content)
+        active_secs = self.detect_active_repair_sections(log_content, list(orig_sections.keys()))
+        sliced_dict_text, is_sliced = self.slice_repair_sections(orig_sections, active_secs, orig_header)
+
+
+        candidate_profiles = self.get_dispatched_candidate_profiles()
+        if not candidate_profiles:
+            raise Exception("尚未設定任何有效的 Gemini API Key！請先至設定頁填入金鑰並儲存。")
+
+
+        try:
+            max_retries_val = max(1, min(5, int(self.config.get("max_retries", 1))))
+        except Exception:
+            max_retries_val = 1
+
+
+        try:
+            base_delay_val = max(10.0, min(600.0, float(self.config.get("base_delay_seconds", 180.0))))
+        except Exception:
+            base_delay_val = 180.0
+
+
+        try:
+            timeout_val = float(self.config.get("request_timeout_seconds", 300.0))
+            timeout_val = max(10.0, min(600.0, timeout_val))
+        except Exception:
+            timeout_val = 300.0
+
+
+        primary_model = self.model_combo.get().strip() or self.config.get("gemini_model", "gemini-3.8-flash") or "gemini-3.8-flash"
+
+
+        return {
+            "log_content": log_content,
+            "candidate_profiles": candidate_profiles,
+            "primary_model": primary_model,
+            "repair_dict_path": repair_dict_path,
+            "eng_prompt_path": eng_prompt_path,
+            "qa_prompt_path": qa_prompt_path,
+            "original_header": orig_header,
+            "original_sections": orig_sections,
+            "active_sections": active_secs,
+            "sliced_dict_text": sliced_dict_text,
+            "is_sliced": is_sliced,
+            "retry_cfg": {
+                "retry_route_policy": self.config.get("retry_route_policy", "vertical_first"),
+                "max_retries": max_retries_val,
+                "base_delay_seconds": base_delay_val,
+                "request_timeout_seconds": timeout_val,
+                "enable_fallback": bool(self.config.get("enable_fallback", True)),
+                "fallback_model_1": self.config.get("fallback_model_1", "gemini-3.6-flash"),
+                "fallback_model_2": self.config.get("fallback_model_2", "gemini-3.5-flash-lite")
+            }
+        }
+
+
+    # -----------------------------------------------------------------------
+    # SDK 底層請求封裝 (關閉隱形重試 + 逾時透傳軟降級，嚴禁拼接 models/ 前綴【By Design】)
+    # -----------------------------------------------------------------------
+    def raw_sdk_call(self, api_key, model_name, prompt_text, timeout_seconds=300.0):
         if not api_key:
-            raise Exception("尚未設定 API Key，請先於設定中配置！")
+            raise Exception("API Key 為空，無法發起請求！")
 
 
-        timeout_val = max(10.0, min(600.0, float(timeout_seconds)))
+        try:
+            timeout_val = max(10.0, min(600.0, float(timeout_seconds)))
+        except (TypeError, ValueError):
+            timeout_val = 300.0
 
 
         if GENAI_MODE == "google.genai":
             from google import genai
+            client = None
             try:
-                client = genai.Client(api_key=api_key, http_options={"timeout": int(timeout_val * 1000)})
-            except TypeError:
-                client = genai.Client(api_key=api_key)
+                from google.genai import types
+                try:
+                    http_opts = types.HttpOptions(
+                        timeout=int(timeout_val * 1000),
+                        retry_options=types.HttpRetryOptions(attempts=1)
+                    )
+                except (TypeError, AttributeError):
+                    http_opts = types.HttpOptions(timeout=int(timeout_val * 1000))
+                client = genai.Client(api_key=api_key, http_options=http_opts)
+            except (ImportError, TypeError, AttributeError):
+                try:
+                    client = genai.Client(api_key=api_key, http_options={"timeout": int(timeout_val * 1000)})
+                except TypeError:
+                    client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
                 model=model_name,
                 contents=prompt_text
@@ -2065,982 +1967,714 @@ class RadarRegexToolApp:
             genai_legacy.configure(api_key=api_key)
             model = genai_legacy.GenerativeModel(model_name)
             try:
-                response = model.generate_content(prompt_text, request_options={"timeout": float(timeout_val)})
+                response = model.generate_content(
+                    prompt_text,
+                    request_options={"timeout": float(timeout_val)}
+                )
             except TypeError:
                 response = model.generate_content(prompt_text)
             return response.text
         else:
-            raise Exception("未安裝 google-genai 套件，請執行 pip install google-genai")
+            raise Exception("未安裝 google-genai 模組，請先執行命令：pip install google-genai")
 
 
+    # -----------------------------------------------------------------------
+    # API 連通性測試探針 (優先測試頂部選定帳號，不污染 rr_counter)
+    # -----------------------------------------------------------------------
     def test_api_connection(self):
         if self.is_running:
-            Toast.show(self.root, "⚠️ 任務執行中，暫無法測試連通性！", bg="#f59e0b", fg="#000000")
+            Toast.show(self.root, "⚠️ 背景任務執行中，請稍候再試！", bg="#f59e0b", fg="#000000")
             return
 
 
-        active_profiles = self.get_active_profiles()
-        if not active_profiles:
-            msg = "⚠️ 尚未配置任何有效 API Key！請至設定頁輸入。"
-            Toast.show(self.root, msg, bg="#f59e0b", fg="#000000")
-            self._show_alert_banner("❌ 無法發起連線測試：所有 API Key 均為空，請至設定頁配置有效金鑰。")
+        # 任務啟動瞬間自動自癒隱藏舊告警橫幅
+        self._hide_alert_banner()
+
+
+        profiles = self.config.get("api_profiles", [])
+        selected_idx = self.account_combo.current()
+        current_prof = None
+
+
+        if 0 <= selected_idx < len(profiles):
+            cand = profiles[selected_idx]
+            if isinstance(cand, dict) and cand.get("key", "").strip():
+                current_prof = cand
+
+
+        if current_prof is None:
+            for cand in profiles:
+                if isinstance(cand, dict) and cand.get("key", "").strip():
+                    current_prof = cand
+                    break
+
+
+        if not current_prof:
+            err_txt = "尚未設定任何有效的 API Key，請至設定頁填寫！"
+            Toast.show(self.root, f"⚠️ {err_txt}", bg="#f59e0b", fg="#000000")
+            self._show_alert_banner("連通性測試阻斷", err_txt)
             return
 
 
-        idx = self.config.get("locked_account_index", 0)
-        all_profiles = self.config.get("api_profiles", [])
-        selected_profile = all_profiles[idx] if 0 <= idx < len(all_profiles) else {}
-        selected_has_key = isinstance(selected_profile, dict) and bool(selected_profile.get("key", "").strip())
+        api_key = current_prof.get("key", "").strip()
+        account_name = current_prof.get("name", "帳號")
+        model_name = self.model_combo.get().strip() or self.config.get("gemini_model", "gemini-3.8-flash") or "gemini-3.8-flash"
+        try:
+            timeout_sec = max(10.0, min(600.0, float(self.config.get("request_timeout_seconds", 300.0))))
+        except (TypeError, ValueError):
+            timeout_sec = 300.0
 
 
-        if selected_has_key:
-            target_profile = selected_profile
-            switched_note = ""
-        else:
-            target_profile = active_profiles[0]
-            switched_note = f"\n(已自動切換至首組有效帳號 [{target_profile['name']}] 測試)"
+        self.set_ui_locked(True)
+        self._start_stopwatch("🔍 連通性測試中", f"帳號: [{account_name}] 模型: [{model_name}]")
 
 
-        api_key = target_profile["key"]
-        account_name = target_profile["name"]
-        model_name = self.model_combo.get().strip() or self.config["gemini_model"]
-        timeout_sec = float(self.config.get("request_timeout_seconds", 300.0))
-
-
-        def _worker(k: str, m: str, acc_name: str, note: str, t_sec: float):
-            self.update_status(f"🔍 正在測試 [{acc_name}] 之模型 [{m}] 連通性...", fg_color="#2563eb")
+        def _worker(k, m, a_name, t_sec):
             try:
                 start_t = time.time()
                 self.raw_sdk_call(k, m, "Hello, reply 'OK'", timeout_seconds=t_sec)
                 cost_t = round(time.time() - start_t, 2)
 
 
+                # 測試成功自癒關閉告警橫幅
                 self._hide_alert_banner()
+                self._stop_stopwatch()
+
+
                 self.root.after(0, lambda: Toast.show(
                     self.root,
-                    f"✅ API 通暢！帳號 [{acc_name}] 模型 [{m}] 回應正常 ({cost_t}s){note}",
-                    duration=2400,
+                    f"✅ API 通暢！[{a_name}] 模型 [{m}] 回應正常 ({cost_t}s)",
+                    duration=2200,
                     bg="#10b981",
                     fg="#ffffff"
                 ))
-                self.update_status(f"💡 API 連線就緒 [{acc_name} | {m} / {cost_t}s]", fg_color="#059669")
+                self.update_status(f"💡 API 就緒 [{a_name} | {m} / {cost_t}s]", fg_color="#059669")
             except Exception as e:
+                self._stop_stopwatch()
                 err_msg = str(e)
                 err_upper = err_msg.upper()
                 if any(code in err_upper for code in ["503", "UNAVAILABLE", "HIGH DEMAND"]):
-                    status_desc = "⚠️ 伺服器暫時負載過高 (503)，請稍後再試或使用備援模型"
-                elif any(code in err_upper for code in ["404", "NOT_FOUND", "NOT FOUND"]):
+                    status_desc = f"⚠️ [{a_name}] 伺服器暫時負載過高 (503)"
+                elif re.search(r'(?<!\d)(?:400|403)(?!\d)', err_upper) or any(
+                    code in err_upper for code in ["API_KEY_INVALID", "PERMISSION_DENIED", "API KEY NOT VALID", "API KEY EXPIRED"]
+                ):
+                    status_desc = f"❌ [{a_name}] API Key 無效或未開通權限"
+                elif "404" in err_msg or "not found" in err_msg.lower():
                     status_desc = f"❌ 模型名稱 [{m}] 不存在"
-                elif any(code in err_upper for code in ["400", "403", "API_KEY_INVALID", "PERMISSION_DENIED"]):
-                    status_desc = "❌ API Key 無效或未開通權限"
                 else:
-                    status_desc = f"❌ 連線失敗: {err_msg[:60]}"
+                    status_desc = f"❌ [{a_name}] 連線失敗: {err_msg[:60]}"
 
 
-                banner_text = f"連線測試失敗 ➔ [帳號: {acc_name} ｜ 模型: {m}]：{status_desc}"
-                self._show_alert_banner(banner_text)
-                self.root.after(0, lambda: Toast.show(
-                    self.root,
-                    f"❌ 測試失敗: {status_desc}{note}",
-                    duration=3000,
-                    bg="#ef4444",
-                    fg="#ffffff"
+                # 展開固化常駐告警橫幅，完整呈現錯誤詳情
+                self._show_alert_banner("API 連通性測試失敗", f"測試帳號: [{a_name}] | 測試模型: [{m}]\n錯誤資訊: {err_msg}")
+                self.root.after(0, lambda: Toast.show(self.root, f"❌ 測試失敗: {status_desc}", duration=3000, bg="#ef4444", fg="#ffffff"))
+                self.update_status(f"❌ {status_desc}", fg_color="#dc2626")
+            finally:
+                self._stop_stopwatch()
+                self.set_ui_locked(False)
+
+
+        threading.Thread(target=_worker, args=(api_key, model_name, account_name, timeout_sec), daemon=True).start()
+
+
+    # -----------------------------------------------------------------------
+    # 【v1.5.5 核心演算法 7】單帳號防風控調用核心
+    # (風控阻斷偵測、邊界精確授權分類、單模型配額隔離與 180s 長冷卻垂直降階)
+    # -----------------------------------------------------------------------
+    def call_gemini_api(self, prompt_text, candidate_profiles, primary_model, retry_cfg, stage_name="任務"):
+        route_policy = retry_cfg.get("retry_route_policy", "vertical_first")
+        try:
+            max_retries = max(1, min(5, int(retry_cfg.get("max_retries", 1))))
+        except (TypeError, ValueError):
+            max_retries = 1
+        try:
+            base_delay = max(10.0, min(600.0, float(retry_cfg.get("base_delay_seconds", 180.0))))
+        except (TypeError, ValueError):
+            base_delay = 180.0
+        enable_fallback = retry_cfg.get("enable_fallback", True)
+        try:
+            timeout_seconds = max(10.0, min(600.0, float(retry_cfg.get("request_timeout_seconds", 300.0))))
+        except (TypeError, ValueError):
+            timeout_seconds = 300.0
+
+
+        models_ladder = [primary_model]
+        if enable_fallback and route_policy == "vertical_first":
+            fb1 = retry_cfg.get("fallback_model_1", "").strip()
+            fb2 = retry_cfg.get("fallback_model_2", "").strip()
+            if fb1 and fb1 not in models_ladder:
+                models_ladder.append(fb1)
+            if fb2 and fb2 not in models_ladder:
+                models_ladder.append(fb2)
+
+
+        # 防風控約束：僅使用單一鎖定帳號 (候選長度恆為 1)
+        target_prof = None
+        for prof in candidate_profiles:
+            if prof.get("key", "").strip():
+                target_prof = prof
+                break
+
+
+        if not target_prof:
+            raise Exception("尚未設定任何有效的 Gemini API Key！")
+
+
+        prof_key = target_prof.get("original_index", 0)
+        account_name = target_prof.get("name", "帳號 1")
+        api_key = target_prof.get("key", "").strip()
+
+
+        quota_exhausted_pairs = set()
+        last_error = None
+        last_model = primary_model
+
+
+        def _classify_error(err_upper: str):
+            is_not_found = ("404" in err_upper or "NOT_FOUND" in err_upper)
+            if is_not_found:
+                return False, False, False, False
+
+
+            is_risk_block = any(k in err_upper for k in [
+                "UNUSUAL ACCOUNT ACTIVITY",
+                "ACCOUNT VERIFICATION REQUIRED",
+                "VERIFY-ACCOUNT",
+                "BLOCKED DUE TO ABUSE"
+            ])
+
+
+            has_explicit_auth_kw = any(k in err_upper for k in [
+                "API_KEY_INVALID",
+                "PERMISSION_DENIED",
+                "API KEY NOT VALID",
+                "API KEY EXPIRED"
+            ])
+            is_invalid_arg = (not is_risk_block) and ("INVALID_ARGUMENT" in err_upper) and (not has_explicit_auth_kw)
+
+
+            is_auth_err = (not is_risk_block) and (not is_invalid_arg) and (
+                has_explicit_auth_kw or bool(re.search(r'(?<!\d)(?:400|403)(?!\d)', err_upper))
+            )
+
+
+            is_daily_quota_err = False
+            if (not is_risk_block) and (not is_invalid_arg) and (not is_auth_err) and (
+                "429" in err_upper or "RESOURCE_EXHAUSTED" in err_upper
+            ):
+                has_daily_kw = any(k in err_upper for k in [
+                    "GENERATEREQUESTSPERDAY", "PERDAY", "PER_DAY", "DAILY LIMIT"
+                ])
+                has_metric_kw = any(k in err_upper for k in [
+                    "QUOTA EXCEEDED FOR QUOTA METRIC", "QUOTA EXCEEDED FOR METRIC"
+                ])
+                has_per_minute_kw = any(k in err_upper for k in ["PERMINUTE", "PER MINUTE"])
+
+
+                has_long_retry = bool(re.search(
+                    r'RETRY[ \t_]*(?:IN|DELAY)[ \t"\':=]*\d+(?:\.\d+)?[^\S\r\n]*H',
+                    err_upper
                 ))
-                self.update_status(f"❌ [{acc_name}] {status_desc}", fg_color="#dc2626")
+                if not has_long_retry:
+                    for m in re.finditer(
+                        r'RETRY[ \t_]*(?:IN|DELAY)[ \t"\':=]*(\d+(?:\.\d+)?)[^\S\r\n]*([MS])',
+                        err_upper
+                    ):
+                        try:
+                            val = float(m.group(1))
+                            unit = m.group(2)
+                            seconds = val * 60.0 if unit == "M" else val
+                            if seconds >= 300.0:
+                                has_long_retry = True
+                                break
+                        except ValueError:
+                            continue
 
 
-        threading.Thread(target=_worker, args=(api_key, model_name, account_name, switched_note, timeout_sec), daemon=True).start()
+                if has_daily_kw or (has_metric_kw and not has_per_minute_kw) or has_long_retry:
+                    is_daily_quota_err = True
 
 
-    # -----------------------------------------------------------------------
-    # 抗焦慮碼錶 (世代 Token 隔離 + 主執行緒安全派發 + 秒數前置 + 心跳互鎖)
-    # -----------------------------------------------------------------------
-    def _start_stopwatch(self, desc_prefix: str, detail_suffix: str = "", fg_color: str = "#2563eb"):
-        self.heartbeat_active = False
-        self.stopwatch_token += 1
-        my_token = self.stopwatch_token
-        self.stopwatch_running = True
-        start_time = time.time()
-        suffix_part = f" {detail_suffix}" if detail_suffix else ""
-
-
-        def _tick():
-            if not self.stopwatch_running or my_token != self.stopwatch_token:
-                return
-            if not self.heartbeat_active:
-                elapsed = int(time.time() - start_time)
-                try:
-                    if self.lbl_status is not None and self.lbl_status.winfo_exists():
-                        self.lbl_status.config(
-                            text=f"{desc_prefix} (已耗時: {elapsed}s){suffix_part}...",
-                            fg=fg_color
-                        )
-                except Exception:
-                    return
-            try:
-                self.stopwatch_after_id = self.root.after(1000, _tick)
-            except Exception:
-                pass
-
-
-        def _init_on_main():
-            if not self.stopwatch_running or my_token != self.stopwatch_token:
-                return
-            if self.stopwatch_after_id is not None:
-                try:
-                    self.root.after_cancel(self.stopwatch_after_id)
-                except Exception:
-                    pass
-                self.stopwatch_after_id = None
-            if not self.heartbeat_active:
-                try:
-                    if self.lbl_status is not None and self.lbl_status.winfo_exists():
-                        self.lbl_status.config(
-                            text=f"{desc_prefix} (已耗時: 0s){suffix_part}...",
-                            fg=fg_color
-                        )
-                except Exception:
-                    return
-            try:
-                self.stopwatch_after_id = self.root.after(1000, _tick)
-            except Exception:
-                pass
-
-
-        try:
-            self.root.after(0, _init_on_main)
-        except Exception:
-            pass
-
-
-    def _stop_stopwatch(self):
-        self.stopwatch_running = False
-        self.stopwatch_token += 1
-
-
-        def _cancel_on_main():
-            if self.stopwatch_after_id is not None:
-                try:
-                    self.root.after_cancel(self.stopwatch_after_id)
-                except Exception:
-                    pass
-                self.stopwatch_after_id = None
-
-
-        try:
-            self.root.after(0, _cancel_on_main)
-        except Exception:
-            pass
-
-
-    def _sleep_with_heartbeat(self, sleep_time: float, current_model: str):
-        remaining_seconds = int(sleep_time)
-        if remaining_seconds <= 0:
-            return
-        self.heartbeat_active = True
-        try:
-            while remaining_seconds > 0 and self.is_running:
-                self.update_status(
-                    f"⏳ {current_model} 尖峰排隊中 (退避倒數: {remaining_seconds}s... 即將重試)",
-                    fg_color="#d97706"
-                )
-                time.sleep(1.0)
-                remaining_seconds -= 1
-        finally:
-            self.heartbeat_active = False
-
-
-    # -----------------------------------------------------------------------
-    # 多帳號多階梯狀態機 (API Key SHA-256 雜湊黑名單、防反向升級與 404/429 精準隔離)
-    # -----------------------------------------------------------------------
-    def call_gemini_api(self, prompt_text: str, candidate_profiles: list[dict], primary_model: str, retry_cfg: dict, stage_name: str = "任務") -> dict:
-        if not candidate_profiles:
-            raise Exception("可用帳號清單為空，請先於設定頁輸入 Gemini API Key！")
-
-
-        auth_failed_key_hashes = set()
-        unique_valid_key_hashes = {
-            hashlib.sha256(p["key"].strip().encode("utf-8")).hexdigest()
-            for p in candidate_profiles
-            if isinstance(p, dict) and p.get("key", "").strip()
-        }
-        if not unique_valid_key_hashes:
-            raise Exception("可用帳號金鑰皆為空，請先於設定頁輸入 Gemini API Key！")
-
-
-        max_retries = int(retry_cfg["max_retries"])
-        base_delay = float(retry_cfg["base_delay_seconds"])
-        request_timeout = float(retry_cfg.get("request_timeout_seconds", 300.0))
-        enable_fallback = bool(retry_cfg["enable_fallback"])
-        route_policy = retry_cfg.get("retry_route_policy", "horizontal_first")
-
-
-        # 建構防重疊與防反向升級模型階梯
-        primary_canon = self.RETIRED_MODEL_ALIAS.get(primary_model, primary_model)
-        primary_rank = self.PRESET_MODELS.index(primary_canon) if primary_canon in self.PRESET_MODELS else None
-        models_to_try = [primary_model]
-        seen_canon = {primary_canon}
-        if enable_fallback and route_policy != "quality_locked":
-            for fb in (retry_cfg["fallback_model_1"].strip(), retry_cfg["fallback_model_2"].strip()):
-                if not fb:
-                    continue
-                fb_canon = self.RETIRED_MODEL_ALIAS.get(fb, fb)
-                if fb_canon in seen_canon or fb in models_to_try:
-                    continue
-                if primary_rank is not None and fb_canon in self.PRESET_MODELS:
-                    if self.PRESET_MODELS.index(fb_canon) <= primary_rank:
-                        continue
-                seen_canon.add(fb_canon)
-                models_to_try.append(fb)
-
-
-        def is_transient_error(e: Exception) -> bool:
-            err_str = str(e).upper()
-            return any(k in err_str for k in [
+            is_trans_err = (not is_risk_block) and (not is_invalid_arg) and (not is_auth_err) and (not is_daily_quota_err) and any(k in err_upper for k in [
                 "503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED",
                 "500", "INTERNAL", "504", "DEADLINE_EXCEEDED", "HIGH DEMAND",
                 "EMPTY RESPONSE", "TIMEOUT", "TIMED OUT", "READTIMEOUT"
             ])
+            return is_risk_block, is_auth_err, is_daily_quota_err, is_trans_err
 
 
-        def is_account_auth_error(e: Exception) -> bool:
-            """比對單一帳號授權/無效金鑰錯誤 (前置排除 404/NOT_FOUND，且嚴禁納入 429)"""
-            err_s = str(e).upper()
-            if any(nf in err_s for nf in ["404", "NOT_FOUND", "NOT FOUND"]):
-                return False
-            return any(k in err_s for k in [
-                "400", "403", "API_KEY_INVALID", "PERMISSION_DENIED",
-                "CREDENTIALS", "INVALID_ARGUMENT", "API KEY NOT VALID", "API KEY EXPIRED"
-            ])
+        # 單帳號垂直階梯穿透調度
+        for m_idx, current_model in enumerate(models_ladder):
+            if (prof_key, current_model) in quota_exhausted_pairs:
+                continue
+            if not self.is_running:
+                raise Exception("任務已中止")
 
 
-        last_error = None
-
-
-        # 路線 1：horizontal_first
-        if route_policy == "horizontal_first":
-            for model_idx, current_model in enumerate(models_to_try):
-                is_fallback_model = (model_idx > 0)
-
-
-                for attempt in range(1, max_retries + 1):
-                    for prof_idx, profile in enumerate(candidate_profiles):
-                        acc_key = profile.get("key", "").strip() if isinstance(profile, dict) else ""
-                        if not acc_key:
-                            continue
-                        key_hash = hashlib.sha256(acc_key.encode("utf-8")).hexdigest()
-                        if key_hash in auth_failed_key_hashes:
-                            continue
-                        acc_name = profile.get("name", f"帳號{prof_idx+1}")
-
-
-                        try:
-                            start_t = time.time()
-                            res_text = self.raw_sdk_call(acc_key, current_model, prompt_text, timeout_seconds=request_timeout)
-                            cost_t = round(time.time() - start_t, 2)
-
-
-                            if res_text and res_text.strip():
-                                if is_fallback_model:
-                                    self.root.after(0, lambda m=current_model, a=acc_name: Toast.show(
-                                        self.root,
-                                        f"⚠️ 主要模型過載，已由 [{a}] 透過備援模型 [{m}] 完成任務！",
-                                        duration=2500, bg="#f59e0b", fg="#000000"
-                                    ))
-                                return {
-                                    "text": res_text,
-                                    "actual_account": acc_name,
-                                    "actual_model": current_model,
-                                    "elapsed_time": cost_t,
-                                    "is_fallback": is_fallback_model
-                                }
-                            else:
-                                raise Exception(f"帳號 [{acc_name}] 之模型 [{current_model}] 回傳空內容 (Empty Response)")
-
-
-                        except Exception as e:
-                            last_error = e
-                            if is_account_auth_error(e):
-                                auth_failed_key_hashes.add(key_hash)
-                                if len(auth_failed_key_hashes) >= len(unique_valid_key_hashes):
-                                    break
-                                switch_tip = f"⚠️ 帳號 [{acc_name}] 授權失效，嘗試候選池下組帳號..."
-                                self.update_status(switch_tip, fg_color="#d97706")
-                                time.sleep(0.3)
-                                continue
-
-
-                            if not is_transient_error(e):
-                                raise e
-
-
-                            switch_tip = f"⏳ [{stage_name}] 帳號 {acc_name} 模型 {current_model} 遇阻，嘗試下組帳號..."
-                            self.update_status(switch_tip, fg_color="#d97706")
-                            time.sleep(0.3)
-
-
-                    if len(auth_failed_key_hashes) >= len(unique_valid_key_hashes):
-                        break
-
-
-                    if attempt < max_retries and self.is_running:
-                        sleep_time = (base_delay * (2 ** (attempt - 1))) + random.uniform(0.1, 0.5)
-                        self._sleep_with_heartbeat(sleep_time, current_model)
-
-
-                if len(auth_failed_key_hashes) >= len(unique_valid_key_hashes):
-                    break
-
-
-                if model_idx < len(models_to_try) - 1 and self.is_running:
-                    next_model = models_to_try[model_idx + 1]
-                    switch_tip = f"⚠️ [{stage_name}] 全帳號模型 {current_model} 負載耗盡，切換至備援模型 [{next_model}]..."
-                    self.update_status(switch_tip, fg_color="#d97706")
-                    time.sleep(1.0)
-
-
-        # 路線 2：quality_locked
-        elif route_policy == "quality_locked":
-            current_model = primary_model
+            is_fallback_model = (m_idx > 0)
+            last_model = current_model
+            model_daily_exhausted = False
 
 
             for attempt in range(1, max_retries + 1):
-                for prof_idx, profile in enumerate(candidate_profiles):
-                    acc_key = profile.get("key", "").strip() if isinstance(profile, dict) else ""
-                    if not acc_key:
-                        continue
-                    key_hash = hashlib.sha256(acc_key.encode("utf-8")).hexdigest()
-                    if key_hash in auth_failed_key_hashes:
-                        continue
-                    acc_name = profile.get("name", f"帳號{prof_idx+1}")
+                if not self.is_running:
+                    raise Exception("任務已中止")
 
 
-                    try:
-                        start_t = time.time()
-                        res_text = self.raw_sdk_call(acc_key, current_model, prompt_text, timeout_seconds=request_timeout)
-                        cost_t = round(time.time() - start_t, 2)
+                try:
+                    start_t = time.time()
+                    response_text = self.raw_sdk_call(
+                        api_key, current_model, prompt_text, timeout_seconds=timeout_seconds
+                    )
+                    cost_t = round(time.time() - start_t, 2)
 
 
-                        if res_text and res_text.strip():
-                            return {
-                                "text": res_text,
-                                "actual_account": acc_name,
-                                "actual_model": current_model,
-                                "elapsed_time": cost_t,
-                                "is_fallback": False
-                            }
+                    if not response_text:
+                        raise Exception("EMPTY RESPONSE: 模型回傳空白內容")
+
+
+                    if is_fallback_model:
+                        self.root.after(0, lambda m=current_model, a=account_name: Toast.show(
+                            self.root,
+                            f"⚠️ 原模型受限，已由 [{a}] 備援模型 [{m}] 完成！",
+                            duration=2500, bg="#f59e0b", fg="#000000"
+                        ))
+
+
+                    return {
+                        "text": response_text,
+                        "account_name": account_name,
+                        "actual_model": current_model,
+                        "elapsed_time": cost_t,
+                        "is_fallback": is_fallback_model
+                    }
+                except Exception as e:
+                    last_error = e
+                    err_str = str(e)
+                    err_upper = err_str.upper()
+                    is_risk_block, is_auth_err, is_daily_quota_err, is_transient = _classify_error(err_upper)
+
+
+                    if is_risk_block:
+                        risk_msg = (
+                            f"🚨 觸發 Google 帳號風控或人機驗證，已全面終止請求，請手動登入 AI Studio 排除！\n"
+                            f"受阻節點: 帳號 [{account_name}] | 模型 [{current_model}] | 原始錯誤: {err_str}"
+                        )
+                        raise Exception(risk_msg)
+
+
+                    if is_auth_err:
+                        raise Exception(
+                            f"帳號 [{account_name}] 授權失效或權限遭拒，已立即終止！模型 [{current_model}] | 錯誤代碼: {err_str}"
+                        )
+
+
+                    if is_daily_quota_err:
+                        quota_exhausted_pairs.add((prof_key, current_model))
+                        model_daily_exhausted = True
+                        if m_idx < len(models_ladder) - 1:
+                            next_model = models_ladder[m_idx + 1]
+                            self.update_status(
+                                f"⚠️ [{stage_name}] 帳號 [{account_name}] 之 [{current_model}] 每日配額已滿，立即降階嘗試 [{next_model}]...",
+                                fg_color="#d97706"
+                            )
                         else:
-                            raise Exception(f"帳號 [{acc_name}] 之模型 [{current_model}] 回傳空內容 (Empty Response)")
-
-
-                    except Exception as e:
-                        last_error = e
-                        if is_account_auth_error(e):
-                            auth_failed_key_hashes.add(key_hash)
-                            if len(auth_failed_key_hashes) >= len(unique_valid_key_hashes):
-                                break
-                            switch_tip = f"⚠️ 帳號 [{acc_name}] 授權失效，切換下組帳號..."
-                            self.update_status(switch_tip, fg_color="#d97706")
-                            time.sleep(0.3)
-                            continue
-
-
-                        if not is_transient_error(e):
-                            raise e
-
-
-                        switch_tip = f"⏳ [{stage_name}] 帳號 {acc_name} 模型 {current_model} 遇阻，切換下組帳號..."
-                        self.update_status(switch_tip, fg_color="#d97706")
-                        time.sleep(0.3)
-
-
-                if len(auth_failed_key_hashes) >= len(unique_valid_key_hashes):
-                    break
-
-
-                if attempt < max_retries and self.is_running:
-                    sleep_time = (base_delay * (2 ** (attempt - 1))) + random.uniform(0.1, 0.5)
-                    self._sleep_with_heartbeat(sleep_time, f"[品質鎖定] {current_model}")
-
-
-        # 路線 3：vertical_first
-        else:
-            for prof_idx, profile in enumerate(candidate_profiles):
-                acc_key = profile.get("key", "").strip() if isinstance(profile, dict) else ""
-                if not acc_key:
-                    continue
-                key_hash = hashlib.sha256(acc_key.encode("utf-8")).hexdigest()
-                if key_hash in auth_failed_key_hashes:
-                    continue
-                acc_name = profile.get("name", f"帳號{prof_idx+1}")
-
-
-                account_auth_failed = False
-                for model_idx, current_model in enumerate(models_to_try):
-                    is_fallback_model = (model_idx > 0)
-
-
-                    for attempt in range(1, max_retries + 1):
-                        try:
-                            start_t = time.time()
-                            res_text = self.raw_sdk_call(acc_key, current_model, prompt_text, timeout_seconds=request_timeout)
-                            cost_t = round(time.time() - start_t, 2)
-
-
-                            if res_text and res_text.strip():
-                                if is_fallback_model:
-                                    self.root.after(0, lambda m=current_model, a=acc_name: Toast.show(
-                                        self.root,
-                                        f"⚠️ [{a}] 觸發模型備援，透過 [{m}] 完成任務！",
-                                        duration=2500, bg="#f59e0b", fg="#000000"
-                                    ))
-                                return {
-                                    "text": res_text,
-                                    "actual_account": acc_name,
-                                    "actual_model": current_model,
-                                    "elapsed_time": cost_t,
-                                    "is_fallback": is_fallback_model
-                                }
-                            else:
-                                raise Exception(f"帳號 [{acc_name}] 之模型 [{current_model}] 回傳空內容 (Empty Response)")
-
-
-                        except Exception as e:
-                            last_error = e
-                            if is_account_auth_error(e):
-                                auth_failed_key_hashes.add(key_hash)
-                                if len(auth_failed_key_hashes) < len(unique_valid_key_hashes):
-                                    switch_tip = f"⚠️ 帳號 [{acc_name}] 授權失效，嘗試下一帳號..."
-                                    self.update_status(switch_tip, fg_color="#d97706")
-                                    time.sleep(0.3)
-                                account_auth_failed = True
-                                break
-
-
-                            if not is_transient_error(e):
-                                raise e
-
-
-                            if attempt < max_retries and self.is_running:
-                                sleep_time = (base_delay * (2 ** (attempt - 1))) + random.uniform(0.1, 0.5)
-                                self._sleep_with_heartbeat(sleep_time, f"[{acc_name}] {current_model}")
-                            else:
-                                break
-
-
-                    if account_auth_failed:
+                            self.update_status(
+                                f"⚠️ [{stage_name}] 帳號 [{account_name}] 之 [{current_model}] 每日配額已滿。",
+                                fg_color="#d97706"
+                            )
                         break
 
 
-                if len(auth_failed_key_hashes) >= len(unique_valid_key_hashes):
-                    break
+                    if not is_transient:
+                        raise e
 
 
-        raise Exception(f"所有帳號與模型梯隊調用皆告失敗。最後錯誤: {str(last_error)}")
+                    # 暫態可退避錯誤 (503 / RPM 429 / Timeout / Empty Response)
+                    if attempt < max_retries:
+                        self._sleep_with_heartbeat(
+                            base_delay, stage_name, current_model, attempt, max_retries, action_label="即將重試"
+                        )
+                        if not self.is_running:
+                            raise Exception("任務已中止")
+                    elif m_idx < len(models_ladder) - 1:
+                        next_model = models_ladder[m_idx + 1]
+                        self._sleep_with_heartbeat(
+                            base_delay, stage_name, current_model, attempt, max_retries,
+                            action_label=f"冷卻後降階 [{next_model}]"
+                        )
+                        if not self.is_running:
+                            raise Exception("任務已中止")
 
 
-    # -----------------------------------------------------------------------
-    # 快照封裝與極速硬阻斷
-    # -----------------------------------------------------------------------
-    def get_selected_dict_content(self) -> tuple[str, str, str, str]:
-        choice = self.selected_dict_for_ai.get()
-        if choice == "dict1":
-            p = self._norm_path_or_empty(self.config.get("dict_path_1", ""))
-            if not p:
-                raise FileNotFoundError("已選擇【字典檔 1】，但路徑設定為空，請至設定頁配置並儲存！")
-            if not os.path.isfile(p):
-                raise FileNotFoundError(f"找不到【字典檔 1】實體檔案：{p}，請至設定頁修正路徑並儲存！")
-            return self.read_file_text_multiformat(p), "字典檔 1", choice, p
-        elif choice == "dict2":
-            p = self._norm_path_or_empty(self.config.get("dict_path_2", ""))
-            if not p:
-                raise FileNotFoundError("已選擇【字典檔 2】，但路徑設定為空，請至設定頁配置並儲存！")
-            if not os.path.isfile(p):
-                raise FileNotFoundError(f"找不到【字典檔 2】實體檔案：{p}，請至設定頁修正路徑並儲存！")
-            return self.read_file_text_multiformat(p), "字典檔 2", choice, p
-        return "", "不附帶字典", choice, ""
+            if model_daily_exhausted and m_idx == len(models_ladder) - 1:
+                break
 
 
-    def create_task_snapshot(self) -> dict:
-        raw_log = self.txt_log.get("1.0", tk.END).strip()
-        log_content = self.sanitize_invisible_chars(raw_log)
-        primary_model = self.model_combo.get().strip() or self.config["gemini_model"]
-        dict_content, dict_label, choice, target_path = self.get_selected_dict_content()
+        final_err_detail = (
+            f"單帳號階梯調度失敗。最後出錯節點: 帳號 [{account_name}] | 模型 [{last_model}] | 錯誤代碼: {str(last_error)}"
+        )
+        raise Exception(final_err_detail)
 
 
-        active_targets = self.detect_active_targets(log_content, dict_content) if dict_content else []
-        all_dict_targets = self.parse_dict_targets(dict_content) if dict_content else set()
+    def read_file_content(self, path, desc):
+        if not path or not os.path.exists(path):
+            raise FileNotFoundError(f"找不到{desc}檔案：{path}")
 
 
-        is_sliced = False
-        sliced_dict = dict_content
-        if choice in ("dict1", "dict2") and dict_content.strip() and active_targets:
-            if set(active_targets) < all_dict_targets and len(active_targets) > 0:
-                sliced_dict = self.slice_dict_blocks(dict_content, active_targets)
-                is_sliced = True
+        try:
+            with open(path, "rb") as f:
+                raw_bytes = f.read()
+        except OSError as e:
+            raise OSError(f"無法讀取{desc}檔案 ({path})：{str(e)}") from e
 
 
-        eng_prompt_path = self.resolve_prompt_path(self.config.get("radar_engineer_prompt_path", ""), "eng")
-        qa_prompt_path = self.resolve_prompt_path(self.config.get("radar_qa_prompt_path", ""), "qa")
+        # 1. 先依序嚴格嘗試 utf-8-sig 與 utf-8
+        for enc in ("utf-8-sig", "utf-8"):
+            try:
+                return raw_bytes.decode(enc)
+            except UnicodeDecodeError:
+                continue
 
 
-        active_profiles = self.get_active_profiles()
-        if not active_profiles:
-            active_profiles = [{"name": "臨時預設帳號", "key": self.config.get("api_key", ""), "note": ""}]
+        # 2. 分別嚴格嘗試 gbk 與 big5 解碼
+        gbk_text = None
+        big5_text = None
+        try:
+            gbk_text = raw_bytes.decode("gbk")
+        except UnicodeDecodeError:
+            pass
+        try:
+            big5_text = raw_bytes.decode("big5")
+        except UnicodeDecodeError:
+            pass
 
 
-        dispatch_mode = self.config.get("account_dispatch_mode", "random")
-        ordered_profiles = list(active_profiles)
+        if gbk_text is not None and big5_text is None:
+            return gbk_text
+        if big5_text is not None and gbk_text is None:
+            return big5_text
 
 
-        if len(ordered_profiles) > 1:
-            if dispatch_mode == "random":
-                start_idx = random.randint(0, len(ordered_profiles) - 1)
-                ordered_profiles = ordered_profiles[start_idx:] + ordered_profiles[:start_idx]
-            elif dispatch_mode == "round_robin":
-                start_idx = self.rr_counter % len(ordered_profiles)
-                self.rr_counter += 1
-                ordered_profiles = ordered_profiles[start_idx:] + ordered_profiles[:start_idx]
-            elif dispatch_mode == "locked":
-                locked_idx = self.config.get("locked_account_index", 0)
-                if 0 <= locked_idx < len(self.config.get("api_profiles", [])):
-                    locked_name = self.config["api_profiles"][locked_idx].get("name", "")
-                    for i, p in enumerate(ordered_profiles):
-                        if p.get("name") == locked_name:
-                            ordered_profiles = ordered_profiles[i:] + ordered_profiles[:i]
-                            break
+        # 3. 兩者皆成功時執行零依賴啟發式評分裁決 (同分優先採用 big5)
+        if gbk_text is not None and big5_text is not None:
+            gibberish_re = re.compile(r'[\u3040-\u30ff\u0370-\u03ff\u0400-\u04ff\u2500-\u257f\ue000-\uf8ff]')
 
 
-        retry_cfg = {
-            "max_retries": self.config["max_retries"],
-            "base_delay_seconds": self.config["base_delay_seconds"],
-            "request_timeout_seconds": self.config.get("request_timeout_seconds", 300.0),
-            "enable_fallback": self.config["enable_fallback"],
-            "fallback_model_1": self.config["fallback_model_1"],
-            "fallback_model_2": self.config["fallback_model_2"],
-            "retry_route_policy": self.config.get("retry_route_policy", "horizontal_first")
-        }
+            gbk_score = -10 * len(gibberish_re.findall(gbk_text))
+            for ch in gbk_text:
+                if '\u4e00' <= ch <= '\u9fff':
+                    try:
+                        ch.encode("gb2312")
+                        gbk_score += 2
+                    except UnicodeEncodeError:
+                        pass
 
 
-        return {
-            "dict_choice": choice,
-            "target_path": target_path,
-            "dict_label": dict_label,
-            "log_content": log_content,
-            "active_targets": active_targets,
-            "all_dict_targets": all_dict_targets,
-            "is_sliced": is_sliced,
-            "candidate_profiles": ordered_profiles,
-            "primary_model": primary_model,
-            "dict_content": dict_content,
-            "sliced_dict": sliced_dict,
-            "eng_prompt_path": eng_prompt_path,
-            "qa_prompt_path": qa_prompt_path,
-            "retry_cfg": retry_cfg,
-            "s1_meta": {},
-            "s1_hash": None,
-            "s2_meta": {},
-            "s2_hash": None
-        }
+            big5_score = -10 * len(gibberish_re.findall(big5_text))
+            for ch in big5_text:
+                try:
+                    b = ch.encode("big5")
+                except UnicodeEncodeError:
+                    continue
+                if len(b) == 2:
+                    code = (b[0] << 8) | b[1]
+                    if '\u4e00' <= ch <= '\u9fff' and 0xA4 <= b[0] <= 0xC6:
+                        big5_score += 2
+                    elif 0xA140 <= code <= 0xA1FE:
+                        big5_score += 3
 
 
-    def check_and_block_alien_targets(self, snapshot: dict) -> bool:
-        choice = snapshot["dict_choice"]
-        dict_content = snapshot["dict_content"]
-        dict_label = snapshot["dict_label"]
-        log_content = snapshot["log_content"]
+            if gbk_score > big5_score:
+                return gbk_text
+            return big5_text
 
 
-        if choice in ("dict1", "dict2") and dict_content.strip() and log_content:
-            log_targets = self.extract_log_targets(log_content)
-            dict_targets = self.parse_dict_targets(dict_content)
-
-
-            if log_targets and dict_targets:
-                alien_targets = [t for t in log_targets if t not in dict_targets]
-                if alien_targets:
-                    alien_str = "、".join(f"【{t}】" for t in alien_targets)
-                    self.set_save_btn_alert(True)
-                    err_msg = f"❌ 阻斷：日誌目標{alien_str}非{dict_label}收錄字，已終止發送！請切換字典"
-                    self.update_status(err_msg, fg_color="#dc2626")
-                    self._show_alert_banner(f"第 0 秒硬阻斷：{dict_label}中未收錄{alien_str}！請於 Radio 切換正確字典後重試。")
-                    Toast.show(
-                        self.root,
-                        f"❌ 字典不匹配，已阻斷發送！\n日誌目標{alien_str}未在{dict_label}中收錄。\n請切換 Radio 後重新點擊。",
-                        duration=3500,
-                        bg="#dc2626",
-                        fg="#ffffff"
-                    )
-                    return True
-
-
-        self.set_save_btn_alert(False)
-        return False
-
-
-    def reset_preview_headers(self):
-        if self.frame_s1 is not None:
-            self.frame_s1.config(text="階段一：雷達工程師提案預覽 (Stage 1)")
-        if self.frame_s2 is not None:
-            self.frame_s2.config(text="階段二：雷達 QA 審核與最終字典條目 (Stage 2 - 直通寫入來源)")
+        # 4. 四者皆解碼失敗時，以容錯模式讀取並發出異常警示
+        self.root.after(0, lambda d=desc, p=os.path.basename(path): Toast.show(
+            self.root,
+            f"⚠️ {d} [{p}] 編碼異常，已以 UTF-8 容錯模式讀取（可能含遺失字元）",
+            duration=3000,
+            bg="#f59e0b",
+            fg="#000000"
+        ))
+        return raw_bytes.decode("utf-8", errors="ignore")
 
 
     # -----------------------------------------------------------------------
-    # 雙階流水線 Worker (三大進入點配置例外安全網與未儲存路徑警示)
+    # 階段一 / 階段二 / 一鍵雙階 執行邏輯 (連動碼錶世代隔離、5s 安全緩衝與告警橫幅)
     # -----------------------------------------------------------------------
     def run_stage1_thread(self):
         if self.is_running:
+            Toast.show(self.root, "⚠️ 任務正在執行中，請稍候！", bg="#f59e0b", fg="#000000")
             return
 
 
-        self._warn_unsaved_path_diffs()
+        # 任務啟動瞬間自動自癒隱藏舊告警橫幅
+        self._hide_alert_banner()
 
 
         try:
             snapshot = self.create_task_snapshot()
         except Exception as e:
-            err_text = f"任務初始化失敗：{str(e)}"
-            self._show_alert_banner(f"❌ {err_text}")
-            Toast.show(self.root, f"❌ {err_text}", duration=3500, bg="#ef4444", fg="#ffffff")
-            self.update_status(f"❌ {err_text}", fg_color="#dc2626")
+            Toast.show(self.root, f"❌ {str(e)}", duration=3000, bg="#ef4444", fg="#ffffff")
+            self._show_alert_banner("階段一任務啟動阻斷", str(e))
             return
 
 
         if not snapshot["log_content"]:
-            Toast.show(self.root, "⚠️ 請先貼上或拖入日誌內容！", bg="#f59e0b", fg="#000000")
-            self.update_status("💡 就緒", fg_color="#4b5563")
-            return
-
-
-        if self.check_and_block_alien_targets(snapshot):
+            Toast.show(self.root, "⚠️ 請先貼上日誌內容！", bg="#f59e0b", fg="#000000")
             return
 
 
         self.last_task_snapshot = snapshot
-        self.set_ui_locked(True)
-
-
         self.txt_stage1.delete("1.0", tk.END)
         self.txt_stage2.delete("1.0", tk.END)
-        self.reset_preview_headers()
-
-
-        target_info = f"【{'、'.join(snapshot['active_targets'])}】" if snapshot['active_targets'] else ""
-        slice_info = " (微創切片)" if snapshot.get("is_sliced", False) else ""
-        first_acc = snapshot["candidate_profiles"][0]["name"] if snapshot["candidate_profiles"] else "預設帳號"
-        self._start_stopwatch("⏳ 雷達工程師提案中 (Stage 1)", f"[{first_acc}]{target_info}{slice_info}")
-
-
-        def _runner(snap: dict):
-            try:
-                self._exec_stage1(snap)
-            finally:
-                self._stop_stopwatch()
-                self.set_ui_locked(False)
-
-
-        threading.Thread(target=_runner, args=(snapshot,), daemon=True).start()
-
-
-    def _exec_stage1(self, snapshot: dict):
-        self.root.after(0, lambda: Toast.show(self.root, "🚀 [階段一] 雷達工程師提案生成中..."))
-        try:
-            log_content = snapshot["log_content"]
-            candidate_profiles = snapshot["candidate_profiles"]
-            primary_model = snapshot["primary_model"]
-            dict_label = snapshot["dict_label"]
-            eng_prompt_path = snapshot["eng_prompt_path"]
-            retry_cfg = snapshot["retry_cfg"]
-
-
-            dict_to_send = snapshot.get("sliced_dict", snapshot["dict_content"])
-            is_sliced = snapshot.get("is_sliced", False)
-            slice_mark = f" (局部切片: {len(snapshot['active_targets'])} 字)" if is_sliced else ""
-
-
-            eng_prompt = self.read_file_text_multiformat(eng_prompt_path)
-
-
-            full_prompt = f"{eng_prompt}\n\n"
-            if dict_to_send.strip():
-                full_prompt += f"=== 【對照原始{dict_label}內容{slice_mark}】 ===\n{dict_to_send}\n\n"
-            full_prompt += f"=== 【全局詳細正則搜尋結果日誌】 ===\n{log_content}\n"
-
-
-            api_res = self.call_gemini_api(full_prompt, candidate_profiles, primary_model, retry_cfg, stage_name="階段一")
-            result = api_res["text"]
-
-
-            snapshot["s1_meta"] = {
-                "actual_account": api_res["actual_account"],
-                "actual_model": api_res["actual_model"],
-                "elapsed_time": api_res["elapsed_time"],
-                "is_fallback": api_res["is_fallback"]
-            }
-            snapshot["s1_hash"] = hashlib.sha256(result.strip().encode("utf-8")).hexdigest()
-            self.root.after(0, lambda s=snapshot: setattr(self, "last_task_snapshot", s))
-
-
-            fallback_mark = " ⚠️備援" if api_res["is_fallback"] else ""
-            title_s1 = f"階段一：雷達工程師提案預覽 (Stage 1) [{api_res['actual_account']} | {api_res['actual_model']} | {api_res['elapsed_time']}s{fallback_mark}]"
-            self.root.after(0, lambda: self.frame_s1.config(text=title_s1))
-
-
-            if "🚨【架構阻斷：偵測到非本字典之外來目標字】" in result:
-                self.root.after(0, lambda: self.set_save_btn_alert(True))
-                self.update_status("🚨 AI 觸發熔斷阻斷：偵測到外來目標字，已拒絕寫入磁碟！", fg_color="#dc2626")
-                self._show_alert_banner("🚨 AI 觸發外來字架構熔斷：模型回傳非本字典目標字，已拒絕寫入！")
-                self.root.after(0, lambda: Toast.show(
-                    self.root,
-                    "🚨 AI 觸發外來字熔斷：已物理阻斷寫入！請確認對照字典。",
-                    duration=3500,
-                    bg="#dc2626",
-                    fg="#ffffff"
-                ))
-            else:
-                self._hide_alert_banner()
-                self.update_status(f"✅ 雷達工程師已給結果 [{api_res['actual_account']} | {api_res['actual_model']} | {api_res['elapsed_time']}s]", fg_color="#059669")
-
-
-            self.root.after(0, lambda: self._update_text_box(self.txt_stage1, result))
-            self.root.after(0, lambda: Toast.show(self.root, "✅ [階段一] 雷達工程師提案產出完成！"))
-            return result
-        except Exception as e:
-            err_msg = str(e)
-            banner_msg = f"❌ [階段一 失敗] 調用端點發生異常：{err_msg}"
-            self._show_alert_banner(banner_msg)
-            self.root.after(0, lambda: self._update_text_box(self.txt_stage1, f"❌ 執行失敗:\n{err_msg}"))
-            self.root.after(0, lambda: Toast.show(self.root, f"❌ 階段一失敗: {err_msg}", duration=3000, bg="#ef4444", fg="#ffffff"))
-            self.update_status("❌ 雷達工程師提案失敗", fg_color="#dc2626")
-            return None
-
-
-    def run_stage2_thread(self, stage1_input=None):
-        if self.is_running:
-            return
-
-
-        self._warn_unsaved_path_diffs()
-
-
-        try:
-            snapshot = self.create_task_snapshot()
-        except Exception as e:
-            err_text = f"任務初始化失敗：{str(e)}"
-            self._show_alert_banner(f"❌ {err_text}")
-            Toast.show(self.root, f"❌ {err_text}", duration=3500, bg="#ef4444", fg="#ffffff")
-            self.update_status(f"❌ {err_text}", fg_color="#dc2626")
-            return
-
-
-        if not snapshot["log_content"]:
-            Toast.show(self.root, "⚠️ 請先貼上或拖入日誌內容！", bg="#f59e0b", fg="#000000")
-            self.update_status("💡 就緒", fg_color="#4b5563")
-            return
-
-
-        s1_result = stage1_input or self.txt_stage1.get("1.0", tk.END).strip()
-        if not s1_result or s1_result.startswith("❌ 執行失敗"):
-            Toast.show(self.root, "⚠️ 請先完成階段一提案！", bg="#f59e0b", fg="#000000")
-            self.update_status("💡 就緒", fg_color="#4b5563")
-            return
-
-
-        if self.check_and_block_alien_targets(snapshot):
-            return
-
-
-        current_s1_hash = hashlib.sha256(s1_result.strip().encode("utf-8")).hexdigest()
-        if (
-            self.last_task_snapshot
-            and "s1_meta" in self.last_task_snapshot
-            and self.last_task_snapshot.get("s1_hash") == current_s1_hash
-            and self.last_task_snapshot.get("log_content") == snapshot["log_content"]
-        ):
-            snapshot["s1_meta"] = self.last_task_snapshot["s1_meta"]
-            snapshot["s1_hash"] = current_s1_hash
-
-
-        self.last_task_snapshot = snapshot
+        self.reset_preview_headers(s1=True, s2=True)
         self.set_ui_locked(True)
-        self.txt_stage2.delete("1.0", tk.END)
 
 
-        target_info = f"【{'、'.join(snapshot['active_targets'])}】" if snapshot['active_targets'] else ""
-        slice_info = " (微創切片)" if snapshot.get("is_sliced", False) else ""
-        first_acc = snapshot["candidate_profiles"][0]["name"] if snapshot["candidate_profiles"] else "預設帳號"
-        self._start_stopwatch("⏳ 雷達 QA 審核中 (Stage 2)", f"[{first_acc}]{target_info}{slice_info}")
+        slice_status = f"切片: {', '.join(snapshot['active_sections'])}" if snapshot["is_sliced"] else "全量模式"
+        self._start_stopwatch("⏳ 工程師提案中 (Stage 1)", slice_status)
 
 
-        def _runner(snap: dict, s1: str):
+        def _worker():
             try:
-                self._exec_stage2(snap, s1)
+                self._exec_stage1(snapshot)
             finally:
                 self._stop_stopwatch()
                 self.set_ui_locked(False)
 
 
-        threading.Thread(target=_runner, args=(snapshot, s1_result), daemon=True).start()
+        threading.Thread(target=_worker, daemon=True).start()
 
 
-    def _exec_stage2(self, snapshot: dict, s1_result: str):
-        self.root.after(0, lambda: Toast.show(self.root, "🔍 [階段二] 雷達 QA 嚴格審核進行中..."))
+    def _exec_stage1(self, snapshot):
+        self.root.after(0, lambda: Toast.show(self.root, "🚀 [階段一] 工程師提案生成中..."))
         try:
-            log_content = snapshot["log_content"]
-            candidate_profiles = snapshot["candidate_profiles"]
-            primary_model = snapshot["primary_model"]
-            dict_label = snapshot["dict_label"]
-            qa_prompt_path = snapshot["qa_prompt_path"]
-            retry_cfg = snapshot["retry_cfg"]
+            eng_prompt = self.read_file_content(snapshot["eng_prompt_path"], "工程師提示詞")
+            dict_context = snapshot["sliced_dict_text"]
 
 
-            dict_to_send = snapshot.get("sliced_dict", snapshot["dict_content"])
-            is_sliced = snapshot.get("is_sliced", False)
-            slice_mark = f" (局部切片: {len(snapshot['active_targets'])} 字)" if is_sliced else ""
-
-
-            qa_prompt = self.read_file_text_multiformat(qa_prompt_path)
-
-
-            full_prompt = f"{qa_prompt}\n\n"
-            if dict_to_send.strip():
-                full_prompt += f"=== 【對照原始{dict_label}內容{slice_mark}】 ===\n{dict_to_send}\n\n"
-
-
-            full_prompt += (
-                f"=== 【階段一雷達工程師提案】 ===\n{s1_result}\n\n"
-                f"=== 【原始搜尋結果日誌】 ===\n{log_content}\n"
+            full_prompt = (
+                f"{eng_prompt}\n\n"
+                f"=== 【現有修復字典內容】 ===\n{dict_context}\n\n"
+                f"=== 【使用者日誌搜尋結果】 ===\n{snapshot['log_content']}\n"
             )
 
 
-            api_res = self.call_gemini_api(full_prompt, candidate_profiles, primary_model, retry_cfg, stage_name="階段二")
-            result = api_res["text"]
+            result_data = self.call_gemini_api(
+                full_prompt,
+                snapshot["candidate_profiles"],
+                snapshot["primary_model"],
+                snapshot["retry_cfg"],
+                stage_name="階段一"
+            )
 
 
-            snapshot["s2_meta"] = {
-                "actual_account": api_res["actual_account"],
-                "actual_model": api_res["actual_model"],
-                "elapsed_time": api_res["elapsed_time"],
-                "is_fallback": api_res["is_fallback"]
+            result_text = result_data["text"]
+            snapshot["s1_meta"] = {
+                "account_name": result_data["account_name"],
+                "actual_model": result_data["actual_model"],
+                "elapsed_time": result_data["elapsed_time"],
+                "is_fallback": result_data["is_fallback"]
             }
 
 
-            fallback_mark = " ⚠️備援" if api_res["is_fallback"] else ""
-            title_s2 = f"階段二：雷達 QA 審核字典 (Stage 2) [{api_res['actual_account']} | {api_res['actual_model']} | {api_res['elapsed_time']}s{fallback_mark}]"
-            self.root.after(0, lambda: self.frame_s2.config(text=title_s2))
+            fallback_mark = " ⚠️備援" if result_data["is_fallback"] else ""
+            slice_mark = f" | 切片: {', '.join(snapshot['active_sections'])}" if snapshot["is_sliced"] else ""
+            title_s1 = (
+                f"階段一：工程師修復提案預覽 (Stage 1) "
+                f"[{result_data['account_name']} | {result_data['actual_model']} | {result_data['elapsed_time']}s{fallback_mark}{slice_mark}]"
+            )
 
 
-            is_meltdown = ("🚨【架構阻斷：偵測到非本字典之外來目標字】" in result)
-            if is_meltdown:
-                self.root.after(0, lambda: self.set_save_btn_alert(True))
-                self.update_status("🚨 AI 觸發熔斷阻斷：偵測到外來目標字，已拒絕寫入磁碟！", fg_color="#dc2626")
-                self._show_alert_banner("🚨 AI 觸發外來字架構熔斷：模型回傳非本字典目標字，已拒絕寫入！")
-                self.root.after(0, lambda: Toast.show(
-                    self.root,
-                    "🚨 AI 觸發外來字熔斷：已物理阻斷寫入！請確認對照字典。",
-                    duration=3500,
-                    bg="#dc2626",
-                    fg="#ffffff"
-                ))
-            else:
-                self._hide_alert_banner()
-                self.update_status(f"🎉 雷達 QA 已給結果 [{api_res['actual_account']} | {api_res['actual_model']} | {api_res['elapsed_time']}s]", fg_color="#059669")
-
-
-            s2_hash = hashlib.sha256(result.strip().encode("utf-8")).hexdigest()
-            snapshot["s2_hash"] = s2_hash
-            self.root.after(0, lambda s=snapshot: setattr(self, "last_task_snapshot", s))
-
-
-            self.root.after(0, lambda: self._update_text_box(self.txt_stage2, result))
-            if not is_meltdown:
-                self.root.after(0, lambda: Toast.show(self.root, "🎉 [階段二] 雷達 QA 審核完畢，最終字典已生成！"))
-
-
-            self.append_history_log({
-                "time": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z"),
-                "targets": "、".join(snapshot.get("active_targets", [])) or "全量",
-                "account": api_res["actual_account"],
-                "model": api_res["actual_model"],
-                "elapsed": f"{api_res['elapsed_time']}s",
-                "status": "QA通過" if not is_meltdown else "外來熔斷",
-                "sentinel": "待存檔檢核"
-            })
-
-
-            return result
+            self._stop_stopwatch()
+            self.root.after(0, lambda: self.frame_s1.config(text=title_s1))
+            self.root.after(0, lambda: self._update_text_box(self.txt_stage1, result_text))
+            self.root.after(0, lambda: Toast.show(self.root, "✅ [階段一] 工程師提案產出完成！"))
+            self.update_status(f"✅ 工程師已給結果 [{result_data['account_name']}]", fg_color="#059669")
+            return result_text
         except Exception as e:
-            err_msg = str(e)
-            banner_msg = f"❌ [階段二 失敗] 調用端點發生異常：{err_msg}"
-            self._show_alert_banner(banner_msg)
-            self.root.after(0, lambda: self._update_text_box(self.txt_stage2, f"❌ 執行失敗:\n{err_msg}"))
-            self.root.after(0, lambda: Toast.show(self.root, f"❌ 階段二失敗: {err_msg}", duration=3000, bg="#ef4444", fg="#ffffff"))
-            self.update_status("❌ 雷達 QA 審核失敗", fg_color="#dc2626")
+            err_str = str(e)
+            self._stop_stopwatch()
+            self._show_alert_banner("階段一執行失敗", err_str)
+            self.root.after(0, lambda: self._update_text_box(self.txt_stage1, f"❌ 執行失敗:\n{err_str}"))
+            self.root.after(0, lambda: Toast.show(self.root, f"❌ 階段一失敗: {err_str[:40]}", duration=3000, bg="#ef4444", fg="#ffffff"))
+            self.update_status("❌ 工程師提案失敗", fg_color="#dc2626")
+            return None
+
+
+    def run_stage2_thread(self):
+        if self.is_running:
+            Toast.show(self.root, "⚠️ 任務正在執行中，請稍候！", bg="#f59e0b", fg="#000000")
+            return
+
+
+        # 任務啟動瞬間自動自癒隱藏舊告警橫幅
+        self._hide_alert_banner()
+
+
+        s1_result = self.txt_stage1.get("1.0", tk.END).strip()
+        if not s1_result or s1_result.startswith("❌ 執行失敗"):
+            Toast.show(self.root, "⚠️ 請先完成階段一提案！", bg="#f59e0b", fg="#000000")
+            return
+
+
+        try:
+            snapshot = self.create_task_snapshot()
+        except Exception as e:
+            Toast.show(self.root, f"❌ {str(e)}", duration=3000, bg="#ef4444", fg="#ffffff")
+            self._show_alert_banner("階段二任務啟動阻斷", str(e))
+            return
+
+
+        self.last_task_snapshot = snapshot
+        self.txt_stage2.delete("1.0", tk.END)
+        self.reset_preview_headers(s1=False, s2=True)
+        self.set_ui_locked(True)
+
+
+        slice_status = f"切片: {', '.join(snapshot['active_sections'])}" if snapshot["is_sliced"] else "全量模式"
+        self._start_stopwatch("⏳ QA複決中 (Stage 2)", slice_status)
+
+
+        def _worker():
+            try:
+                self._exec_stage2(snapshot, s1_result)
+            finally:
+                self._stop_stopwatch()
+                self.set_ui_locked(False)
+
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+
+    def _exec_stage2(self, snapshot, stage1_result):
+        self.root.after(0, lambda: Toast.show(self.root, "🔍 [階段二] QA 嚴格審核進行中..."))
+        try:
+            qa_prompt = self.read_file_content(snapshot["qa_prompt_path"], "QA提示詞")
+            dict_context = snapshot["sliced_dict_text"]
+
+
+            full_prompt = (
+                f"{qa_prompt}\n\n"
+                f"=== 【現有修復字典內容】 ===\n{dict_context}\n\n"
+                f"=== 【階段一工程師提案】 ===\n{stage1_result}\n\n"
+                f"=== 【原始日誌搜尋結果】 ===\n{snapshot['log_content']}\n"
+            )
+
+
+            result_data = self.call_gemini_api(
+                full_prompt,
+                snapshot["candidate_profiles"],
+                snapshot["primary_model"],
+                snapshot["retry_cfg"],
+                stage_name="階段二"
+            )
+
+
+            result_text = result_data["text"]
+
+
+            s2_hash = hashlib.sha256(result_text.strip().encode("utf-8")).hexdigest()
+            snapshot["s2_hash"] = s2_hash
+            snapshot["s2_meta"] = {
+                "account_name": result_data["account_name"],
+                "actual_model": result_data["actual_model"],
+                "elapsed_time": result_data["elapsed_time"],
+                "is_fallback": result_data["is_fallback"]
+            }
+            self.last_task_snapshot = snapshot
+
+
+            fallback_mark = " ⚠️備援" if result_data["is_fallback"] else ""
+            slice_mark = f" | 切片: {', '.join(snapshot['active_sections'])}" if snapshot["is_sliced"] else ""
+            title_s2 = (
+                f"階段二：QA 審核與最終字典條目 (Stage 2) "
+                f"[{result_data['account_name']} | {result_data['actual_model']} | {result_data['elapsed_time']}s{fallback_mark}{slice_mark}]"
+            )
+
+
+            self._stop_stopwatch()
+            self.root.after(0, lambda: self.frame_s2.config(text=title_s2))
+            self.root.after(0, lambda: self._update_text_box(self.txt_stage2, result_text))
+            self.root.after(0, lambda: Toast.show(self.root, "🎉 [階段二] QA 審核完畢，最終字典已生成！"))
+            self.update_status(f"🎉 QA已給結果 [{result_data['account_name']}]", fg_color="#059669")
+            return result_text
+        except Exception as e:
+            err_str = str(e)
+            self._stop_stopwatch()
+            self._show_alert_banner("階段二審核失敗", err_str)
+            self.root.after(0, lambda: self._update_text_box(self.txt_stage2, f"❌ 執行失敗:\n{err_str}"))
+            self.root.after(0, lambda: Toast.show(self.root, f"❌ 階段二失敗: {err_str[:40]}", duration=3000, bg="#ef4444", fg="#ffffff"))
+            self.update_status("❌ QA複決失敗", fg_color="#dc2626")
             return None
 
 
     def run_auto_pipeline(self):
         if self.is_running:
+            Toast.show(self.root, "⚠️ 任務正在執行中，請稍候！", bg="#f59e0b", fg="#000000")
             return
 
 
-        self._warn_unsaved_path_diffs()
+        # 任務啟動瞬間自動自癒隱藏舊告警橫幅
+        self._hide_alert_banner()
 
 
         try:
             snapshot = self.create_task_snapshot()
         except Exception as e:
-            err_text = f"任務初始化失敗：{str(e)}"
-            self._show_alert_banner(f"❌ {err_text}")
-            Toast.show(self.root, f"❌ {err_text}", duration=3500, bg="#ef4444", fg="#ffffff")
-            self.update_status(f"❌ {err_text}", fg_color="#dc2626")
+            Toast.show(self.root, f"❌ {str(e)}", duration=3000, bg="#ef4444", fg="#ffffff")
+            self._show_alert_banner("一鍵雙階任務啟動阻斷", str(e))
             return
 
 
         if not snapshot["log_content"]:
-            Toast.show(self.root, "⚠️ 請先貼上或拖入日誌內容！", bg="#f59e0b", fg="#000000")
-            return
-
-
-        if self.check_and_block_alien_targets(snapshot):
+            Toast.show(self.root, "⚠️ 請先貼上日誌內容！", bg="#f59e0b", fg="#000000")
             return
 
 
         self.last_task_snapshot = snapshot
+        self.txt_stage1.delete("1.0", tk.END)
+        self.txt_stage2.delete("1.0", tk.END)
+        self.reset_preview_headers(s1=True, s2=True)
         self.set_ui_locked(True)
 
 
-        self.txt_stage1.delete("1.0", tk.END)
-        self.txt_stage2.delete("1.0", tk.END)
-        self.reset_preview_headers()
+        slice_status = f"切片: {', '.join(snapshot['active_sections'])}" if snapshot["is_sliced"] else "全量模式"
+        self._start_stopwatch("⏳ 工程師提案中 (Stage 1)", slice_status)
 
 
-        target_info = f"【{'、'.join(snapshot['active_targets'])}】" if snapshot['active_targets'] else ""
-        slice_info = " (微創切片)" if snapshot.get("is_sliced", False) else ""
-        first_acc = snapshot["candidate_profiles"][0]["name"] if snapshot["candidate_profiles"] else "預設帳號"
-        self._start_stopwatch("⏳ 雷達工程師提案中 (Stage 1)", f"[{first_acc}]{target_info}{slice_info}")
-
-
-        def _pipeline(snap: dict):
+        def _pipeline():
             try:
-                s1_res = self._exec_stage1(snap)
-
-
+                s1_res = self._exec_stage1(snapshot)
                 if not s1_res or s1_res.startswith("❌ 執行失敗"):
                     return
-                if "🚨【架構阻斷：偵測到非本字典之外來目標字】" in s1_res:
+
+
+                # 防風控保護：雙階之間強制 5 秒安全生理緩衝
+                self._stop_stopwatch()
+                self.update_status("⏳ [防風控保護] 雙階安全緩衝冷卻中 (5s)... 即將進入階段二", fg_color="#d97706")
+                for _ in range(5):
+                    if not self.is_running:
+                        return
+                    time.sleep(1.0)
+
+
+                if not self.is_running:
                     return
 
 
-                self._stop_stopwatch()
-                self._start_stopwatch("⏳ 雷達 QA 審核中 (Stage 2)", f"[{first_acc}]{target_info}{slice_info}")
-                self._exec_stage2(snap, s1_res)
+                # 切換至階段二，世代隔離重置碼錶為 0s
+                self._start_stopwatch("⏳ QA複決中 (Stage 2)", slice_status)
+                self._exec_stage2(snapshot, s1_res)
             finally:
                 self._stop_stopwatch()
                 self.set_ui_locked(False)
 
 
-        threading.Thread(target=_pipeline, args=(snapshot,), daemon=True).start()
+        threading.Thread(target=_pipeline, daemon=True).start()
 
 
     def _update_text_box(self, widget, text):
@@ -3049,500 +2683,234 @@ class RadarRegexToolApp:
 
 
     # -----------------------------------------------------------------------
-    # PCRE2 轉譯預檢 (括號狀態機 + 回溯控制動詞安全置換 + 致命黑名單)
-    # -----------------------------------------------------------------------
-    @staticmethod
-    def validate_pcre_syntax(cleaned_extracted: str) -> tuple[bool, str]:
-        """
-        四道防線語法驗證：
-        1. 括號狀態機掃描：排除轉義符與字元類 [...] 內部括號，攔截未配對或提前閉合之 ( / )
-        2. Unicode 大括號十六進位轉譯
-        3. PCRE2 回溯/引擎控制動詞安全置換為 (?:) (保留轉義序列與字元類原義)
-        4. Python re 試編譯 + 7 項致命錯誤黑名單裁決 (放行 \\p{Han}、\\K 等專屬語法)
-        """
-        pcre2_verb_pattern = re.compile(
-            r'(\\.|\[(?:\\.|[^\]])*\])|(\(\*(?:SKIP|FAIL|F|PRUNE|COMMIT|THEN|ACCEPT|UTF8?|UCP|CR|LF|CRLF|ANYCRLF|ANY|BSR_ANYCRLF|BSR_UNICODE|NO_AUTO_POSSESS|NO_START_OPT)(?::[^)]*)?\))'
-        )
-        fatal_blacklist = [
-            "unterminated subpattern",
-            "unbalanced parenthesis",
-            "unterminated character set",
-            "nothing to repeat",
-            "bad escape (end of pattern)",
-            "min repeat greater than max repeat",
-            "bad character range"
-        ]
-
-
-        for line in cleaned_extracted.splitlines():
-            line_s = line.strip()
-            if not line_s or line_s.startswith(";"):
-                continue
-
-
-            # 第一防線：狀態機括號對稱掃描
-            open_parens = 0
-            in_class = False
-            is_escaped = False
-
-
-            for char in line_s:
-                if is_escaped:
-                    is_escaped = False
-                    continue
-                if char == '\\':
-                    is_escaped = True
-                    continue
-                if not in_class and char == '[':
-                    in_class = True
-                    continue
-                if in_class and char == ']':
-                    in_class = False
-                    continue
-                if not in_class:
-                    if char == '(':
-                        open_parens += 1
-                    elif char == ')':
-                        open_parens -= 1
-                        if open_parens < 0:
-                            return False, f"括號閉合次序錯誤 (未配對先閉合)：{line_s[:40]}"
-
-
-            if open_parens != 0:
-                return False, f"括號數量不對稱 (未完整閉合)：{line_s[:40]}"
-
-
-            # 第二防線：Unicode 大括號十六進位轉譯
-            transpiled = re.sub(
-                r'\\x\{([0-9a-fA-F]+)\}',
-                lambda m: f"\\u{int(m.group(1), 16):04x}" if len(m.group(1)) <= 4 else f"\\U{int(m.group(1), 16):08x}",
-                line_s
-            )
-
-
-            # 第三防線：PCRE2 回溯控制動詞安全預替換 (保護轉義序列與字元類)
-            transpiled = pcre2_verb_pattern.sub(
-                lambda m: m.group(1) if m.group(1) is not None else "(?:)",
-                transpiled
-            )
-
-
-            # 第四防線：Python re.compile 試編譯 + 致命錯誤黑名單裁決
-            try:
-                re.compile(transpiled)
-            except re.error as e:
-                err_text = str(e)
-                if any(token in err_text for token in fatal_blacklist):
-                    return False, f"正則編譯失敗: {err_text} (條目: {line_s[:30]})"
-                continue
-
-
-        return True, ""
-
-
-    @classmethod
-    def stitch_and_deduplicate(cls, raw_full_dict: str, new_blocks_map: dict[str, str], active_targets: list[str]) -> str:
-        matches = list(cls.ENTRY_BLOCK_REGEX.finditer(raw_full_dict))
-
-
-        target_positions = {}
-        for idx, m in enumerate(matches):
-            t_key = m.group(1).strip()
-            if t_key:
-                target_positions.setdefault(t_key, []).append((idx, m))
-
-
-        stitched = raw_full_dict
-        for m in reversed(matches):
-            t_key = m.group(1).strip()
-            if t_key in active_targets and t_key in new_blocks_map:
-                positions = target_positions.get(t_key, [])
-                first_match_idx = positions[0][0]
-                current_match_idx = [p[0] for p in positions if p[1] == m][0]
-
-
-                if current_match_idx == first_match_idx:
-                    is_at_end = (m.end() >= len(stitched))
-                    new_block_str = new_blocks_map[t_key].strip()
-                    suffix = "\n" if is_at_end else "\n\n"
-                    replacement = new_block_str + suffix
-                    stitched = stitched[:m.start()] + replacement + stitched[m.end():]
-                else:
-                    stitched = stitched[:m.start()] + stitched[m.end():]
-
-
-        return stitched.strip("\r\n") + "\n"
-
-
-    # -----------------------------------------------------------------------
-    # 核心安全存檔：動態重讀組態、微創手術刀、衝突哨兵預檢與雙重原子覆寫
+    # 【安全存檔演算法】(防線門禁 + 三道Linter + 動態重讀換檔再解析縫合 + 雙保險原子落盤)
     # -----------------------------------------------------------------------
     def save_and_backup_dict(self):
         if self.is_running:
-            Toast.show(self.root, "⚠️ AI 任務執行中，請稍候再進行存檔！", bg="#f59e0b", fg="#000000")
+            Toast.show(self.root, "⚠️ 任務正在執行中，禁止存檔操作！", bg="#f59e0b", fg="#000000")
             return
 
 
         if not self.last_task_snapshot:
-            Toast.show(self.root, "⚠️ 尚未執行任何 AI 優化任務，無快照可比對存檔！", duration=2500, bg="#f59e0b", fg="#000000")
-            self.update_status("❌ 存檔失敗：無任務快照記錄", fg_color="#dc2626")
+            err_txt = "無已完成之任務快照！"
+            Toast.show(self.root, f"❌ 寫入阻斷：{err_txt}", bg="#ef4444", fg="#ffffff")
+            self._show_alert_banner("字典存檔阻斷", err_txt)
             return
 
 
-        if self.last_task_snapshot["dict_choice"] == "none":
-            Toast.show(self.root, "⚠️ 最近執行的任務為「不附帶字典檔」，無法覆蓋寫入！", duration=2500, bg="#f59e0b", fg="#000000")
-            self.update_status("❌ 存檔失敗：任務未關聯目標字典", fg_color="#dc2626")
+        qa_output = self.txt_stage2.get("1.0", tk.END).strip()
+
+
+        # 雙錨點物理唯一性門禁 (count == 1)
+        if qa_output.count(self.ANCHOR_TEXT) != 1:
+            err_txt = f"開頭錨點缺失或出現多次 (count={qa_output.count(self.ANCHOR_TEXT)})！"
+            Toast.show(self.root, f"❌ 寫入阻斷：{err_txt}", duration=3000, bg="#ef4444", fg="#ffffff")
+            self._show_alert_banner("雙錨點核驗失敗", err_txt)
             return
 
 
-        current_choice = self.selected_dict_for_ai.get()
-        if current_choice != self.last_task_snapshot["dict_choice"]:
-            msg = "❌ 寫入阻斷：偵測到對照字典已切換！存檔目標與優化任務不符，已中止覆蓋。"
-            Toast.show(self.root, msg, duration=3500, bg="#ef4444", fg="#ffffff")
-            self._show_alert_banner("❌ 存檔目標漂移：目前選定字典與任務快照不符，禁止覆蓋！")
-            self.update_status("❌ 存檔失敗：對照目標與優化快照不一致", fg_color="#dc2626")
+        if qa_output.count(self.EOF_MARKER) != 1:
+            err_txt = f"結尾 EOF 錨點缺失或出現多次 (count={qa_output.count(self.EOF_MARKER)})！"
+            Toast.show(self.root, f"❌ 寫入阻斷：{err_txt}", duration=3000, bg="#ef4444", fg="#ffffff")
+            self._show_alert_banner("雙錨點核驗失敗", err_txt)
             return
 
 
-        # 存檔前重讀磁碟 config.json 並僅選擇性同步 6 鍵 (BL-new-01)
-        latest_cfg = self.load_config()
-        self._warn_unsaved_path_diffs(latest_cfg)
-        for sync_key in (
-            "dict_path_1",
-            "dict_path_2",
-            "radar_engineer_prompt_path",
-            "radar_qa_prompt_path",
-            "sentinel_script_path",
-            "enable_collision_sentinel",
-        ):
-            self.config[sync_key] = latest_cfg[sync_key]
-
-
-        target_key = "dict_path_1" if current_choice == "dict1" else "dict_path_2"
-        target_path = self._norm_path_or_empty(latest_cfg.get(target_key, ""))
-        dict_label = self.last_task_snapshot["dict_label"]
-
-
-        qa_output = self.txt_stage2.get("1.0", tk.END)
-
-
-        if "🚨【架構阻斷：偵測到非本字典之外來目標字】" in qa_output:
-            self.set_save_btn_alert(True)
-            self._show_alert_banner("🚨 AI 觸發外來字架構熔斷：模型回傳非本字典目標字，已拒絕寫入磁碟！")
-            Toast.show(self.root, "❌ 寫入阻斷：QA 輸出包含外來字架構阻斷標記，禁止寫入磁碟！", duration=3500, bg="#ef4444", fg="#ffffff")
-            self.update_status("❌ 存檔失敗：AI 偵測到外來目標字熔斷", fg_color="#dc2626")
-            return
-
-
-        anchor_count = qa_output.count(self.ANCHOR_TEXT)
-        if anchor_count != 1:
-            err = "缺少開頭錨點" if anchor_count == 0 else "開頭錨點不唯一"
-            self._show_alert_banner(f"❌ 存檔阻斷：{err} ({self.ANCHOR_TEXT})")
-            Toast.show(self.root, f"❌ 寫入阻斷：{err}！", duration=3000, bg="#ef4444", fg="#ffffff")
-            self.update_status(f"❌ 存檔失敗：{err}", fg_color="#dc2626")
-            return
-
-
-        eof_count = qa_output.count(self.EOF_MARKER)
-        if eof_count != 1:
-            err = "缺少 EOF 結尾標記 (輸出不完整)" if eof_count == 0 else "結尾標記不唯一"
-            self._show_alert_banner(f"❌ 存檔阻斷：{err} ({self.EOF_MARKER})")
-            Toast.show(self.root, f"❌ 寫入阻斷：{err}！", duration=3500, bg="#ef4444", fg="#ffffff")
-            self.update_status(f"❌ 存檔失敗：{err}", fg_color="#dc2626")
-            return
-
-
+        # R1 數位印章核驗
         expected_hash = self.last_task_snapshot.get("s2_hash")
         if not expected_hash:
-            Toast.show(self.root, "❌ 寫入阻斷：尚未完成階段二 QA 審核，無有效字典印章！", duration=3000, bg="#ef4444", fg="#ffffff")
-            self.update_status("❌ 存檔失敗：缺少 QA 審核印章", fg_color="#dc2626")
+            err_txt = "缺少有效數位印章，請重新執行階段二！"
+            Toast.show(self.root, f"❌ 寫入阻斷：{err_txt}", bg="#ef4444", fg="#ffffff")
+            self._show_alert_banner("數位印章核驗失敗", err_txt)
             return
 
 
-        current_hash = hashlib.sha256(qa_output.strip().encode("utf-8")).hexdigest()
+        current_hash = hashlib.sha256(qa_output.encode("utf-8")).hexdigest()
         if current_hash != expected_hash:
-            self._show_alert_banner("❌ 存檔阻斷：預覽框內容已被手動篡改或非本輪生成 (數位印章不符)！")
-            Toast.show(self.root, "❌ 寫入阻斷：預覽框內容已被修改（數位印章不符）！已終止覆蓋。", duration=3500, bg="#ef4444", fg="#ffffff")
-            self.update_status("❌ 存檔失敗：內容數位印章比對失敗", fg_color="#dc2626")
+            err_txt = "預覽框內容已被修改或非本輪任務產出（數位印章不符）！已終止覆蓋。"
+            Toast.show(self.root, f"❌ 寫入阻斷：{err_txt}", duration=3500, bg="#ef4444", fg="#ffffff")
+            self._show_alert_banner("數位印章核驗失敗", err_txt)
             return
 
 
+        # 雙向切分與 N3 Markdown 圍欄硬阻斷
         try:
-            content_after_anchor = qa_output.split(self.ANCHOR_TEXT, 1)[1]
-            raw_dict_content = content_after_anchor.split(self.EOF_MARKER, 1)[0]
+            between_text = qa_output.split(self.ANCHOR_TEXT, 1)[1]
+            ai_dict_content = between_text.split(self.EOF_MARKER, 1)[0].strip("\r\n")
         except Exception as e:
-            Toast.show(self.root, f"❌ 錨點內容擷取解析失敗: {str(e)}", duration=3000, bg="#ef4444", fg="#ffffff")
-            self.update_status("❌ 存檔失敗：內容擷取解析錯誤", fg_color="#dc2626")
+            err_txt = f"雙向錨點切分失敗: {str(e)}"
+            Toast.show(self.root, f"❌ 寫入阻斷：{err_txt}", bg="#ef4444", fg="#ffffff")
+            self._show_alert_banner("錨點切分失敗", err_txt)
             return
 
 
-        cleaned_extracted = raw_dict_content.strip("\r\n")
-
-
-        if "```" in cleaned_extracted:
-            self._show_alert_banner("❌ 存檔阻斷：QA 輸出殘留 Markdown 代碼塊標記 (```)，拒絕覆寫！")
-            Toast.show(self.root, "❌ 寫入阻斷：QA 輸出中殘留 Markdown 代碼塊標記 (```)！已終止覆蓋以防壞檔。", duration=3500, bg="#ef4444", fg="#ffffff")
-            self.update_status("❌ 存檔失敗：輸出殘留代碼塊標記", fg_color="#dc2626")
+        if "```" in ai_dict_content:
+            err_txt = "QA 輸出中殘留 Markdown 代碼塊標記 (```)！已終止覆蓋以防壞檔。"
+            Toast.show(self.root, f"❌ 寫入阻斷：{err_txt}", duration=3500, bg="#ef4444", fg="#ffffff")
+            self._show_alert_banner("代碼圍欄安全阻斷", err_txt)
             return
 
 
-        if not cleaned_extracted.strip():
-            Toast.show(self.root, "❌ 寫入阻斷：擷取之字典內容為空！", duration=3000, bg="#ef4444", fg="#ffffff")
-            self.update_status("❌ 存檔失敗：擷取字典為空", fg_color="#dc2626")
+        if not ai_dict_content.strip():
+            err_txt = "截取之字典內容為空！"
+            Toast.show(self.root, f"❌ 寫入阻斷：{err_txt}", bg="#ef4444", fg="#ffffff")
+            self._show_alert_banner("空字典內容阻斷", err_txt)
             return
 
 
-        pcre_ok, pcre_err = self.validate_pcre_syntax(cleaned_extracted)
-        if not pcre_ok:
-            self._show_alert_banner(f"❌ 正則語法預檢失敗 (Linter Gate)：{pcre_err}")
-            Toast.show(self.root, f"❌ 寫入阻斷：正則語法預檢失敗！\n{pcre_err}", duration=3500, bg="#ef4444", fg="#ffffff")
-            self.update_status("❌ 存檔失敗：正則語法損壞", fg_color="#dc2626")
+        # 三道剛性靜態語法 Linter 防線檢查
+        is_valid, linter_err = self.validate_dict_syntax(ai_dict_content)
+        if not is_valid:
+            Toast.show(self.root, f"❌ 寫入阻斷：{linter_err}", duration=4000, bg="#ef4444", fg="#ffffff")
+            self._show_alert_banner("靜態語法 Linter 攔截", linter_err)
             return
 
 
-        if not target_path or not os.path.isfile(target_path):
-            err_missing = f"找不到目標【{dict_label}】實體檔案：{target_path or '(路徑為空)'}，請至設定頁修正路徑並儲存後重試存檔！"
-            self._show_alert_banner(f"❌ 存檔阻斷：{err_missing}")
-            Toast.show(self.root, f"❌ {err_missing}", duration=3500, bg="#ef4444", fg="#ffffff")
-            self.update_status("❌ 存檔失敗：目標檔案不存在（快照已保留供重試）", fg_color="#dc2626")
+        # 重讀磁碟最新 config.json 動態更新路徑（嚴禁整包覆蓋 self.config，僅同步三個路徑欄位）
+        latest_cfg = self.load_config()
+        for p_key in ("repair_dict_path", "engineer_prompt_path", "qa_prompt_path"):
+            self.config[p_key] = self._norm_path_or_empty(latest_cfg.get(p_key, ""))
+
+
+        dict_path = self.config["repair_dict_path"]
+
+
+        # 檢查 Tab 2 是否有未點擊儲存之路徑變更
+        unsaved_diffs = []
+        if hasattr(self, "entry_dict_path") and self._norm_path_or_empty(self.entry_dict_path.get()) != dict_path:
+            unsaved_diffs.append("字典路徑")
+        if hasattr(self, "entry_eng_path") and self._norm_path_or_empty(self.entry_eng_path.get()) != self.config["engineer_prompt_path"]:
+            unsaved_diffs.append("工程師提示詞路徑")
+        if hasattr(self, "entry_qa_path") and self._norm_path_or_empty(self.entry_qa_path.get()) != self.config["qa_prompt_path"]:
+            unsaved_diffs.append("QA提示詞路徑")
+        if unsaved_diffs:
+            Toast.show(
+                self.root,
+                f"⚠️ 設定頁有未儲存的 {', '.join(unsaved_diffs)} 變更，本次操作將依磁碟 config.json 為準！",
+                duration=3000,
+                bg="#f59e0b",
+                fg="#000000"
+            )
+
+
+        # 目標檔存在性門禁 (中斷時保留 last_task_snapshot，方便修正路徑後直接重試存檔)
+        if not dict_path or not os.path.isfile(dict_path):
+            err_txt = f"找不到目標字典檔案：{dict_path or '(未設定路徑)'}\n（已保留任務快照，修正路徑並儲存設定後可直接重試存檔）"
+            Toast.show(self.root, f"❌ {err_txt}", duration=3500, bg="#ef4444", fg="#ffffff")
+            self._show_alert_banner("目標字典檔案缺失", err_txt)
             return
 
 
-        if current_choice in ("dict1", "dict2") and not self.last_task_snapshot.get("dict_content", "").strip():
-            self._show_alert_banner("❌ 存檔阻斷：本次任務快照無原始字典上下文，請重新執行優化後再存檔！")
-            Toast.show(self.root, "❌ 寫入阻斷：任務快照無原始字典上下文，請重新執行優化！", duration=3500, bg="#ef4444", fg="#ffffff")
-            self.update_status("❌ 存檔失敗：缺乏原始字典快照", fg_color="#dc2626")
-            return
-
-
-        is_sliced = self.last_task_snapshot.get("is_sliced", False)
-        active_targets = self.last_task_snapshot.get("active_targets", [])
-
-
-        if is_sliced and active_targets:
-            try:
-                _, new_blocks_map = self.parse_dict_blocks(cleaned_extracted)
-                missing_targets = [t for t in active_targets if t not in new_blocks_map]
-                if missing_targets:
-                    missing_str = "、".join(missing_targets)
-                    self._show_alert_banner(f"❌ 縫合阻斷：QA 輸出缺少已鎖定之目標字條目：{missing_str}！")
-                    Toast.show(self.root, f"❌ 縫合阻斷：QA 輸出缺少已鎖定之目標字條目：{missing_str}！", duration=3500, bg="#ef4444", fg="#ffffff")
-                    self.update_status(f"❌ 存檔失敗：QA 結果缺少條目 {missing_str}", fg_color="#dc2626")
-                    return
-
-
-                raw_full_dict = self.read_file_text_multiformat(target_path)
-                _, disk_blocks_map = self.parse_dict_blocks(raw_full_dict)
-                missing_in_disk = [t for t in active_targets if t not in disk_blocks_map]
-                if missing_in_disk:
-                    missing_disk_str = "、".join(missing_in_disk)
-                    self._show_alert_banner(
-                        f"❌ 縫合阻斷：磁碟目標字典檔中找不到本次優化標的：{missing_disk_str}！"
-                        "請確認設定頁目標字典路徑是否正確，修正儲存後可重試存檔。"
-                    )
-                    Toast.show(
-                        self.root,
-                        f"❌ 縫合阻斷：磁碟字典缺少條目：{missing_disk_str}\n請確認路徑無誤後重試存檔（快照已保留）。",
-                        duration=3500, bg="#ef4444", fg="#ffffff"
-                    )
-                    self.update_status(f"❌ 存檔失敗：磁碟字典缺少條目 {missing_disk_str}", fg_color="#dc2626")
-                    return
-
-
-                final_dict_content = self.stitch_and_deduplicate(raw_full_dict, new_blocks_map, active_targets)
-                targets_str = "、".join(active_targets)
-            except Exception as e:
-                Toast.show(self.root, f"❌ 記憶體微創縫合失敗: {str(e)}", duration=3000, bg="#ef4444", fg="#ffffff")
-                self.update_status("❌ 存檔失敗：記憶體縫合運算異常", fg_color="#dc2626")
-                return
+        # 比對目標路徑是否變更，若指向新目標檔則重讀再解析
+        snap_dict_path = self._norm_path_or_empty(self.last_task_snapshot.get("repair_dict_path", ""))
+        if dict_path == snap_dict_path:
+            target_header = self.last_task_snapshot["original_header"]
+            target_sections = self.last_task_snapshot["original_sections"]
         else:
-            final_dict_content = cleaned_extracted + "\n"
-            targets_str = "全量條目"
+            try:
+                new_dict_content = self.read_file_content(dict_path, "新目標修復字典")
+                target_header, target_sections = self.parse_repair_dict_sections(new_dict_content)
+            except Exception as e:
+                err_txt = f"讀取或解析新目標字典失敗: {str(e)}"
+                Toast.show(self.root, f"❌ {err_txt}", duration=3500, bg="#ef4444", fg="#ffffff")
+                self._show_alert_banner("新目標字典解析失敗", str(e))
+                return
 
 
-        if self.ANCHOR_TEXT in final_dict_content or self.EOF_MARKER in final_dict_content:
-            Toast.show(self.root, "❌ 寫入阻斷：字典內容包含錨點標記！", duration=3000, bg="#ef4444", fg="#ffffff")
-            self.update_status("❌ 存檔失敗：字典內含未清除錨點", fg_color="#dc2626")
-            return
-
-
-        if "```" in final_dict_content:
-            Toast.show(self.root, "❌ 寫入阻斷：縫合後仍殘留代碼圍欄！", duration=3000, bg="#ef4444", fg="#ffffff")
-            self.update_status("❌ 存檔失敗：殘留代碼標記", fg_color="#dc2626")
-            return
-
-
-        # -------------------------------------------------------------------
-        # 哨兵記憶體預檢 (同步取自已儲存之 config.json)
-        # -------------------------------------------------------------------
-        sentinel_pass_label = "跳過/無哨兵"
-        if bool(self.config.get("enable_collision_sentinel", True)):
-            sentinel_path = self._norm_path_or_empty(self.config.get("sentinel_script_path", ""))
-            if sentinel_path and os.path.exists(sentinel_path):
-                self.update_status("🛡️ 正在執行哨兵語意對沖預檢 (Pre-Commit Gate)...", fg_color="#2563eb")
-                dry_tmp_path = target_path + ".sentinel_dryrun.tmp"
-                norm_d1 = self._norm_path_or_empty(latest_cfg.get("dict_path_1", ""))
-                norm_d2 = self._norm_path_or_empty(latest_cfg.get("dict_path_2", ""))
-                other_dict_path = norm_d2 if target_path == norm_d1 else norm_d1
-
-
-                try:
-                    with open(dry_tmp_path, "w", encoding="utf-8-sig", newline="") as f:
-                        f.write(final_dict_content)
-                        f.flush()
-
-
-                    cmd = [sys.executable, sentinel_path, "--cli-check", dry_tmp_path]
-                    if other_dict_path and os.path.exists(other_dict_path):
-                        cmd.append(other_dict_path)
-
-
-                    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-                    stdout_txt = proc.stdout.strip()
-
-
-                    is_collision = (
-                        "🚨 檢測到致命語意對沖" in stdout_txt or
-                        (proc.returncode != 0 and any(k in stdout_txt for k in ["語意對沖", "衝突對沖"]))
-                    )
-
-
-                    if is_collision:
-                        self.set_save_btn_alert(True)
-                        first_err_line = stdout_txt.splitlines()[0] if stdout_txt else "正則語意致命衝突"
-                        banner_msg = f"🚨 存檔遭哨兵阻斷！檢測到致命語意對沖：{first_err_line}！正式字典已物理保護 (磁碟 0 污染)。"
-                        self._show_alert_banner(banner_msg, show_sentinel=True)
-
-
-                        Toast.show(
-                            self.root,
-                            "❌ 存檔遭衝突哨兵阻斷！\n檢測到新規則與現有字典發生對沖！\n磁碟檔案未修改，請點擊橫幅搶救。",
-                            duration=3500,
-                            bg="#dc2626",
-                            fg="#ffffff"
-                        )
-                        self.update_status("❌ 存檔遭哨兵阻斷：檢測到正則語意對沖！", fg_color="#dc2626")
-
-
-                        self.append_history_log({
-                            "time": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z"),
-                            "targets": targets_str,
-                            "account": "-",
-                            "model": "-",
-                            "elapsed": "0s",
-                            "status": "❌ 哨兵阻斷",
-                            "sentinel": "🛑 衝突對沖"
-                        })
-                        return
-                    elif proc.returncode != 0:
-                        self.update_status("⚠️ 哨兵腳本執行異常，平滑降級放行正式存檔...", fg_color="#d97706")
-                        sentinel_pass_label = "⚠️ 哨兵異常放行"
-                    else:
-                        sentinel_pass_label = "🟢 哨兵通過"
-
-
-                except subprocess.TimeoutExpired:
-                    self.update_status("⚠️ 哨兵檢測逾時，平滑降級放行常規存檔...", fg_color="#d97706")
-                    sentinel_pass_label = "⚠️ 哨兵逾時放行"
-                except Exception as e:
-                    self.update_status(f"⚠️ 哨兵調用異常 ({str(e)[:20]})，平滑降級放行...", fg_color="#d97706")
-                    sentinel_pass_label = "⚠️ 哨兵降級"
-                finally:
-                    if os.path.exists(dry_tmp_path):
-                        try:
-                            os.remove(dry_tmp_path)
-                        except Exception:
-                            pass
-
-
-        # 雙保險 Copy-on-Write 備份 (同秒撞名防護) 與原子覆寫 (flush + os.fsync + os.replace)
-        tmp_file_path = target_path + ".tmp"
+        # 記憶體原地原子縫合 (實裝雙重分類數量守恆物理熔斷門禁)
         try:
+            final_stitched_dict = self.stitch_repair_sections(
+                original_header=target_header,
+                original_sections=target_sections,
+                active_sections=self.last_task_snapshot["active_sections"],
+                ai_output_text=ai_dict_content,
+                is_sliced=self.last_task_snapshot["is_sliced"]
+            )
+        except Exception as e:
+            err_txt = f"記憶體縫合失敗: {str(e)}"
+            Toast.show(self.root, f"❌ {err_txt}", duration=3500, bg="#ef4444", fg="#ffffff")
+            self._show_alert_banner("記憶體原地縫合熔斷", str(e))
+            return
+
+
+        # 雙保險原子置換覆蓋寫入 (Copy-on-Write 備份 + 同目錄 .tmp utf-8-sig LF 刷盤原子置換)
+        dict_dir = os.path.dirname(dict_path)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        random_id = f"{random.randint(1000, 9999)}"
+        temp_file_path = os.path.join(dict_dir, f"{os.path.basename(dict_path)}.tmp_{timestamp}_{random_id}")
+
+
+        try:
+            dict_filename = os.path.basename(dict_path)
             os.makedirs(TOOL_BAK_DIR, exist_ok=True)
-            dict_filename = os.path.basename(target_path)
-            name_no_ext, _ = os.path.splitext(dict_filename)
+            bak_filename = f"{timestamp}_{dict_filename}.bak"
+            bak_file_path = os.path.join(TOOL_BAK_DIR, bak_filename)
+            shutil.copy2(dict_path, bak_file_path)
 
 
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            bak_filename = f"{timestamp}_{name_no_ext}.bak"
-            bak_file_path = os.path.normpath(os.path.join(TOOL_BAK_DIR, bak_filename))
-            if os.path.exists(bak_file_path):
-                bak_filename = f"{timestamp}_{os.urandom(2).hex()}_{name_no_ext}.bak"
-                bak_file_path = os.path.normpath(os.path.join(TOOL_BAK_DIR, bak_filename))
-
-
-            shutil.copy2(target_path, bak_file_path)
-
-
-            with open(tmp_file_path, "w", encoding="utf-8-sig", newline="") as f:
-                f.write(final_dict_content)
+            normalized_lf = final_stitched_dict.replace("\r\n", "\n").replace("\r", "\n").strip("\n") + "\n"
+            with open(temp_file_path, "w", encoding="utf-8-sig", newline="\n") as f:
+                f.write(normalized_lf)
                 f.flush()
                 os.fsync(f.fileno())
 
 
-            os.replace(tmp_file_path, target_path)
+            os.replace(temp_file_path, dict_path)
 
 
-            self.set_save_btn_alert(False)
+            # 存檔覆蓋成功，自癒關閉告警橫幅
             self._hide_alert_banner()
 
 
-            if is_sliced:
-                success_msg = f"💾 【{dict_label}】局部手術更新【{targets_str}】成功並安全備份！"
-                toast_msg = f"✅ 舊檔已備份至 bak\\{bak_filename}\n並成功微創縫合更新【{dict_label}】之【{targets_str}】條目！"
-            else:
-                success_msg = f"💾 【{dict_label}】全量備份並更新成功！"
-                toast_msg = f"✅ 舊檔已備份至 bak\\{bak_filename}\n並成功寫入更新【{dict_label}】！"
-
-
-            Toast.show(self.root, toast_msg, duration=2600, bg="#10b981", fg="#ffffff")
-            self.update_status(success_msg, fg_color="#10b981")
-
-
-            self.append_history_log({
-                "time": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z"),
-                "targets": targets_str,
-                "account": "-",
-                "model": "-",
-                "elapsed": "0s",
-                "status": "存檔成功",
-                "sentinel": sentinel_pass_label
-            })
+            stitch_msg = "微創縫合更新" if self.last_task_snapshot["is_sliced"] else "全量覆蓋更新"
+            Toast.show(
+                self.root,
+                f"✅ 舊檔已備份至 bak/{bak_filename}\n並以【{stitch_msg}】原子寫入字典！",
+                duration=2800,
+                bg="#10b981",
+                fg="#ffffff"
+            )
+            self.update_status(f"💾 字典檔備份並{stitch_msg}成功！", fg_color="#10b981")
         except Exception as e:
-            self._show_alert_banner(f"❌ 磁碟原子覆寫失敗：{str(e)}")
-            Toast.show(self.root, f"❌ 備份或存檔失敗: {str(e)}", duration=3000, bg="#ef4444", fg="#ffffff")
+            err_txt = f"備份或存檔失敗: {str(e)}"
+            Toast.show(self.root, f"❌ {err_txt}", duration=2500, bg="#ef4444", fg="#ffffff")
+            self._show_alert_banner("磁碟寫入與原子置換失敗", str(e))
             self.update_status(f"❌ 存檔失敗: {str(e)[:40]}", fg_color="#dc2626")
         finally:
-            if os.path.exists(tmp_file_path):
+            if os.path.exists(temp_file_path):
                 try:
-                    os.remove(tmp_file_path)
+                    os.remove(temp_file_path)
                 except Exception:
                     pass
 
 
     def copy_qa_result(self):
-        qa_output = self.txt_stage2.get("1.0", tk.END).strip()
-        if not qa_output:
-            Toast.show(self.root, "⚠️ QA 最終字典內容為空！", bg="#f59e0b", fg="#000000")
-            return
-
-
         try:
+            qa_output = self.txt_stage2.get("1.0", tk.END).strip()
+            if not qa_output:
+                Toast.show(self.root, "⚠️ QA 最終字典內容為空！", bg="#f59e0b", fg="#000000")
+                return
+
+
             self.root.clipboard_clear()
             self.root.clipboard_append(qa_output)
             Toast.show(self.root, "📋 QA 最終字典內容已成功複製至剪貼簿！")
-        except Exception:
-            Toast.show(self.root, "⚠️ 剪貼簿正被其他程式鎖定，複製失敗，請重試！", duration=2500, bg="#f59e0b", fg="#000000")
+        except Exception as e:
+            err_summary = str(e).splitlines()[0][:60] if str(e) else "未知錯誤"
+            Toast.show(
+                self.root,
+                f"⚠️ 剪貼簿寫入失敗（可能被其他程式鎖定）：{err_summary}",
+                duration=3000,
+                bg="#f59e0b",
+                fg="#000000"
+            )
 
 
 # ---------------------------------------------------------------------------
-# 主程式啟動入口
+# 主程式進入點
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    if HAS_DND:
-        root = TkinterDnD.Tk()
-    else:
-        root = tk.Tk()
+    root = tk.Tk()
 
 
     style = ttk.Style()
@@ -3552,5 +2920,5 @@ if __name__ == "__main__":
         style.theme_use("clam")
 
 
-    app = RadarRegexToolApp(root)
+    app = NovelRegexToolApp(root)
     root.mainloop()
