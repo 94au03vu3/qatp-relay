@@ -87,264 +87,118 @@
 
 ## 【貳、 QA 測試驗證任務書 (QATP)】
 
-> 🔒 **規格預設值顯式定錨**：  
-> **1. 目標版本號**：`1.3.5` ｜ **2. 目標語系**：`Python 3 / Tkinter Desktop GUI` ｜ **3. By-Design 豁免清單**：`見下方第 1 小節清單 (BD-01 ~ BD-12)` ｜ **4. Profile**：`Profile-BackendScript`
+> **表頭規格預設值顯式定錨**：  
+> **1. 目標版本號**：`3.9.1` ｜ **2. 目標語系**：`繁體中文 (zh-TW / CMoney 台股財經頁面)` ｜ **3. By-Design 豁免清單**：`見下方第 1 小節清單` ｜ **4. Profile**：`Profile-WebScript`
 
-> 🔒 **QATP 預判標籤總則與安全港聲明**：  
-> ① 預判 `[FAIL]`（阻斷簽核）之允許集合，嚴格限縮於：P0 嚴重架構缺陷、P1 架構安全級缺陷、法定契約項（功能虛報、數據造假、版本號未宣告或未遞增）。  
-> ② **非失真安全港**：輔助性讓步延遲未逐一獨立成表（惟代碼本體欠缺必要讓步導致死循環或 CPU 飆高者除外）、具合理豁免說明之跨軌無涉 `[N/A]` 項目（非門禁最後依據者）、參數命名非實質縮寫或非功能性排版微瑕，均嚴禁判為 `[FAIL]`，統一歸列 P3 衛生觀察項。
-
----
-
-### 0. 🧬 【強制優先】Phase 0：獨立白箱代碼靜態風險排查
-
-QA 必須在展開測試案例表格前，對《審核雷達正則維護工具 v1.3.5.py》獨立完成以下五項底層靜態審查；凡發現未受保護之風險，須附帶 4 要素登錄於【3.3.1】：
-* **0.1 【外部進程與路徑安全排查】**：檢查 `launch_sentinel_gui`、`open_file_path`、`open_relay_exports_dir` 及 `save_and_backup_dict` 之 `subprocess.run` / `Popen` / `os.startfile` 呼叫點，驗證未啟用 `shell=True`、路徑皆經 `_norm_path_or_empty` 或 `os.path.normpath` 正規化，且在 `sys.frozen` 下不會自我重啟主執行緒程序。
-* **0.2 【字串與正則邊界吞噬排查】**：複掃 `ENTRY_BLOCK_REGEX`、`sanitize_invisible_chars`、`parse_dict_targets`、`extract_log_targets`、`is_daily_quota_error`、`is_auth_error` 與 `validate_pcre_syntax` 內 `pcre2_verb_pattern`，確認不存在 `.*` / `.*?` 與 `re.S` 共構吞噬全文換行之風險，且無空交替分支。
-* **0.3 【執行緒安全、互斥鎖與資源洩漏排查】**：複掃背景執行緒 (`_cleanup`、`_worker`、`_runner`、`_pipeline`) 是否存在任何直接讀取或寫入 Tkinter 控制項的違規路徑；驗證 `set_ui_locked`、`set_save_btn_alert`、`update_status`、`_show_alert_banner`、`_hide_alert_banner` 與 `_start_stopwatch` / `_stop_stopwatch` 皆經 `root.after(0, ...)` 與 `winfo_exists()` 保護；檢查 `.tmp` 檔案清理 `finally` 閉環。
-* **0.4 【全域頂層輸入格式與冷啟動例外防護排查】**：獨立複驗腳本頭部前 10 行 `__version__ = "1.3.5"`、`sys.setrecursionlimit(5000)`、可選模組 (`tkinterdnd2`、`google.genai`、`google.generativeai`) 之平滑降級旗標，及無金鑰／無提示詞環境下主視窗與外部接力分頁之無條件啟動存活度。
-* **0.5 【災難救援與執行環境能力邊界排查】**：審查離線環境下 `relay_exports\` 匯出檔案編碼 (`utf-8-sig`)、`.bak` 手動複製還原 SOP 與 `--cli-check` 哨兵 CLI 指令之本機執行可行性，確認無跨環境誤導或不可執行指令。
+> **QATP 預判標籤總則與安全港閉環**：  
+> ① 本任務書預判 `[FAIL]`（阻斷簽核）之允許集合，嚴格限縮於三類：P0 嚴重架構缺陷、P1 安全與穩定性缺陷、法定契約項（功能虛報、數據造假、版本號未宣告或未遞增）。  
+> ② **非失真安全港**：輔助性渲染讓步延遲未逐毫秒展開者（惟代碼本體根本欠缺必要讓步導致死循環者不入港，仍屬 P0 阻斷）、反向指標合理標記 `[N/A]` 且非不可豁免門禁最後依據者、非實質識別差異或排版微瑕，均嚴禁判為 `[FAIL]`，一律列為 P3 工單衛生觀察項。
 
 ---
 
-### 1. 🛡️ 架構妥協與驗收豁免須知 (By-Design Exceptions)
+### 0. 🧬 【強制優先】Phase 0：獨立白箱代碼靜態風險排查 (Static Code Audit)
 
-> **不可豁免鐵律與對稱面宣告**：  
-> 載入例外防護與救援入口存活於任何環境均不得豁免；目標檔案靜默損毀或未驗證覆寫恒為 P0 缺陷。屬 `Profile-BackendScript` 範圍外之 Web SPA 水合／DOM 選擇器與 AHK Win32 擊鍵項目，均依安全港原則標記無涉並排除。
+QA 必須於展開測試案例表格前，獨立完成以下五大靜態排查；凡發現異常風險，須附帶 4 要素記錄於【3.3.1】：
+* **0.1 【選擇器字元安全性與 URL 端點轉譯排查】**：查驗 `MODULE_KEY_REGEX` 是否完整阻隔引號、括號及換行字元進入 `p.modules`；查驗 `#cm-btn-save-profile` 是否已徹底消除動態屬性選擇器字串拼接；複檢 5 處 `<option>` 插值與輸入框值是否全面通過 `escapeHtml` 消毒；查驗 `getGoogleSheetsCsvUrl` 僅轉譯標準試算表 ID 與 `gid`。
+* **0.2 【字串與正則邊界吞噬排查】**：複掃全檔正則表達式（含 `MODULE_KEY_REGEX = /^[A-Za-z0-9_-]+$/`、`institutional-target` 目標價與總評清洗、`trading-fee` 費率清洗、`syncGoogleSheetLists` 補零正則 `/^[0-9]+[A-Z]?$/`），確認無「可空萬用字元 `.*`/`.*?` 搭配 `s` 旗標」或「空交替分支 `(|x)`」之全文換行吞噬風險（註：JS 正則與字串字面量內的 `\n` 為合法轉義序列，嚴禁憑空推斷為語法異常）。
+* **0.3 【跨分頁資源競爭、輪詢上限與記憶體洩漏排查】**：重點複核 `startRelayBatchScrape` 之 1000ms `batchMonitorTimer` 在正常推進期間完全不寫回 `cm_batch_task`；核對單頁 K 線輪詢 `singleScrapePoller` 上限為 `40 次 (20 秒)`、Worker K 線輪詢上限為 `50 次 (25 秒)`、Worker Watchdog 超時鎖定為 `25,000ms`、主分頁停滯釋放門檻為 `180,000ms`，且所有計時器在退出路徑均正確執行 `clearInterval` / `clearTimeout`。
+* **0.4 🚨 【全域頂層範圍語法結構與入口盲區排查 (Zero-Meltdown Audit)】**：查驗 `setupNetworkInterceptor` 與 `initMainApp` 於 `document-start` 與 `DOMContentLoaded` 階段之執行順序；確認 `GM_registerMenuCommand` 無條件掛載於 UI 建置之前；確認 `isValidCategoriesStructure` 與 `storedCategories` 分支在任何殘缺 Storage 輸入下皆不會拋出 `TypeError` 阻斷腳本啟動。
+* **0.5 🛡️ 【災難救援與脫困指令執行環境能力邊界排查】**：檢核交接與維運場景中的 Console 救援操作（如清空 `cm_batch_task` 或重置 `cm_scrape_categories`）是否具備明確之 Tampermonkey Context 邊界說明，以及 `DEF-04` 在不依賴手動 Console 指令下是否具備自動覆寫自癒能力。
 
-1. **BD-01：外部 SDK 參數原樣透傳禁令 (`No models/ Prefix`) 與 `HttpRetryOptions(attempts=1)`**
-   * 說明：`raw_sdk_call` 原樣透傳模型名稱（嚴禁拼接 `models/` 前綴），並在 `google.genai` 顯式關閉底層自動重試 (`attempts=1`)，輔以軟降級捕捉 `(TypeError, AttributeError, ImportError)`。
-   * 不可豁免鐵律自查：無衝突。
-2. **BD-02：單次任務單帳號鎖定 (`len(candidate_profiles) == 1`)**
-   * 說明：即使配置 3 組帳號槽位，任務啟動僅挑選單一帳號執行，禁止跨 Key 輪詢；`horizontal_first` 運行期自動轉為 `vertical_first`。
-   * 不可豁免鐵律自查：無衝突。
-3. **BD-03：503 長週期冷卻 (`180.0s`) 與雙階生理緩衝 (`DUAL_PHASE_BUFFER_SECONDS = 5`)**
-   * 說明：預設重試次數 `1`、基礎冷卻 `180.0s`，一鍵雙階流水線於階段一完成後強制倒數 5 秒緩衝再啟動階段二（逐秒檢查 `is_running`）。
-   * 不可豁免鐵律自查：無衝突。
-4. **BD-04：`self.rr_counter` 相容性保留**
-   * 說明：僅作為 `round_robin` 單次初始起手索引與物件屬性相容保留，不負責任務內跨帳號旋轉。
-   * 不可豁免鐵律自查：無衝突。
-5. **BD-05：衝突哨兵缺失／逾時／異常平滑降級與 `sys.frozen` 適配**
-   * 說明：哨兵腳本缺失、執行逾時 (`>5s`) 或打包環境找不到系統 Python 時，於狀態列提示警告後放行常規存檔。
-   * 不可豁免鐵律自查：無衝突。
-6. **BD-06：`validate_pcre_syntax` 預替換與 7 項致命黑名單裁決**
-   * 說明：將 PCRE2 回溯控制動詞預替換為 `(?:)`，僅攔截 `fatal_blacklist` 7 項致命錯誤，放行 `\p{Han}`、`\K` 等 PCRE2 專屬語法。
-   * 不可豁免鐵律自查：無衝突。
-7. **BD-07：頁籤 2 未儲存路徑變更不即時生效**
-   * 說明：作業與存檔一律以磁碟 `config.json` 為準，頁籤 2 輸入框未點擊儲存時僅透過 `_warn_unsaved_path_diffs` 彈黃底提醒。
-   * 不可豁免鐵律自查：無衝突。
-8. **BD-08：外部接力分頁選定 `dict1`/`dict2` 時強制要求上方 `txt_log` 非空**
-   * 說明：防止 `active_targets` 退化為空導致 `is_sliced` 變為 `False` 而誤觸全量覆寫整本字典；若選用「不附帶字典檔 (`none`)」則僅能進行語法驗證，禁止寫入字典檔。
-   * 不可豁免鐵律自查：無衝突。
-9. **BD-09：外部接力成果必須經 `verify_relay_result` 簽發 `s2_hash` 方可存檔**
-   * 說明：不開放直接手動編輯 `txt_stage2` 後存檔；若於驗證通過後手動篡改 `txt_stage2` 任一字元，存檔必遭 R1 SHA-256 數位印章攔截。
-   * 不可豁免鐵律自查：無衝突。
-10. **BD-10：對照字典 Radio (`selected_dict_for_ai`) 不寫入 `config.json`**
-    * 說明：純運行期狀態，防止誤跨工作階段寫錯目標字典。
-    * 不可豁免鐵律自查：無衝突。
-11. **BD-11：雙階手動接力依序支援缺省 Stage 1 提示詞打包**
-    * 說明：點擊 `[📋 複製 QA 任務包]` 或 `[💾 匯出 QA 任務檔]` 時若 `txt_stage1` 為空或失敗訊息，系統彈出黃底提醒並自動注入缺省導引文字繼續組裝 QA 任務包。
-    * 不可豁免鐵律自查：無衝突。
-12. **BD-12：非目標軌道功能豁免 (`Profile-BackendScript` 對稱面)**
-    * 說明：本工具為 Python Tkinter Desktop GUI 應用，非 Web 瀏覽器 Userscript (`GM_*` / DOM / CSS `!important`) 或 AHK 腳本 (`SetKeyDelay` / `CoordMode` / H 類熱鍵)，該等跨軌指標不適用本案驗證。
-    * 不可豁免鐵律自查：無衝突。
+---
+
+### 1. 🛡️ 【強制】架構妥協與驗收豁免須知 (By-Design Exceptions)
+
+> **不可豁免鐵律與合法對稱面**：載入異常與救援入口失效、目標情境資料靜默丟失或輸出污染，於任何環境皆不得列為豁免。同時，非目標頁面（如 `/watchlist`、`/market` 或無法人覆蓋之冷門標的與 ETF）之預期性路由略過或優雅降級文案，屬合法對稱排除面，不得誤判為異常。
+
+1. **維持 1000ms 輪詢與 `task.active` 跨分頁協定（延後 `TASK-OPT-01`）**：`v3.9.1` 刻意保留 `setInterval` 輪詢與布林 `task.active` 結構，僅修復早退條件與區域變數計時，不於本版重寫為 `GM_addValueChangeListener`。
+   * **不可豁免鐵律自查**：無衝突（不造成載入失敗或資料遺失，且修復後已確保完賽資料完整寫入）。
+2. **URL 自動路由頁面與手動優先邊界**：`/watchlist` 與 `/market` 頁面不觸發自動切換 Profile；同標的頁面手動變更分類或組合後鎖定 `userManuallySelectedProfile = true` 不再逆向覆寫。
+   * **不可豁免鐵律自查**：無衝突（屬非目標路由之預期性排除與操作脈絡保全）。
+3. **背景分頁剪貼簿沙盒權限邊界**：當 Worker 關閉後主分頁處於非聚焦狀態（`document.hasFocus() === false`），現代瀏覽器可能拒絕 `navigator.clipboard.writeText`，此時依賴 `window.focus()`、`GM_setClipboard`、快取持久化及 `.cm-btn-pulse` 呼吸燈導引 F9 複製。
+   * **不可豁免鐵律自查**：無衝突（`cm_last_scraped_data` 已確保無損持久化，絕無靜默丟失數據）。
+4. **Google 試算表需公開檢視權限與防空熔斷**：私密試算表回傳 HTML 登入頁或空試算表時，由 `isHtmlResponse()` 與防空熔斷主動拒絕覆寫本機名單。
+   * **不可豁免鐵律自查**：無衝突（保護本機既有資料不被污染）。
+5. **既有解析器頁面限制（資產負債表三表輪切、法人目標降級、大盤無流水帳）**：維持 `v3.9.0` 既定設計，冷門股/ETF 無報告時回傳預期降級文案，大盤 K 線僅輸出深海狙擊雷達摘要。
+   * **不可豁免鐵律自查**：無衝突。
+6. **測試前置環境清理要求 (`[Probe V1]`)**：實機執行批次測試前，必須停用或移除開發排查階段使用之 `[Probe V1]` 拋棄式腳本，防止其外部攔截或干擾 `cm_batch_task` 狀態。
+   * **不可豁免鐵律自查**：無衝突。
 
 ---
 
 ### 2. 四大維度測試案例清單 (Test Cases)
 
-#### 🌟 維度一：新功能驗收 (`TC-NEW-01` ~ `TC-NEW-09`)
+#### 🌟 維度一：新功能與修復驗收 (TC-NEW-xx)
 
-1. **`TC-NEW-01`：Tab 1 `nb_preview` 雙分頁結構與 `tab_relay` Bottom-First Pack 防裁切佈局**
-   * **測試情境**：驗證頁籤 1 下半部雙分頁容器拓撲及 `tab_relay` 的 Pack 掛載順序。
-   * **操作步驟**：白箱檢視 `build_tab1` 容器層級與 `pack()` 呼叫順序，確認 `nb_preview` 內含 `tab_preview`（內含 `preview_paned` 左右雙框）與 `tab_relay`，並核對 `tab_relay` 內三段子元件之 `pack` 先後與 `side`/`fill`/`expand` 參數。
-   * **預期結果**：`relay_top_bar`（拆分為 `relay_row1` 與 `relay_row2` 兩排）優先 `pack(side=tk.TOP, fill=tk.X)`；其次 `relay_bottom_bar` 優先於 `txt_relay` 執行 `pack(side=tk.BOTTOM, fill=tk.X)`（右側掛載 `btn_verify_relay` 翡翠綠 `#059669`）；最後 `self.txt_relay` 執行 `pack(side=tk.TOP, fill=tk.BOTH, expand=True)`。實機縮放表現同步登錄於 3.2.1 `MV-01`。
-   * **代碼 AST 語意錨點推演**：`RadarRegexToolApp.build_tab1` 內緊鄰 `self.nb_preview = ttk.Notebook(bottom_box)` 至 `self.txt_relay.pack(side=tk.TOP, fill=tk.BOTH, expand=True)` 處。
+| 案例編號 | 測試情境與目標 | 靜態白箱審查步驟 / 操作路徑 | 預期結果 | 代碼 AST 語意錨點 |
+| :--- | :--- | :--- | :--- | :--- |
+| **TC-NEW-01** | 頭部版本宣告、面板標題與檔尾結構驗收 | 1. 檢查檔案頭部前 10 行 `@version` 欄位。<br>2. 檢查 `createUI` 內主面板標題字串。<br>3. 檢查檔案末尾最後一段啟動邏輯。 | 1. 前 10 行存在 `// @version      3.9.1`。<br>2. 標題顯示為 `數據助手 v3.9.1`。<br>3. 檔尾乾淨閉合於 `initMainApp` 條件分支，無殘留字元。 | Metadata 區塊 緊鄰 `// @namespace` 下方處；`createUI` 內 緊鄰 `#cm-panel-head` 模板處；檔尾 `if (document.readyState === 'loading')` 處 |
+| **TC-NEW-02** | `FIX-05` 批次完賽結算無早退與換行存活性驗證 | 1. 模擬 Worker 完賽寫入 `cm_batch_task`（含相同 `id: taskId`、`active: false`、`queue: []`、`results` 內含多列換行 `\n` 與 Tab `\t` 數據）。<br>2. 逐行推演 `batchMonitorTimer` 判定順位 1 至 5。 | 1. 順位 1 僅檢查 `!task \|\| task.id !== taskId`，不會因 `!task.active` 早退。<br>2. 進入順位 4，完整組裝 `finalOut`（含 `=== 【...】 ===` 與多列 `\n` / `\t` 數據，換行總數完整保留不被壓扁單行），寫入 `cm_last_scraped_data` 與 `cm_last_scraped_stock_id`，執行複製與呼吸燈判定，清空 `cm_batch_task = null`。 | `startRelayBatchScrape` 內 `batchMonitorTimer = setInterval` 緊鄰 `判定順位 1` 與 `判定順位 4` 處 |
+| **TC-NEW-03** | `FIX-05` 主分頁進度推進無寫回競態驗證 | 1. 模擬 Worker 執行中 `task.active === true` 且 `task.queue.length` 從 `3` 變為 `2`。<br>2. 追蹤 `batchMonitorTimer` 順位 2 至 5 是否觸發 `GM_setValue`。 | 1. 進入順位 2 僅於記憶體更新 `lastQueueLen` 與 `lastProgressAt`。<br>2. 整個正常進度推進與進行中分支內，零次呼叫 `GM_setValue("cm_batch_task", task)`，完全消除覆寫 Worker `results` 之競態風險。 | `startRelayBatchScrape` 內 緊鄰 `判定順位 2：Worker 已推進佇列` 與 `let lastProgressAt = Date.now()` 處 |
+| **TC-NEW-04** | `DEF-04` 初始化端 `CATEGORIES` 深度校驗與自癒 | 1. 分別推演 Storage key `cm_scrape_categories` 為 `[]`、`[{catId:0, profiles:[]}]`、`[{catId:0, profiles:[{id:null}]}]`、`[{catId:0, profiles:[{id:0, modules:"bad"}]}]`。<br>2. 追蹤啟動初始化與 `saveCategories` 邏輯。 | 1. `isValidCategoriesStructure` 均正確回傳 `false`。<br>2. 啟動邏輯以 `JSON.parse(JSON.stringify(DEFAULT_CATEGORIES))` 深拷貝建立 `CATEGORIES`，並立即呼叫 `GM_setValue("cm_scrape_categories", CATEGORIES)` 覆寫修復 Storage。 | `initMainApp` 內 `isValidCategoriesStructure` 與 `const storedCategories = GM_getValue` 條件分支處 |
+| **TC-NEW-05** | `OBS-06` 模組鍵白名單正則過濾驗證 | 1. 透過 `applyJsonData(data, true)` 匯入或啟動載入含 `modules: ["realtime", "bad\"][x", "kline\n", "pe", 123, "realtime"]` 之 Profile。<br>2. 追蹤 `sanitizeCategoryModules` 執行結果。 | 1. `MODULE_KEY_REGEX` (`/^[A-Za-z0-9_-]+$/`) 精準放行 `"realtime"` 與 `"pe"`。<br>2. 含引號、括號、換行字元及非字串之畸形鍵全數被濾除且完成去重；若 `p.modules` 本身為非陣列字串則由 `isValidCategoriesStructure` 整批拒絕還原。 | `initMainApp` 頂部 `MODULE_KEY_REGEX`、`sanitizeCategoryModules` 及 `applyJsonData` 內 `if (data.categories !== undefined)` 處 |
+| **TC-NEW-06** | `OBS-06` 儲存組合勾選安全反查驗證 | 1. 點擊 `#cm-btn-save-profile` 觸發儲存流程。<br>2. 檢查計算隱藏既有模組 `hiddenExisting` 之 DOM 比對實作。 | 1. 放棄字串拼接選擇器查詢，改為先檢查 `typeof modKey === 'string' && MODULE_KEY_REGEX.test(modKey)`。<br>2. 透過 `allModuleCbs.find(el => el.value === modKey)` 比對節點 `offsetParent === null`，零 `SyntaxError` 風險且保有 `UI-02` 聯集防抹殺能力。 | `createUI` 內 `document.getElementById('cm-btn-save-profile').onclick` 緊鄰 `hiddenExisting` 計算處 |
 
-2. **`TC-NEW-02`：共用 Prompt 組裝引擎與微創切片結構一致性**
-   * **測試情境**：驗證線上 API 執行與外部接力打包產出完全一致的 Prompt 與局部切片結構。
-   * **操作步驟**：追蹤 `_build_stage1_prompt` 與 `_build_stage2_prompt` 之分段標題字面量、切片標記 `(局部切片: N 字)` 邏輯，以及 `_exec_stage1`、`_exec_stage2`、`_prepare_relay_eng_payload`、`_prepare_relay_qa_payload` 之調用點。
-   * **預期結果**：四個入口全數調用上述兩個共用純函式；無論來源為 API 或外部接力，產出提示詞之對照字典區塊、局部切片標題與日誌區塊結構 100% 一致。
-   * **代碼 AST 語意錨點推演**：`RadarRegexToolApp._build_stage1_prompt`、`RadarRegexToolApp._build_stage2_prompt`，以及 `_exec_stage1` 內緊鄰 `self._build_stage1_prompt(snapshot, eng_prompt)` 與 `_exec_stage2` 內緊鄰 `self._build_stage2_prompt(snapshot, qa_prompt, s1_result)` 處。
+#### 🔄 維度二：關鍵防禦機制實體存活審查 (TC-REG-xx)
 
-3. **`TC-NEW-03`：條件式快照解析 (`create_task_snapshot`) 與 0 金鑰純離線隔離**
-   * **測試情境**：在全部 API Key 為空、且未設定任何 ENG/QA 提示詞檔案的純離線環境下驗證各路徑調用快照之行為。
-   * **操作步驟**：追蹤 `create_task_snapshot` 簽名參數 `resolve_eng_prompt` 與 `resolve_qa_prompt`，檢查無有效金鑰時 `candidate_profiles` 處理方式，並檢查離線接力與 API 入口傳參差異。
-   * **預期結果**：`api_profiles` 全空時 `create_task_snapshot` 不拋出例外；ENG 打包僅解析 ENG 提示詞 (`resolve_qa_prompt=False`)；QA 打包與單階段二 API 僅解析 QA 提示詞 (`resolve_eng_prompt=False`)；外部驗證與貼回為 `False, False`，完全不因缺乏提示詞而阻斷外部定稿驗證；雙階 API (`run_stage1_thread`、`run_auto_pipeline`) 預設雙解析 `True`。
-   * **代碼 AST 語意錨點推演**：`RadarRegexToolApp.create_task_snapshot` 內緊鄰 `eng_prompt_path = self.resolve_prompt_path(...) if resolve_eng_prompt else ""` 與 `if not active_profiles:` 處。
+| 案例編號 | 測試情境與目標 | 靜態白箱審查步驟 / 操作路徑 | 預期結果 | 代碼 AST 語意錨點 |
+| :--- | :--- | :--- | :--- | :--- |
+| **TC-REG-01** | `FIX-01` 任務指紋隔離與 Worker 視窗鎖定存活 | 1. 檢查 `startRelayBatchScrape` 之 `taskId` 生成與 Worker `checkAndExecuteWorkerTask` 入口守衛。<br>2. 檢查移轉佇列前之指紋核對條件。 | 1. 發起時生成隨機指紋 `id`；Worker 入口首行檢查 `window.name !== 'CMScrapeWorker'` 即退出。<br>2. Watchdog 與主流程寫入/跳轉前均驗證 `id === task.id` 且 `queue[0] === currentModKey`。 | `startRelayBatchScrape` 內 `const taskId =` 處；`checkAndExecuteWorkerTask` 首行與 `latestTask.id !== task.id` 處 |
+| **TC-REG-02** | `FIX-02 ~ FIX-04` 座標兜底、原子儲存與資產負債收斂存活 | 1. 檢查 `toggleSideDrawer` 與 `makeDraggable` 之座標計算。<br>2. 檢查 `saveCategories` 重新讀取與寫回流程。<br>3. 檢查 `balance-sheet` 之 `getTableSnapshot` 選擇器。 | 1. 座標全面以 `Number.isFinite` 兜底，杜絕 `NaN` 寫入 `panel_pos`。<br>2. `saveCategories` 重新讀取最新 Storage 並先校驗洗滌再原子寫回。<br>3. `balance-sheet` 僅查詢 `.balanceSheet__table table, .stockPanel__view table`，無裸 `table` 回退。 | `toggleSideDrawer` 底部、`makeDraggable` 內 `onmouseup`、`saveCategories` 函式體、`MODULE_REGISTRY['balance-sheet']` 內 `getTableSnapshot` 處 |
+| **TC-REG-03** | `DEF-01 ~ DEF-03` 就地替換與 5 處轉義消毒存活 | 1. 檢查 `applyJsonData` 對 `cats` 之變更方式。<br>2. 掃描全檔 `<option value="...">` 與輸入框 `value` 插值點。 | 1. `applyJsonData` 經 `saveCategories` 執行 `cats.length = 0; cats.push(...clonedCats);` 就地替換。<br>2. `loadCategories`、`loadProfilesList`、`populateDefaultProfileOptions`、`applyAutoRoute` 及左抽屜輸入框插值均包覆 `escapeHtml(...)`。 | `applyJsonData` 內 `saveCategories` 回呼體；`createUI` 內 `populateDefaultProfileOptions`、`loadCategories`、`loadProfilesList` 與 `applyAutoRoute` 處 |
+| **TC-REG-04** | `UI-01`、`UI-02` 與 CSS 權重級聯防呆驗證 | 1. 檢查 `injectStyles` 之雙欄 Grid、5 處防萎縮與所有 `!important` 聲明。<br>2. 檢查 `loadProfileData` 與 `applyAutoRoute` 之情境遮罩與寬度計算。 | 1. `.cc-center-stage` 寬度維持 `460 + (off * 16)` 並採 `.cm-checkbox-area-grid` 雙欄排版；5 處容器具備 `flex-shrink: 0 !important;`。<br>2. 動態行內座標 (`top`, `left`) 與遮罩 (`display`) 在 CSS 樣式表無 `!important` 壓制。 | `getDynamicUIParams`、`injectStyles`、`loadProfileData` 及 `applyAutoRoute` 緊鄰 `UI-02` 註解處 |
+| **TC-REG-05** | `ROUTE-01`、`SYNC-01`、`CLIP-01` 與攔截器存活 | 1. 檢查 `setupNetworkInterceptor`、`applyAutoRoute`、`syncGoogleSheetLists` 及 `finishScrape` / `startRelayBatchScrape` 複製流程。 | 1. XHR/Fetch 雙軌攔截與 `JsonCsv` 降級轉換完整。<br>2. `applyAutoRoute` 維持手動切換鎖定優先；`syncGoogleSheetLists` 維持 HTML 偵測、A/B 欄補零、C 欄不補零及防空熔斷。<br>3. 複製維持 `window.focus()` + 雙軌寫入 + 失焦 `.cm-btn-pulse` 呼吸燈。 | `setupNetworkInterceptor`、`applyAutoRoute`、`syncGoogleSheetLists`、`finishScrape` 處 |
 
-4. **`TC-NEW-04`：階段一 ENG 接力複製、匯出 (`utf-8-sig` + `fsync`) 與開啟匯出資料夾**
-   * **測試情境**：驗證 0 金鑰下點擊「📋 複製 ENG 任務包」、「💾 匯出 ENG 任務檔」及「📂 開啟匯出資料夾」之處理流程與安全守衛。
-   * **操作步驟**：追蹤 `_prepare_relay_eng_payload`、`copy_relay_eng`、`export_relay_eng` 與 `open_relay_exports_dir` 控制流。
-   * **預期結果**：打包前必先執行 `_warn_unsaved_path_diffs`、`log_content` 判空與 `check_and_block_alien_targets` 第 0 秒硬阻斷；匯出時自動建立 `self.RELAY_EXPORT_DIR` 並以 `encoding="utf-8-sig", newline=""` 寫入 `relay_ENG_{YYYYMMDD_HHMMSS}.txt` 且執行 `flush()` + `os.fsync()`；Toast 與狀態列精確回報「局部微創切片 (N 字)」、「全量對照」或「純日誌模式」；`open_relay_exports_dir` 跨平台喚醒目錄。
-   * **代碼 AST 語意錨點推演**：`RadarRegexToolApp._prepare_relay_eng_payload`、`export_relay_eng` 內緊鄰 `os.fsync(f.fileno())` 及 `open_relay_exports_dir` 內緊鄰 `os.makedirs(self.RELAY_EXPORT_DIR, exist_ok=True)` 處。
+#### ⚠️ 維度三：架構風險與極端情境識別 (TC-RISK-xx)
 
-5. **`TC-NEW-05`：半自動混跑貼回 (`apply_relay_to_stage1`) 與 `s1_hash` / `s1_meta` 繼承**
-   * **測試情境**：將外部 ENG 產出貼入 `txt_relay` 並點擊「📥 貼回為 Stage 1 提案」，接續點擊「2️⃣ 僅執行階段二」。
-   * **操作步驟**：追蹤 `apply_relay_to_stage1` 與 `run_stage2_thread` 之 `s1_hash` 比對與快照更新邏輯。
-   * **預期結果**：`apply_relay_to_stage1` 先檢查 `self.is_running`、驗證 `txt_relay` 非空且非失敗訊息、視需要重建快照並對非空 `log_content` 執行 `check_and_block_alien_targets`、更新 `txt_stage1`、計算 `s1_hash`、寫入 `s1_meta` (`"外部接力"` / `"Web Relay"`) 並更新 `frame_s1` 標題；隨後 `run_stage2_thread` 檢驗 `s1_hash` 與 `log_content` 雙吻合成功繼承 `s1_meta`。
-   * **代碼 AST 語意錨點推演**：`RadarRegexToolApp.apply_relay_to_stage1` 內緊鄰 `snapshot["s1_hash"] = hashlib.sha256(...)` 與 `run_stage2_thread` 內緊鄰 `self.last_task_snapshot.get("s1_hash") == current_s1_hash` 處。
+| 案例編號 | 測試情境與目標 | 靜態白箱審查步驟 / 操作路徑 | 預期結果 | 代碼 AST 語意錨點 |
+| :--- | :--- | :--- | :--- | :--- |
+| **TC-RISK-01** | 180 秒停滯逾時與正常完賽邊界競爭推演 | 1. 推演最後一個模組耗時 179 秒完賽，Worker 設定 `active: false` 與 `queue: []`。<br>2. 推演 Worker 卡死超過 181 秒且 `active: true`、`queue` 未變動。 | 1. 情境 1：順位 2 更新 `lastProgressAt` 為 `Date.now()` 且 `task.active` 為 `false`，順位 3 必為 `false`，平滑進入順位 4 正常結算。<br>2. 情境 2：順位 3 觸發停滯超時，清除定時器、設 `task.active = false` 寫回並解鎖按鈕，不會誤進入順位 4 輸出殘缺成功訊息。 | `startRelayBatchScrape` 內 `判定順位 2`、`判定順位 3` 與 `判定順位 4` 處 |
+| **TC-RISK-02** | Worker 25 秒 Watchdog 與 K 線輪詢極限互斥推演 | 1. 模擬 K 線一直未載入，比較 Worker K 線 Poller (`50 次 = 25 秒`) 與 25 秒 Watchdog (`25,000ms`) 幾乎同時觸發之競爭。<br>2. 檢核單頁 K 線 Poller (`40 次 = 20 秒`)。 | 1. Watchdog 觸發後立即設置 `isWatchdogFired = true` 並移轉佇列。<br>2. 延遲到達的 Poller 進入 `executeScrapeAndJump()` 或 `clickShowMoreAndExecute` 回呼時受 `if (isWatchdogFired) return;` 阻斷，絕不重複 `shift()` 佇列或重複跳轉。 | `checkAndExecuteWorkerTask` 內 `isWatchdogFired`、`watchdogTimer` 與 `checkCount >= 50` 處；`executeSinglePageScrape` 內 `checkCount >= 40` 處 |
+| **TC-RISK-03** | 多重發起或切換視窗時之定時器收斂推演 | 1. 使用者連續發起兩次批次任務，或手動清空 `cm_batch_task`。<br>2. 檢查舊 `batchMonitorTimer` 行為。 | 1. `startRelayBatchScrape` 開頭先 `clearInterval(batchMonitorTimer)`。<br>2. 即使有殘留輪詢觸發，於順位 1 命中 `!task \|\| task.id !== taskId` 立即恢復按鈕並自我清除，不干擾新任務。 | `startRelayBatchScrape` 內 `if (batchMonitorTimer) clearInterval(batchMonitorTimer)` 與 `判定順位 1` 處 |
+| **TC-RISK-04** | 三檔字體縮放與雙向邊界拖曳防呆驗證 | 1. 檢查 `font_offset` 為 `0`、`+2`、`+4` 時 `getDynamicUIParams()` 與 `.cc-center-stage` 之 `max-height: 85vh` 表現。<br>2. 檢查 `makeDraggable` 與 `toggleSideDrawer` 邊界夾緊。 | 1. 寬度與字級按比例線性縮放，中央舞台固定 `85vh` 與 `overflow-y: auto` 保護視窗不溢出。<br>2. `toggleSideDrawer` 展開左抽屜以 `Math.max(0, ...)` 防負座標，`makeDraggable` 以視窗寬高 clamp 防拖出可視區。 | `getDynamicUIParams`、`injectStyles` 內 `.cc-center-stage`、`toggleSideDrawer` 與 `makeDraggable` 處 |
+| **TC-RISK-05** | Userscript 雙層脫困環境可達性審查 (`QP-Track1-DualLayer-Rescue`) | 1. 檢查當 `cm_batch_task` 卡死或 `cm_scrape_categories` 異常時之復原路徑。<br>2. 核對實機驗證專區對擴充套件 Context 切換要求。 | 1. 初始化 `DEF-04` 已提供無需人工介入之結構異常自動自癒。<br>2. 批次卡死具備 3 分鐘自動釋放及手動 Tampermonkey Context Console 指令脫困（詳見 `MV-04` 雙環境驗證）。 | `initMainApp` 初始化守衛、`GM_registerMenuCommand` 與 `startRelayBatchScrape` 逾時釋放處 |
 
-6. **`TC-NEW-06`：階段二 QA 接力打包、匯出與空 Stage 1 缺省容錯**
-   * **測試情境**：測試 `txt_stage1` 有有效內容與 `txt_stage1` 為空（或失敗訊息）時，執行「📋 複製 QA 任務包」與「💾 匯出 QA 任務檔」。
-   * **操作步驟**：追蹤 `_prepare_relay_qa_payload`、`copy_relay_qa` 與 `export_relay_qa`。
-   * **預期結果**：`txt_stage1` 有效時直接帶入為提案；為空或 `❌ 執行失敗` 開頭時，彈出黃底警告 Toast 並帶入明確缺省導引文字繼續組裝；匯出路徑為 `RELAY_EXPORT_DIR\relay_QA_{YYYYMMDD_HHMMSS}.txt`（`utf-8-sig` + `os.fsync`）。
-   * **代碼 AST 語意錨點推演**：`RadarRegexToolApp._prepare_relay_qa_payload` 內緊鄰 `if not s1_text or s1_text.startswith("❌ 執行失敗"):` 與 `export_relay_qa` 內緊鄰 `relay_QA_` 處。
+#### 🏛️ 維度四：靜態資料庫殘缺自癒推演 (Static Mock Data-Flow Trace) (TC-DEBT-xx)
 
-7. **`TC-NEW-07`：共用白箱驗證 (`_validate_stage2_output`)、換行存活性驗證與解鎖寫入 (`verify_relay_result`)**
-   * **測試情境**：輸入含多段落註解與多條 PCRE 正則之合格／不合格外部定稿至 `txt_relay`，驗證白箱攔截、換行保留與印章簽發。
-   * **操作步驟**：
-     (a) 輸入包含 `ANCHOR_TEXT`、2 條以上多行規則（含換行 `\n`）與 `EOF_MARKER` 之正常切片結果，追蹤 `verify_relay_result` ➔ `_validate_stage2_output` ➔ `save_and_backup_dict` 全路徑；
-     (b) 分別注入以下無效樣本推演驗證結果：缺 `ANCHOR_TEXT`、缺 `EOF_MARKER`、含 ```` ``` ````、含括號不對稱或黑名單正則、含外來字熔斷標記、切片模式下缺少鎖定目標字條目、切片模式下夾帶非 `active_targets` 外來條目。
-   * **預期結果**：
-     (a) 正常樣本經 `strip("\r\n")` 保留內部換行總數（不壓扁為單行），通過全部白箱檢查後簽發 `s2_hash`、`s2_meta` (`"外部接力"` / `"Web Relay"`)、寫入 `txt_stage2`、復位 `btn_save` 翡翠綠、隱藏告警橫幅、切回 `tab_preview` 並寫入 `"外部驗證通過"` 歷史紀錄；
-     (b) 任一異常樣本均於 `_validate_stage2_output` 即刻攔截，釘選告警橫幅、嚴禁寫入 `txt_stage2` 與簽發 `s2_hash`。
-   * **代碼 AST 語意錨點推演**：`RadarRegexToolApp._validate_stage2_output` 與 `verify_relay_result` 內緊鄰 `alien_in_qa = [t for t in new_blocks_map if t not in active_targets]` 及 `self.nb_preview.select(self.tab_preview)` 處。
-
-8. **`TC-NEW-08`：告警橫幅一鍵導引按鈕 (`btn_goto_relay`)**
-   * **測試情境**：線上 API 因無金鑰、連線例外、重大風控或階段一/二調用失敗時，橫幅導引行為與哨兵阻斷區分。
-   * **操作步驟**：檢查 `build_alert_banner`、`_show_alert_banner`、`_goto_relay_tab` 及全部 `_show_alert_banner` 呼叫點之旗標參數。
-   * **預期結果**：`test_api_connection`（空金鑰與例外）、`call_gemini_api` (`is_risk_block`)、`_exec_stage1` 例外與 `_exec_stage2` 例外均傳入 `show_goto_relay=True` 展示 `🛠️ 前往外部接力 ➔` 按鈕，點擊執行 `notebook.select(tab1)` + `nb_preview.select(tab_relay)`；哨兵碰撞阻斷維持 `show_sentinel=True, show_goto_relay=False`。
-   * **代碼 AST 語意錨點推演**：`RadarRegexToolApp.build_alert_banner` 內緊鄰 `self.btn_goto_relay = tk.Button`、`_show_alert_banner` 內 `if show_goto_relay:` 與 `_goto_relay_tab` 處。
-
-9. **`TC-NEW-09`：Backlog 衛生收斂 (`BK-135-01`、`BK-135-02`、`BK-135-04`)**
-   * **測試情境**：驗證存檔按鈕變色線程安全、雙階緩衝常數化及組態檔寫入編碼對齊。
-   * **操作步驟**：檢查 `set_save_btn_alert`、`DUAL_PHASE_BUFFER_SECONDS` 與 `save_config` 實作細節。
-   * **預期結果**：`set_save_btn_alert` 內部透過 `self.root.after(0, _apply)` 檢核 `winfo_exists()` 安全改色；`DUAL_PHASE_BUFFER_SECONDS = 5` 定義於類別頂部且被 `run_auto_pipeline._pipeline` 引用；`save_config` 以 `encoding="utf-8-sig"` 原子寫入。
-   * **代碼 AST 語意錨點推演**：`RadarRegexToolApp` 類別屬性 `DUAL_PHASE_BUFFER_SECONDS = 5`、`set_save_btn_alert` 內 `self.root.after(0, _apply)` 與 `save_config` 內 `encoding="utf-8-sig"` 處。
-
-#### 🔄 維度二：關鍵防禦機制實體存活審查 (`TC-REG-01` ~ `TC-REG-06`)
-
-10. **`TC-REG-01`：頭部版本、遞迴防護與 SDK 原樣透傳 / `attempts=1` 防線**
-    * **測試情境**：核對版本宣告、PyInstaller 遞迴保護與底層 SDK 呼叫參數。
-    * **操作步驟**：檢視檔頭宣告與 `raw_sdk_call` 內部 `types.HttpOptions` / `HttpRetryOptions` 建構與降級分支。
-    * **預期結果**：`__version__ = "1.3.5"` 位於頭部前 10 行內；`sys.setrecursionlimit(5000)` 存在；`raw_sdk_call` 嚴禁拼接 `models/` 前綴且顯式傳入 `attempts=1` 與可調逾時。
-    * **代碼 AST 語意錨點推演**：模組頂部 `__version__` 與 `sys.setrecursionlimit(5000)`，及 `RadarRegexToolApp.raw_sdk_call` 內 `retry_options=types.HttpRetryOptions(attempts=1)` 處。
-
-11. **`TC-REG-02`：單帳號鎖定、四維五順位異常分類器與防反向升級階梯**
-    * **測試情境**：驗證多帳號設定下不發生自動跨 Key 輪詢及 503/429/400-403/風控差異化處置。
-    * **操作步驟**：審查 `create_task_snapshot` 候選帳號挑選與 `call_gemini_api` 內部閉包序列 (`is_risk_block` ➔ `is_daily_quota_error` ➔ `is_auth_error` ➔ `is_invalid_argument_error` ➔ `is_transient_error`)。
-    * **預期結果**：`len(candidate_profiles) == 1`；模型階梯防反向升級與別名去重存活；每日配額 0 秒即時降階、503 進入心跳退避冷卻、重大風控 0 重試立即終止。
-    * **代碼 AST 語意錨點推演**：`create_task_snapshot` 內 `candidate_profiles = [` 與 `call_gemini_api` 內五組閉包定義與迴圈例外處理處。
-
-12. **`TC-REG-03`：第 0 秒極速硬阻斷於 API 與接力雙軌存活**
-    * **測試情境**：日誌目標詞與所選字典不匹配時之攔截時機驗證。
-    * **操作步驟**：核對 `run_stage1_thread`、`run_stage2_thread`、`run_auto_pipeline`、`_prepare_relay_eng_payload`、`_prepare_relay_qa_payload`、`apply_relay_to_stage1` 與 `verify_relay_result` 是否皆調用 `check_and_block_alien_targets`。
-    * **預期結果**：全數 7 個入口均於發送請求／組裝打包／簽發驗證前即時調用 `check_and_block_alien_targets` 並於不匹配時 0ms 中止。
-    * **代碼 AST 語意錨點推演**：`RadarRegexToolApp.check_and_block_alien_targets` 及其於 API 與 Relay 各入口之調用點。
-
-13. **`TC-REG-04`：R1 SHA-256 印章、微創去重縫合、哨兵 `--cli-check` 與雙重原子覆寫**
-    * **測試情境**：驗證 `save_and_backup_dict` 之磁碟寫入全防線。
-    * **操作步驟**：審查 `save_and_backup_dict` 對 `s2_hash`、`_validate_stage2_output`、6 鍵重讀同步、磁碟條目檢查、`stitch_and_deduplicate`、`dry_tmp_path` (`os.fsync`)、`sys.frozen` 系統 Python 尋址、`bak\` 同秒防撞及 `os.replace` 之保留情形。
-    * **預期結果**：全量既有存檔門禁 100% 保留，無任何繞過 `s2_hash` 或哨兵之旁路。
-    * **代碼 AST 語意錨點推演**：`RadarRegexToolApp.save_and_backup_dict` 內緊鄰 `if current_hash != expected_hash:` 至 `os.replace(tmp_file_path, target_path)` 處。
-
-14. **`TC-REG-05`：PCRE2 無回溯正則預替換與換行吞噬安全性**
-    * **測試情境**：驗證 `validate_pcre_syntax` 與 `sanitize_invisible_chars` 面臨連續反斜線及換行字元時之安全性。
-    * **操作步驟**：檢視 `validate_pcre_syntax` 內四道防線與 `pcre2_verb_pattern`、`fatal_blacklist`。
-    * **預期結果**：字元類採無回溯 `\[\^?(?:\\.|[^\\\]])+\]` 消除 ReDoS；以 `splitlines()` 單行詞法處置，絕無跨行吞噬問題。
-    * **代碼 AST 語意錨點推演**：`RadarRegexToolApp.validate_pcre_syntax` 內緊鄰 `pcre2_verb_pattern = re.compile` 處。
-
-15. **`TC-REG-06`：併發互斥鎖與 Worker 0 `.get()` 物理隔離**
-    * **測試情境**：背景執行緒執行期間全互動元件鎖定與跨執行緒隔離。
-    * **操作步驟**：檢視 `set_ui_locked`、`run_stage1_thread._runner`、`_exec_stage1`、`run_stage2_thread._runner`、`_exec_stage2`、`run_auto_pipeline._pipeline`。
-    * **預期結果**：鎖定名單納入 6 組舊按鈕、頂部 2 下拉及新增之 `btn_apply_relay_s1` 與 `btn_verify_relay`；背景執行緒僅讀快照 dict，寫回 UI 與提交 `last_task_snapshot` 一律採 `root.after(0, ...)`。
-    * **代碼 AST 語意錨點推演**：`RadarRegexToolApp.set_ui_locked` 內 `for btn in [` 清單處。
-
-#### ⚠️ 維度三：架構風險與極端情境識別 (`TC-RISK-01` ~ `TC-RISK-04`)
-
-16. **`TC-RISK-01`：未貼入日誌時點擊外部驗證之全量覆蓋風險攔截**
-    * **測試情境**：使用者選定 `dict1` 或 `dict2` 但忘記在 `txt_log` 貼上日誌，直接於 `txt_relay` 貼入單條條目並點擊「🛡️ 驗證外部成果並解鎖寫入」。
-    * **操作步驟**：追蹤 `verify_relay_result` 於 `current_choice in ("dict1", "dict2") and not current_log` 時之防衛分支。
-    * **預期結果**：立即彈出黃底警告 Toast 阻斷驗證並中止，防止 `active_targets` 為空導致 `is_sliced` 判為 `False` 而誤覆寫整本字典。
-    * **代碼 AST 語意錨點推演**：`RadarRegexToolApp.verify_relay_result` 內緊鄰 `if current_choice in ("dict1", "dict2") and not current_log:` 處。
-
-17. **`TC-RISK-02`：API 背景任務運行中觸發外部接力寫入類按鈕之競態防護**
-    * **測試情境**：API 階段一或階段二執行中，嘗試點擊「📥 貼回為 Stage 1 提案」或「🛡️ 驗證外部成果並解鎖寫入」。
-    * **操作步驟**：檢視 `set_ui_locked` 與 `apply_relay_to_stage1`、`verify_relay_result` 入口之 `self.is_running` 雙重守衛。
-    * **預期結果**：按鈕狀態於任務期間呈 `DISABLED` 且函式入口亦以 `if self.is_running:` 即時中止，杜絕競態覆寫快照與預覽框。
-    * **代碼 AST 語意錨點推演**：`apply_relay_to_stage1` 與 `verify_relay_result` 開頭 `if self.is_running:` 處。
-
-18. **`TC-RISK-03`：驗證解鎖後手動竄改 `txt_stage2` 與目標檔缺失保留快照機制**
-    * **測試情境**：(a) 外部接力驗證通過後於 `txt_stage2` 增刪 1 個字元再按存檔；(b) 目標字典檔路徑暫時不存在時按存檔。
-    * **操作步驟**：追蹤 `save_and_backup_dict` 之 `current_hash != expected_hash` 與 `not os.path.isfile(target_path)` 分支。
-    * **預期結果**：(a) 因 `s2_hash` 不符即時阻斷覆寫；(b) 阻斷存檔同時保留 `self.last_task_snapshot`（不歸零），使用者修正設定頁路徑儲存後可免重跑直接重試存檔。
-    * **代碼 AST 語意錨點推演**：`RadarRegexToolApp.save_and_backup_dict` 內緊鄰 `if current_hash != expected_hash:` 與 `if not target_path or not os.path.isfile(target_path):` 處。
-
-19. **`TC-RISK-04`：剪貼簿被佔用、匯出寫入失敗與視窗銷毀安全停機**
-    * **測試情境**：剪貼簿遭他程式鎖定、匯出目錄無寫入權限、或長冷卻倒數中直接關閉視窗。
-    * **操作步驟**：檢視 `copy_relay_eng`、`copy_relay_qa`、`export_relay_eng`、`export_relay_qa` 例外捕捉與 `_on_closing` 狀態歸零。
-    * **預期結果**：剪貼簿或磁碟異常皆由 `try-except` 捕獲並顯示明確 Toast，不造成主視窗閃退；`_on_closing` 歸零 `is_running` 與 `heartbeat_active` 並停止碼錶安全退出。
-    * **代碼 AST 語意錨點推演**：`copy_relay_eng` / `export_relay_eng` `try-except` 區塊與 `RadarRegexToolApp._on_closing` 處。
-
-#### 🏛️ 維度四：靜態資料庫殘缺自癒推演 (`TC-DEBT-01` ~ `TC-DEBT-03`)
-
-20. **`TC-DEBT-01`：`config.json` 殘缺、含 BOM 與舊版參數遷移閉環**
-    * **測試情境**：`config.json` 不存在、為殘缺 JSON、含 `base_delay_seconds=2.0`、`max_retries=10` 或含退役模型名稱。
-    * **操作步驟**：靜態追蹤 `load_config` 深拷貝預設補齊、型別轉型 Clamp、`utf-8-sig` 讀取與 `save_config` `utf-8-sig` 原子寫入閉環。
-    * **預期結果**：21 個核心葉節點全數回退補齊，`base_delay_seconds < 10.0` 自動遷移 `180.0`，`max_retries` Clamp 至 `1~5`，寫回編碼統一為 `utf-8-sig`。
-    * **代碼 AST 語意錨點推演**：`RadarRegexToolApp.load_config` 與 `RadarRegexToolApp.save_config` 處。
-
-21. **`TC-DEBT-02`：全新 0 金鑰、無提示詞設定下冷啟動與離線驗證推演**
-    * **測試情境**：全新環境僅配置 `dict_path_1` 字典路徑，未填任何 API Key 且無提示詞檔。
-    * **操作步驟**：追蹤 `__init__` ➔ `verify_relay_result`（使用預設 `resolve_eng_prompt=False, resolve_qa_prompt=False`）➔ `save_and_backup_dict`。
-    * **預期結果**：無任何異常中斷，能順利貼入外部定稿完成白箱驗證、簽發印章並原子寫入字典。
-    * **代碼 AST 語意錨點推演**：`verify_relay_result` 內緊鄰 `self.create_task_snapshot(resolve_eng_prompt=False, resolve_qa_prompt=False)` 處。
-
-22. **`TC-DEBT-03`：類別與實例屬性讀寫活性雙向核驗 (無殭屍變數)**
-    * **測試情境**：掃描 v1.3.5 新增與既有實例屬性 (`RELAY_EXPORT_DIR`、`DUAL_PHASE_BUFFER_SECONDS`、`nb_preview`、`tab_preview`、`tab_relay`、`txt_relay`、`btn_goto_relay`、`btn_verify_relay`、`btn_apply_relay_s1`、`rr_counter`) 之讀寫對稱性。
-    * **操作步驟**：統計各屬性寫入點與讀取/調用點，檢核是否存在「只寫不讀」殭屍變數。
-    * **預期結果**：所有新增常數與控制項引用皆具備明確讀取／綁定／渲染或鎖定引用點，無 Write-Only 殭屍變數；`rr_counter` 具明確讀取與遞增點。
-    * **代碼 AST 語意錨點推演**：`RadarRegexToolApp.__init__`、`build_tab1`、`build_alert_banner`、`set_ui_locked` 與 `run_auto_pipeline._pipeline` 處。
+| 案例編號 | 測試情境與目標 | 靜態白箱推演步驟 | 預期結果 | 代碼 AST 語意錨點 |
+| :--- | :--- | :--- | :--- | :--- |
+| **TC-DEBT-01** | 變數讀寫計數雙向核驗（嚴查殭屍變數） | 1. 核對本次新增與修改之變數與常數：`MODULE_KEY_REGEX`、`storedCategories`、`lastQueueLen`、`lastProgressAt`、`allModuleCbs`。<br>2. 抽查既有 `CONFIG` 各屬性之讀取點。 | 1. 所有新增變數均同時具備寫入（定義）與讀取（判定/過濾/計算）路徑，無 Write-Only 殭屍變數。<br>2. `CONFIG` 各屬性均於 `getAutoLimit`、`injectStyles`、`createUI`、`syncGoogleSheetLists` 等處被實質讀取。 | `initMainApp` 內 `MODULE_KEY_REGEX`、`storedCategories` 與 `startRelayBatchScrape` 內 `lastProgressAt` 處 |
+| **TC-DEBT-02** | 全新安裝零狀態 (`undefined`) 冷啟動推演 | 1. 模擬所有 `GM_getValue` 皆回傳預設值（`cm_scrape_categories` 回傳 `undefined`）。<br>2. 追蹤 `CONFIG`、`CATEGORIES`、`loadCategories` 與 `applyAutoRoute` 執行鏈。 | 1. `storedCategories === undefined` 觸發深拷貝 `DEFAULT_CATEGORIES`，不執行多餘覆寫，正常生成 3 大類 15 組 Profile。<br>2. 頁面依 URL 自動路由或預設選項載入，0 例外發生。 | `initMainApp` 內 `const storedCategories` 與 `loadCategories` 處 |
+| **TC-DEBT-03** | 極端殘缺與混合毒丸資料流自癒推演 | 1. 模擬 `panel_pos` 為 `{top: "NaN", left: undefined}`、`cm_scrape_categories` 為 `[{catId: 0, profiles: []}]` 或 `[{catId: 0, profiles: [{id: 4, modules: ["realtime", "\"><img src=x>"]}]}]`。<br>2. 追蹤啟動與 UI 互動流。 | 1. `cm_scrape_categories` 空 `profiles` 觸發 `DEF-04` 自癒覆寫預設結構；畸形模組鍵觸發 `OBS-06` 濾除僅留 `"realtime"`。<br>2. `toggleSideDrawer` / `makeDraggable` 以 `Number.isFinite` 攔截 `NaN` 座標還原為 `150, 200`。 | `isValidCategoriesStructure`、`sanitizeCategoryModules`、`toggleSideDrawer` 與 `makeDraggable` 處 |
 
 ---
 
 ### 3. 驗收報告格式要求 (Mandatory Output Schema)
 
 #### 3.1 測試環境與涵蓋範圍總覽
-須包含四項定錨確認（目標版本 `1.3.5`、目標語系 `Python 3 / Tkinter Desktop GUI`、By-Design 豁免清單 `BD-01 ~ BD-12`、Profile `Profile-BackendScript`）與靜／動態測試範圍摘要。
+* 必須顯式確認以下四項規格定錨：**目標版本號 (`3.9.1`)、目標語系 (`繁體中文 / CMoney`)、By-Design 豁免清單、Profile (`Profile-WebScript`)**。
 
 #### 3.2 四大維度逐項檢驗表格
-| 測試編號 | 維度類別 | 測試摘要 | AST 語意錨點 | 終審標籤 (`[PASS]` / `[PASS (By-Design)]` / `[PASS (Retired)]` / `[FAIL]` / `[🟡 未決待處置]`) | 備註 / 佐證 |
-| :--- | :--- | :--- | :--- | :--- | :--- |
+* 必須完整展開 `TC-NEW-01 ~ 06`、`TC-REG-01 ~ 05`、`TC-RISK-01 ~ 05`、`TC-DEBT-01 ~ 03` 共 **19 項**。
+* 靜態白箱審查部分必須即時給予四態終審標籤：`[PASS]` ｜ `[PASS (By-Design)]` ｜ `[PASS (Retired)]` ｜ `[FAIL]`；若涉及待補證或仲裁爭議則填註 `[🟡 未決待處置]` 並附原因，嚴禁填入假性通過標籤。動態實機項目統一追蹤於下方 **3.2.1**。
 
 #### 3.2.1 🕹️ 人類實機操作核對專區 (Manual Live Verification Area)
 | 實機項目編號 | 驗證操作目標 | 實體代碼對應邏輯錨點 | 實機回填要求 | 當前專區狀態 |
 | :--- | :--- | :--- | :--- | :--- |
-| **MV-01** | `tab_relay` 最小視窗 (`1000x750`) 與多檔縮放 (100%/125%/150% DPI) 不裁切實測 | `build_tab1` 內 `relay_top_bar`、`relay_bottom_bar` 與 `txt_relay` pack 順序處 | 於 Windows 10/11 縮放視窗至 `1000x750`（含高 DPI），截圖或回報兩排按鈕列與 `btn_verify_relay` 完整可見無重疊裁切 | 待回填 |
-| **MV-02** | 0 金鑰純離線兩段外部接力與哨兵 `--cli-check` 實機全閉環 | `_prepare_relay_eng_payload` ➔ `_prepare_relay_qa_payload` ➔ `verify_relay_result` ➔ `save_and_backup_dict` | 清空全部 API Key 重啟，貼上日誌依序複製/匯出 ENG 與 QA 任務包、於 `txt_relay` 驗證定稿並點擊存檔，貼回 `relay_exports\` 與 `bak\` 產出實機日誌 | 待回填 |
-| **MV-03** | 半自動混跑實測 (外部 ENG ➔ 本地 API QA) | `apply_relay_to_stage1` ➔ `run_stage2_thread` | 將外部 ENG 回覆貼入 `txt_relay` 並點擊 `📥 貼回為 Stage 1 提案`，再點 `2️⃣ 僅執行階段二` 呼叫本地 API 完成審核並存檔 | 待回填 |
-| **MV-04** | API 異常告警橫幅導引與一鍵跳轉實測 | `build_alert_banner`、`btn_goto_relay`、`_goto_relay_tab` | 清空 API Key 點擊 `⚡ 測試連通性`，確認橫幅出現 `🛠️ 前往外部接力 ➔` 且點擊可立即切換至 `tab_relay` | 待回填 |
+| **MV-01** | `FIX-05` 批次彙整真實開窗關窗完賽結算實測（請先確認已停用 `[Probe V1]`） | `startRelayBatchScrape` 內 `batchMonitorTimer` 順位 1 至 5 及 `checkAndExecuteWorkerTask` 閉合處 | 於 `/stock/00922` 勾選 2 個以上模組執行「自動開頁彙整勾選資料」，回報 Worker 自動關閉後：剪貼簿是否成功取得多模組 `\n` / `\t` 數據（附上擷取摘要與換行存活確認）、`#cm-status-bar` 是否更新、以及點擊「重新複製上次數據」／F9 是否成功 | 待回填 |
+| **MV-02** | `DEF-04` + `OBS-06` 殘缺 Storage 自癒與畸形 JSON 匯入實測 | `initMainApp` 內 `storedCategories` 初始化分支、`applyJsonData` 及 `#cm-btn-save-profile` 處 | 透過 Console 將 `cm_scrape_categories` 設為 `[]` 後重整確認 UI 正常渲染且 Storage 已自動覆寫還原；另匯入含 `"bad\"][x"` 模組鍵之備份 JSON 並點擊儲存組合，確認無報錯且畸形鍵已被過濾 | 待回填 |
+| **MV-03** | 三檔字體縮放偏移 (`0` / `+2` / `+4`) 與動態行內樣式即時覆寫實測 | `getDynamicUIParams`、`injectStyles` 內 `.cc-center-stage`、`toggleSideDrawer` 與 `loadProfileData` 處 | 依序測試 `font_offset` 為 `0`、`+2`、`+4` 並重整，確認雙欄佈局無截斷重疊；實測拖曳主面板、開合左右抽屜與切換個股/ETF 遮罩，確認行內座標與 `display` 即時生效未被 `!important` 壓制 | 待回填 |
+| **MV-04** | `QP-Track1-DualLayer-Rescue` 雙環境 Console 脫困與選單重置實測 | `GM_registerMenuCommand` 與 Storage 鍵 `cm_batch_task` / `panel_pos` 處 | 分別於 **(a) 擴充套件沙盒 Context** 執行 `GM_setValue("cm_batch_task", null)` 與 **(b) 頁面預設 Context** 觀察權限提示，並實測 Tampermonkey 選單「🔄 重置面板位置 (尋回 UI)」確認均可成功脫困 | 待回填 |
 
 *專區狀態集合：`{待回填 ｜ 已回填-通過 ｜ 已回填-異常轉升格 3.3 缺陷並附 4 要素}`*
 
 #### 3.3 🚨 發現之缺陷與異常清單 (Defects & Observations)
-凡判定 `[FAIL]` 或異常項目，必須完整附帶 **缺陷復現 4 要素**：① 具體代碼位置（語意錨點，零行號）；② 最小復現邏輯推演；③ 實際行為 vs 預期行為；④ 置信度標記與證據鏈（🔴 確認缺陷 / 🟡 疑似風險 / ⚪ 需實機驗證/人審回報）。
+* 凡判定 `[FAIL]` 或實機異常者，必須附帶 4 要素：(1) 語意錨點位置（嚴禁行號）、(2) 最小復現步驟、(3) 實際 vs 預期行為、(4) 置信度標記（🔴 確認缺陷 / 🟡 疑似風險 / ⚪ 需實機驗證/人審回報）。
 
 #### 3.3.1 🧬 清單外白箱代碼缺陷 (Off-List Static Vulnerabilities)
-承接 Phase 0（`0.1` 至 `0.5`）獨立排查結果；若無清單外缺陷則顯式宣告「無清單外白箱缺陷」。
+* 承接 Phase 0（0.1 至 0.5 項）獨立白箱排查結果，於此區塊回報；若全數無風險則明文宣告「Phase 0 五項排查全數潔淨無異常」。
 
 #### 3.4 最終 PASS / FAIL 簽核結論與發布建議
-* **6-A 技術手冊封存（解耦交付責任）**：當 3.2 表格內全量靜態測試案例（`TC-NEW-01` ~ `TC-DEBT-03` 共 22 項）均完成四態閉環（`[PASS]` / `[PASS (By-Design)]` / `[PASS (Retired)]`），且 Phase 0 檢查通過、所有 🟡 標記均已處置閉環時，即刻簽發 **【6-A 技術手冊封存核准】**，正式解除 ENG 交付責任。
-* **6-B 維運追蹤管理（解耦動態實機）**：3.2.1 專區之 `MV-01` ~ `MV-04` 獨立列管於【6-B 維運與動態追蹤待辦】，不得反向阻礙 6-A 封存與代碼合併。
-* **雙門禁 Fallback 回退**：若 3.2 表格尚有未解決之 `[FAIL]` 或未決 `[🟡 未決待處置]`，嚴禁啟動 6-A 封存，強制依實際狀況退回暫緩最終簽核。
+* 依 **6-A / 6-B 分階段簽核機制** 出具結論：
+  - 若 **3.2** 全量 19 項靜態 TC 皆完成四態閉環、Phase 0 無確認缺陷且無未決 🟡 項目，即簽發 **【6-A 技術手冊封存核准】**（解除 ENG 代碼交付責任），並將 **3.2.1 (`MV-01 ~ MV-04`)** 列入 **【6-B 維運與現場實機待驗追蹤】**；
+  - 若 **3.2** 或 **3.3.1** 仍存在 `[FAIL]` 或 `[🟡 未決待處置]`，則嚴禁 6-A 封存，依雙門禁回退暫緩簽核並退回修復。
 
 ---
 
-## 【叁、 執行輸入區 (Data Input)】
-
-```Text
-=== TARGET_VERSION: 1.3.5 ===
-=== BASELINE_VERSION: 1.3.4 ===
-=== TARGET_LANGUAGE: Python 3 / Tkinter Desktop GUI ===
-=== PROFILE_TYPE: Profile-BackendScript ===
-=== RETIREMENT_REQUESTED: NO ===
-=== PRD_ACCEPTANCE_SUMMARY: API 雙階自動優先 + 0 金鑰純離線外部接力手動修補分頁 (Bottom-First Pack) + 共用 Prompt 組裝與白箱驗證引擎 (含切片異物侵入檢查與換行存活性) + 告警橫幅一鍵導引 + BK-135-01/02/04 收斂 ===
-=== TARGET_CODE_START ===
-{請將已完成傳入之《審核雷達正則維護工具 v1.3.5.py》完整原始碼隨本任務書附帶提供給 QA 實例執行檢驗}
-=== TARGET_CODE_END ===
-```
-
----
-
-> 🔔 **跨輪次任務切換準備就緒**：本輪初審通過並已完整輸出 QATP 任務書；後續收到 QA 驗收報告將進入階段 4.5 異議仲裁，或收到技術交接檔時立即啟動交接檔簽核模式（反倒嚼熔斷、AST 結算數學閉環、29 項指標核驗與安全港防線）。
+> 🔔 **【肆、 任務切換 Hook 已就緒】**：本審查輸出完畢後將常駐監聽，待 QA 驗收閉環及收到新 ENG 產出之 `v3.9.1` 技術交接檔時，立即啟動反倒嚼熔斷審查、AST 結算數學閉環校驗、變數活性雙向檢查、雙環境救援標準化核驗及安全港防線審查。
