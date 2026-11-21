@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         股市爆料同學會-輔助工具
 // @namespace    http://tampermonkey.net/
-// @version      3.9.1
+// @version      3.9.2
 // @description  架構躍進版：智慧零點擊Profile路由、Google試算表雲端同步、雙欄拓寬佈局、失焦複製防禦與批次防踩踏
 // @author       AI Helper & Architect
 // @match        *://www.cmoney.tw/forum/watchlist*
@@ -158,6 +158,13 @@ function initMainApp() {
     const DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1UzJHDONTLNPJiH2nQ_Wau50hLQSf2jV6Fe_RexTWU_I/edit?usp=sharing";
 
 
+    // P3-01 (OBS-A): CONFIG.panel_pos 啟動讀取兜底
+    const rawPanelPos = GM_getValue("panel_pos", {top: 150, left: 200});
+    const safePanelPos = (rawPanelPos && typeof rawPanelPos === 'object' && Number.isFinite(rawPanelPos.top) && Number.isFinite(rawPanelPos.left))
+        ? { top: rawPanelPos.top, left: rawPanelPos.left }
+        : { top: 150, left: 200 };
+
+
     const CONFIG = {
         eps: safeInt(GM_getValue("limit_eps", 12), 12),
         revenue: safeInt(GM_getValue("limit_rev", 12), 12),
@@ -182,7 +189,7 @@ function initMainApp() {
         font_offset: safeInt(GM_getValue("font_offset", 0), 0),
         drawer_top: safeInt(GM_getValue("drawer_top", 200), 200),
         drawer_side: GM_getValue("cm_drawer_side", "right"),
-        panel_pos: GM_getValue("panel_pos", {top: 150, left: 200}),
+        panel_pos: safePanelPos,
         is_panel_open: GM_getValue("is_panel_open", false),
         left_open: GM_getValue("cm_left_open", false),
         right_open: GM_getValue("cm_right_open", false),
@@ -204,7 +211,7 @@ function initMainApp() {
     const ACC_STATE = GM_getValue("cm_acc_state", DEFAULT_ACC_STATE);
 
 
-    // 出廠真理源定錨：v3.9.1 配置
+    // 出廠真理源定錨：v3.9.2 配置
     const DEFAULT_CATEGORIES = [
         {
             catId: 0,
@@ -500,6 +507,83 @@ function initMainApp() {
         const id = doc.querySelector('.stockData__id')?.innerText.trim() || (window.location.pathname.includes('/market') ? "TAIEX" : "");
         const time = doc.querySelector('.stockData__update span')?.innerText.trim() || "未知";
         return `【${name} (${id}) | ${reportName} | ${time}】`;
+    }
+
+
+    // 共用二維網格展平引擎 (FIX-06 ~ FIX-09)
+    function flattenTableGrid(table) {
+        if (!table) return { headers: [], rows: [], subRows: new Set() };
+
+
+        const expand = (trs) => {
+            const grid = [];
+            const subRows = new Set();
+            for (let r = 0; r < trs.length; r++) {
+                if (!grid[r]) grid[r] = [];
+                if (grid[r][0] !== undefined) {
+                    subRows.add(r);
+                }
+                let c = 0;
+                const cells = trs[r].querySelectorAll('th, td');
+                for (let i = 0; i < cells.length; i++) {
+                    const cell = cells[i];
+                    while (grid[r][c] !== undefined) {
+                        c++;
+                    }
+                    const rs = cell.rowSpan || 1;
+                    const cs = cell.colSpan || 1;
+                    const txt = (cell.innerText || '')
+                        .replace(/[\n\r\t]+/g, ' ')
+                        .replace(/[^\S\r\n]+/g, ' ')
+                        .trim();
+                    for (let dr = 0; dr < rs; dr++) {
+                        if (!grid[r + dr]) grid[r + dr] = [];
+                        for (let dc = 0; dc < cs; dc++) {
+                            grid[r + dr][c + dc] = txt;
+                        }
+                    }
+                    c += cs;
+                }
+            }
+            return { grid, subRows };
+        };
+
+
+        const bodyTrs = Array.from(table.querySelectorAll('tbody tr'));
+        const headTrs = Array.from(table.querySelectorAll('thead tr'));
+        const { grid: bodyGrid, subRows } = expand(bodyTrs);
+        const { grid: headGrid } = expand(headTrs);
+
+
+        const maxBodyLen = bodyGrid.reduce((max, row) => Math.max(max, row.length), 0);
+        const headerLen = maxBodyLen > 0
+            ? maxBodyLen
+            : (headGrid.length > 0 ? headGrid[headGrid.length - 1].length : 0);
+
+
+        const headers = [];
+        for (let c = 0; c < headerLen; c++) {
+            const parts = [];
+            for (let r = 0; r < headGrid.length; r++) {
+                const val = headGrid[r][c];
+                if (val && parts[parts.length - 1] !== val) {
+                    parts.push(val);
+                }
+            }
+            headers.push(parts.join('-'));
+        }
+
+
+        const rows = bodyGrid.map(row => {
+            const padded = [];
+            for (let c = 0; c < headerLen; c++) {
+                padded.push(row[c] !== undefined ? row[c] : '-');
+            }
+            return padded;
+        });
+
+
+        return { headers, rows, subRows };
     }
 
 
@@ -1261,31 +1345,70 @@ function initMainApp() {
             domParserFn: (doc, limit) => {
                 let res = [getMetaHeader(doc, "股利政策")];
                 const descEl = doc.querySelector('.dividend__text--infoDesc');
-                const dataRows = Array.from(doc.querySelectorAll('.dividend__wrapper--table tbody tr, .stockPanel__view table tbody tr'));
+                const targetTable = doc.querySelector('.dividend__wrapper--table table, .stockPanel__view table');
+                if (!targetTable) return res;
+
+
+                const { headers, rows, subRows } = flattenTableGrid(targetTable);
+                const iDate = headers.findIndex(h => h.includes('除息日'));
+                const iCash = headers.findIndex(h => h.replace(/-/g, '').includes('現金股利'));
+                const iStk = headers.findIndex(h => h.replace(/-/g, '').includes('股票股利'));
+                const iExStk = headers.findIndex(h => h.includes('除權日'));
+
+
+                const kept = [];
+                rows.forEach((cells, idx) => {
+                    const isSub = subRows.has(idx);
+                    const isEmptyPlaceholder = isSub
+                        && (iDate >= 0 && cells[iDate] === '-')
+                        && (iCash < 0 || parseFloat(cells[iCash]) === 0)
+                        && (iStk < 0 || parseFloat(cells[iStk]) === 0)
+                        && (iExStk < 0 || cells[iExStk] === '-');
+                    if (!isEmptyPlaceholder) {
+                        kept.push({ cells, isSub });
+                    }
+                });
 
 
                 if (descEl) {
-                    res.push(`${descEl.innerText.trim()} (共${dataRows.length}筆數據)`);
+                    res.push(`${descEl.innerText.trim()} (共${kept.length}筆數據)`);
+                }
+                if (headers.length > 0) {
+                    res.push(headers.join('\t'));
                 }
 
 
-                res.push("除權息年度\t現金-股利\t現金-除息日\t現金-發放日\t現金-除息前股價\t現金-填息天數\t股票-股利\t股票-除權日\t股票-除權前股價\t股票-填權天數\t股利合計\t殖利率(%)\t盈餘分配-配息\t盈餘分配-配股\t盈餘分配-合計");
-                dataRows.slice(0, limit).forEach(r => {
-                    res.push(Array.from(r.querySelectorAll('td')).map(td => td.innerText.trim()).join('\t'));
+                let end = Math.min(limit, kept.length);
+                while (end > 0 && end < kept.length && kept[end].isSub) {
+                    end++;
+                }
+                kept.slice(0, end).forEach(item => {
+                    res.push(item.cells.join('\t'));
                 });
                 return res;
             }
         },
         eps: { label: "歷年 EPS", urlSuffix: '?s=eps', requiresExpand: true, delay: 800, domParserFn: (doc, limit) => {
-            let res = [getMetaHeader(doc, "歷年 EPS"), "年度/季別\t每股盈餘(EPS)\t季增率\t年增率"];
-            Array.from(doc.querySelectorAll('.eps__table tbody tr, .stockPanel__view table tbody tr')).slice(0, limit).forEach(r => { const c = Array.from(r.querySelectorAll('td')).map(td => td.innerText.trim()); if(c.length>=2) res.push(c.join('\t')); });
+            let res = [getMetaHeader(doc, "歷年 EPS")];
+            const targetTable = doc.querySelector('table.eps__table, .eps__table table, .stockPanel__view table');
+            if (!targetTable) return res;
+            const { headers, rows } = flattenTableGrid(targetTable);
+            if (headers.length > 0) res.push(headers.join('\t'));
+            else res.push("年度/季別\t每股盈餘(EPS)\t季增率\t年增率");
+            rows.slice(0, limit).forEach(c => {
+                if (c.length >= 2) res.push(c.join('\t'));
+            });
             return res;
         }},
         revenue: { label: "月營收", urlSuffix: '?s=revenue', requiresExpand: true, delay: 800, domParserFn: (doc, limit) => {
             let res = [getMetaHeader(doc, "營收數據")];
-            const targetTable = doc.querySelector('.revenue__table table, .stockPanel__view table'); if (!targetTable) return res;
-            const theads = Array.from(targetTable.querySelectorAll('thead th')).map(th => th.innerText.trim()); if (theads.length > 0) res.push(theads.join('\t'));
-            Array.from(targetTable.querySelectorAll('tbody tr')).slice(0, limit).forEach(r => { const c = Array.from(r.querySelectorAll('td')).map(td => td.innerText.trim()); if(c.length>=2) res.push(c.join('\t')); });
+            const targetTable = doc.querySelector('table.revenue__table, .revenue__table table, .stockPanel__view table');
+            if (!targetTable) return res;
+            const { headers, rows } = flattenTableGrid(targetTable);
+            if (headers.length > 0) res.push(headers.join('\t'));
+            rows.slice(0, limit).forEach(c => {
+                if (c.length >= 2) res.push(c.join('\t'));
+            });
             return res;
         }},
         'income-statement': {
@@ -1575,24 +1698,12 @@ function initMainApp() {
         }},
         div_comp: { label: "股利組成", urlSuffix: '?s=dividend-composition', requiresExpand: true, delay: 1000, domParserFn: (doc, limit) => {
             let res = [getMetaHeader(doc, "ETF 股利組成")];
-            const table = doc.querySelector('.dividendComposition__wrapper--table table, .stockPanel__view table'); 
+            const table = doc.querySelector('.dividendComposition__wrapper--table table, .stockPanel__view table');
             if (!table) return res;
-            
-            const theadRows = Array.from(table.querySelectorAll('thead tr'));
-            let headerLine = "";
-            if (theadRows.length > 0) {
-                const lastThead = theadRows[theadRows.length - 1];
-                const ths = Array.from(lastThead.querySelectorAll('th, td')).map(th => th.innerText.replace(/[\n\r\t]+/g, ' ').trim()).filter(Boolean);
-                headerLine = ths.join('\t');
-            }
-            if (headerLine) {
-                res.push(headerLine);
-            }
-
-
-            Array.from(table.querySelectorAll('tbody tr')).slice(0, limit).forEach(r => { 
-                const c = Array.from(r.querySelectorAll('td, th')).map(td => td.innerText.replace(/[\n\r\t]+/g, ' ').trim()); 
-                if(c.length >= 2) res.push(c.join('\t')); 
+            const { headers, rows } = flattenTableGrid(table);
+            if (headers.length > 0) res.push(headers.join('\t'));
+            rows.slice(0, limit).forEach(c => {
+                if (c.length >= 2) res.push(c.join('\t'));
             });
             return res;
         }},
@@ -1832,7 +1943,7 @@ function initMainApp() {
 
 
             let isWatchdogFired = false;
-            // FIX-04: Watchdog 延長至 25,000ms (25 秒)
+            // FIX-04: Watchdog 延長至 25,000ms (25 秒)；P3-02 單次原子寫回
             const watchdogTimer = setTimeout(() => {
                 isWatchdogFired = true; 
                 let currentTask = GM_getValue("cm_batch_task");
@@ -1840,13 +1951,15 @@ function initMainApp() {
                     currentTask.results[currentModKey] = ["【抓取失敗】", "(網路超時或頁面卡死，自動略過)", ""];
                     currentTask.queue.shift();
                     currentTask.lastProgressTime = Date.now();
-                    GM_setValue("cm_batch_task", currentTask);
                     if (currentTask.queue.length > 0) {
+                        GM_setValue("cm_batch_task", currentTask);
                         const nextMod = MODULE_REGISTRY[currentTask.queue[0]];
                         const nextUrl = nextMod.absoluteUrl ? nextMod.absoluteUrl : `https://www.cmoney.tw/forum/stock/${currentTask.stockId}${nextMod.urlSuffix}`;
                         window.location.href = nextUrl;
                     } else {
-                        currentTask.active = false; GM_setValue("cm_batch_task", currentTask); window.close();
+                        currentTask.active = false;
+                        GM_setValue("cm_batch_task", currentTask);
+                        window.close();
                     }
                 }
             }, 25000);
@@ -1879,10 +1992,11 @@ function initMainApp() {
                         latestTask.results[currentModKey] = res; 
                         latestTask.queue.shift();
                         latestTask.lastProgressTime = Date.now();
-                        GM_setValue("cm_batch_task", latestTask);
 
 
+                        // P3-02: 僅執行單次原子寫回
                         if (latestTask.queue.length > 0) {
+                            GM_setValue("cm_batch_task", latestTask);
                             const nextMod = MODULE_REGISTRY[latestTask.queue[0]];
                             const nextUrl = nextMod.absoluteUrl ? nextMod.absoluteUrl : `https://www.cmoney.tw/forum/stock/${latestTask.stockId}${nextMod.urlSuffix}`;
                             window.location.href = nextUrl;
@@ -2202,7 +2316,7 @@ function initMainApp() {
         panel.innerHTML = `
             <div id="cm-panel-head">
                 <button id="cm-toggle-left" class="cm-toggle-btn">◀ 設定</button>
-                <span>數據助手 v3.9.1</span>
+                <span>數據助手 v3.9.2</span>
                 <button id="cm-toggle-right" class="cm-toggle-btn">參數 ▶</button>
             </div>
 
@@ -2680,16 +2794,18 @@ function initMainApp() {
 
 
         const applyJsonData = (data, isFull = false) => {
+            if (!data || typeof data !== 'object') return;
             if (data.limit_div_stock !== undefined) { const val = safeInt(data.limit_div_stock, 7); GM_setValue("limit_div_stock", val); document.getElementById('cfg-div-s').value = val; }
             if (data.limit_div_etf !== undefined) { const val = safeInt(data.limit_div_etf, 24); GM_setValue("limit_div_etf", val); document.getElementById('cfg-div-e').value = val; }
-            if (data.white_list !== undefined) { const val = data.white_list.trim(); GM_setValue("white_list", val); document.getElementById('cfg-white').value = val; }
-            if (data.black_list !== undefined) { const val = data.black_list.trim(); GM_setValue("black_list", val); document.getElementById('cfg-black').value = val; }
+            // P3-03: 字串欄位型別守衛
+            if (typeof data.white_list === 'string') { const val = data.white_list.trim(); GM_setValue("white_list", val); document.getElementById('cfg-white').value = val; }
+            if (typeof data.black_list === 'string') { const val = data.black_list.trim(); GM_setValue("black_list", val); document.getElementById('cfg-black').value = val; }
 
 
             if (isFull) {
                 if (data.font_offset !== undefined) { const val = safeInt(data.font_offset, 0); GM_setValue("font_offset", val); document.getElementById('cfg-font').value = val; }
-                if (data.kline_sort !== undefined) { GM_setValue("cm_kline_sort", data.kline_sort); document.getElementById('cfg-kline-sort').value = data.kline_sort; }
-                if (data.sync_sheet_url !== undefined) { GM_setValue("cm_sync_sheet_url", data.sync_sheet_url); if (document.getElementById('cfg-sync-sheet-url')) document.getElementById('cfg-sync-sheet-url').value = data.sync_sheet_url; }
+                if (typeof data.kline_sort === 'string') { const val = data.kline_sort.trim(); GM_setValue("cm_kline_sort", val); document.getElementById('cfg-kline-sort').value = val; }
+                if (typeof data.sync_sheet_url === 'string') { const val = data.sync_sheet_url.trim(); GM_setValue("cm_sync_sheet_url", val); if (document.getElementById('cfg-sync-sheet-url')) document.getElementById('cfg-sync-sheet-url').value = val; }
                 if (data.default_stock_prof !== undefined) { GM_setValue("cm_default_stock_prof", safeInt(data.default_stock_prof, 4)); if (document.getElementById('cfg-def-stock-prof')) document.getElementById('cfg-def-stock-prof').value = data.default_stock_prof; }
                 if (data.default_etf_prof !== undefined) { GM_setValue("cm_default_etf_prof", safeInt(data.default_etf_prof, 10)); if (document.getElementById('cfg-def-etf-prof')) document.getElementById('cfg-def-etf-prof').value = data.default_etf_prof; }
                 if (data.limit_eps !== undefined) { const val = safeInt(data.limit_eps, 12); GM_setValue("limit_eps", val); document.getElementById('cfg-eps').value = val; }
@@ -2704,9 +2820,9 @@ function initMainApp() {
                 if (data.limit_const !== undefined) { const val = safeInt(data.limit_const, 10); GM_setValue("limit_const", val); document.getElementById('cfg-const').value = val; }
                 if (data.limit_discount !== undefined) { const val = safeInt(data.limit_discount, 10); GM_setValue("limit_discount", val); document.getElementById('cfg-disc').value = val; }
                 if (data.limit_drawdown !== undefined) { const val = safeInt(data.limit_drawdown, 10); GM_setValue("limit_drawdown", val); if (document.getElementById('cfg-drawdown')) document.getElementById('cfg-drawdown').value = val; }
-                if (data.hotkey_single !== undefined) { const val = data.hotkey_single.trim(); GM_setValue("cm_hk_single", val); document.getElementById('cfg-hk-single').value = val; }
-                if (data.hotkey_batch !== undefined) { const val = data.hotkey_batch.trim(); GM_setValue("cm_hk_batch", val); document.getElementById('cfg-hk-batch').value = val; }
-                if (data.hotkey_recopy !== undefined) { const val = data.hotkey_recopy.trim(); GM_setValue("cm_hk_recopy", val); document.getElementById('cfg-hk-recopy').value = val; }
+                if (typeof data.hotkey_single === 'string') { const val = data.hotkey_single.trim(); GM_setValue("cm_hk_single", val); document.getElementById('cfg-hk-single').value = val; }
+                if (typeof data.hotkey_batch === 'string') { const val = data.hotkey_batch.trim(); GM_setValue("cm_hk_batch", val); document.getElementById('cfg-hk-batch').value = val; }
+                if (typeof data.hotkey_recopy === 'string') { const val = data.hotkey_recopy.trim(); GM_setValue("cm_hk_recopy", val); document.getElementById('cfg-hk-recopy').value = val; }
 
 
                 if (data.categories !== undefined) { 

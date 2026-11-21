@@ -85,120 +85,263 @@
    
 ---
 
-## 【貳、 QA 測試驗證任務書 (QATP)】
+# 【貳、 QA 測試驗證任務書 (QATP)】
 
-> **表頭規格預設值顯式定錨**：  
-> **1. 目標版本號**：`3.9.1` ｜ **2. 目標語系**：`繁體中文 (zh-TW / CMoney 台股財經頁面)` ｜ **3. By-Design 豁免清單**：`見下方第 1 小節清單` ｜ **4. Profile**：`Profile-WebScript`
+> 🔒 **表頭規格預設值顯式定錨**：  
+> **1. 目標版本號**：`3.9.2` ｜ **2. 目標語系**：`JavaScript (Tampermonkey Userscript / Profile-WebScript)` ｜ **3. By-Design 豁免清單**：`見下方第 1 小節清單（共 16 項）` ｜ **4. Profile**：`Profile-WebScript`
 
-> **QATP 預判標籤總則與安全港閉環**：  
-> ① 本任務書預判 `[FAIL]`（阻斷簽核）之允許集合，嚴格限縮於三類：P0 嚴重架構缺陷、P1 安全與穩定性缺陷、法定契約項（功能虛報、數據造假、版本號未宣告或未遞增）。  
-> ② **非失真安全港**：輔助性渲染讓步延遲未逐毫秒展開者（惟代碼本體根本欠缺必要讓步導致死循環者不入港，仍屬 P0 阻斷）、反向指標合理標記 `[N/A]` 且非不可豁免門禁最後依據者、非實質識別差異或排版微瑕，均嚴禁判為 `[FAIL]`，一律列為 P3 工單衛生觀察項。
+> 🔒 **QATP 預判標籤總則與安全港閉環（對齊規範邊界 3）**：  
+> ① 預判 `[FAIL]`（阻斷簽核）之允許集合嚴格限縮於三類：P0 工安級缺陷、P1 架構安全級缺陷、法定契約項（功能虛報、數據造假、版本號未宣告/未遞增）。  
+> ② **嚴格落實非失真安全港**：輔助性讓步延遲（如表格展開緩衝或非同步切換讓步 `sleep`）未列入獨立排程矩陣者（惟代碼本體根本欠缺必要讓步導致死循環或資源耗盡者不適用安全港，恆屬 P0 阻斷）、反向驗證清單標記 `[N/A]` 且附帶合理豁免自述者（惟該指標為 Zero-Meltdown、救援入口存活、資料完整性等不可豁免門禁之最後驗證依據者除外，應列 `🟡 未決待處置` 提請補證）、參數名稱非實質縮寫差異或排版微瑕，一律不得預判為 `[FAIL]`，僅得列為 P3 工單衛生觀察項。
 
 ---
 
 ### 0. 🧬 【強制優先】Phase 0：獨立白箱代碼靜態風險排查 (Static Code Audit)
 
-QA 必須於展開測試案例表格前，獨立完成以下五大靜態排查；凡發現異常風險，須附帶 4 要素記錄於【3.3.1】：
-* **0.1 【選擇器字元安全性與 URL 端點轉譯排查】**：查驗 `MODULE_KEY_REGEX` 是否完整阻隔引號、括號及換行字元進入 `p.modules`；查驗 `#cm-btn-save-profile` 是否已徹底消除動態屬性選擇器字串拼接；複檢 5 處 `<option>` 插值與輸入框值是否全面通過 `escapeHtml` 消毒；查驗 `getGoogleSheetsCsvUrl` 僅轉譯標準試算表 ID 與 `gid`。
-* **0.2 【字串與正則邊界吞噬排查】**：複掃全檔正則表達式（含 `MODULE_KEY_REGEX = /^[A-Za-z0-9_-]+$/`、`institutional-target` 目標價與總評清洗、`trading-fee` 費率清洗、`syncGoogleSheetLists` 補零正則 `/^[0-9]+[A-Z]?$/`），確認無「可空萬用字元 `.*`/`.*?` 搭配 `s` 旗標」或「空交替分支 `(|x)`」之全文換行吞噬風險（註：JS 正則與字串字面量內的 `\n` 為合法轉義序列，嚴禁憑空推斷為語法異常）。
-* **0.3 【跨分頁資源競爭、輪詢上限與記憶體洩漏排查】**：重點複核 `startRelayBatchScrape` 之 1000ms `batchMonitorTimer` 在正常推進期間完全不寫回 `cm_batch_task`；核對單頁 K 線輪詢 `singleScrapePoller` 上限為 `40 次 (20 秒)`、Worker K 線輪詢上限為 `50 次 (25 秒)`、Worker Watchdog 超時鎖定為 `25,000ms`、主分頁停滯釋放門檻為 `180,000ms`，且所有計時器在退出路徑均正確執行 `clearInterval` / `clearTimeout`。
-* **0.4 🚨 【全域頂層範圍語法結構與入口盲區排查 (Zero-Meltdown Audit)】**：查驗 `setupNetworkInterceptor` 與 `initMainApp` 於 `document-start` 與 `DOMContentLoaded` 階段之執行順序；確認 `GM_registerMenuCommand` 無條件掛載於 UI 建置之前；確認 `isValidCategoriesStructure` 與 `storedCategories` 分支在任何殘缺 Storage 輸入下皆不會拋出 `TypeError` 阻斷腳本啟動。
-* **0.5 🛡️ 【災難救援與脫困指令執行環境能力邊界排查】**：檢核交接與維運場景中的 Console 救援操作（如清空 `cm_batch_task` 或重置 `cm_scrape_categories`）是否具備明確之 Tampermonkey Context 邊界說明，以及 `DEF-04` 在不依賴手動 Console 指令下是否具備自動覆寫自癒能力。
+QA 必須在展開測試案例表格前，獨立完成以下五大底層靜態排查。凡發現風險，必須附帶 4 要素記錄於報告第 `3.3.1` 節：
+* **0.1 【外部請求、選擇器注入與路徑轉義漏洞排查】**：檢查 `GM_xmlhttpRequest` 端點轉換、`escapeHtml` DOM 插值消毒與 `MODULE_KEY_REGEX` 反查防護，確認無未經轉義之選擇器字串拼接或 XSS 注入路徑。
+* **0.2 【字串與正則邊界吞噬排查】**：全面掃描 `flattenTableGrid` 與 `MODULE_REGISTRY` 所有正則字面量，確認無「含換行元素與 `.*`/`.*?` 並存且搭配 `s` (dotAll) 旗標」、無裸露無邊界 `\s*`/`\s+`、無空交替分支 `/(?:|x)/`，避免單行資料跨列吞噬。
+* **0.3 【非同步競態、計時器清理與跨分頁寫回衝突排查】**：檢查 `batchMonitorTimer` 閉包區域變數 `lastQueueLen` / `lastProgressAt` 是否徹底禁止正常輪詢期寫回 `cm_batch_task`；檢查 `checkAndExecuteWorkerTask` 末模組關閉前是否合併為單一次 `GM_setValue` 原子寫回；檢查 `singleScrapePoller` 清理機制。
+* **0.4 🚨 【全域頂層範圍語法崩潰與入口盲區排查 (Zero-Meltdown Audit)】**：獨立複查 metadata 閉合、IIFE `setupNetworkInterceptor`、`initMainApp` 初始化區間之異常隔離與 `GM_registerMenuCommand` 無條件掛載。遵守舉證責任規則，JavaScript 正則字面量內之 `\n` 與 `\r` 屬合法標準轉義序列，嚴禁將其誤判為實體換行引發之語法崩潰。
+* **0.5 🛡️ 【災難救援與脫困指令執行環境能力邊界排查 (Runtime Context Feasibility)】**：核查與本腳本配合之 Console 緊急救援／脫困方案是否遵守雙層自適應與 Context 切換邊界（在頁面預設 Context 呼叫 `GM_*` 將拋出 `ReferenceError`，必須明確包含 `try/catch` 偵測提醒切換至 Tampermonkey 擴充套件沙盒 Context，或使用 Tampermonkey 選單命令「🔄 重置面板位置 (尋回 UI)」與 JSON 備份還原）。
 
 ---
 
 ### 1. 🛡️ 【強制】架構妥協與驗收豁免須知 (By-Design Exceptions)
 
-> **不可豁免鐵律與合法對稱面**：載入異常與救援入口失效、目標情境資料靜默丟失或輸出污染，於任何環境皆不得列為豁免。同時，非目標頁面（如 `/watchlist`、`/market` 或無法人覆蓋之冷門標的與 ETF）之預期性路由略過或優雅降級文案，屬合法對稱排除面，不得誤判為異常。
+> 🛑 **不可豁免鐵律與合法對稱面**：  
+> ① 載入崩潰（Zero-Meltdown 違規）於任何環境恆不得列為 By-Design 豁免，救援入口存活為無條件底線。  
+> ② 目標情境之資料實質損壞（靜默丟失、欄位錯位、輸出污染）恆為 P0 缺陷。  
+> ③ **合法對稱面**：非目標路徑（如 `/watchlist`、`/market`）依守衛主動略過特定功能屬預期性排除；非目標語系下之功能差異視為 By-Design。  
+> ④ 以下每一條目均已執行「不可豁免鐵律自查：無衝突」確認。
 
-1. **維持 1000ms 輪詢與 `task.active` 跨分頁協定（延後 `TASK-OPT-01`）**：`v3.9.1` 刻意保留 `setInterval` 輪詢與布林 `task.active` 結構，僅修復早退條件與區域變數計時，不於本版重寫為 `GM_addValueChangeListener`。
-   * **不可豁免鐵律自查**：無衝突（不造成載入失敗或資料遺失，且修復後已確保完賽資料完整寫入）。
-2. **URL 自動路由頁面與手動優先邊界**：`/watchlist` 與 `/market` 頁面不觸發自動切換 Profile；同標的頁面手動變更分類或組合後鎖定 `userManuallySelectedProfile = true` 不再逆向覆寫。
-   * **不可豁免鐵律自查**：無衝突（屬非目標路由之預期性排除與操作脈絡保全）。
-3. **背景分頁剪貼簿沙盒權限邊界**：當 Worker 關閉後主分頁處於非聚焦狀態（`document.hasFocus() === false`），現代瀏覽器可能拒絕 `navigator.clipboard.writeText`，此時依賴 `window.focus()`、`GM_setClipboard`、快取持久化及 `.cm-btn-pulse` 呼吸燈導引 F9 複製。
-   * **不可豁免鐵律自查**：無衝突（`cm_last_scraped_data` 已確保無損持久化，絕無靜默丟失數據）。
-4. **Google 試算表需公開檢視權限與防空熔斷**：私密試算表回傳 HTML 登入頁或空試算表時，由 `isHtmlResponse()` 與防空熔斷主動拒絕覆寫本機名單。
-   * **不可豁免鐵律自查**：無衝突（保護本機既有資料不被污染）。
-5. **既有解析器頁面限制（資產負債表三表輪切、法人目標降級、大盤無流水帳）**：維持 `v3.9.0` 既定設計，冷門股/ETF 無報告時回傳預期降級文案，大盤 K 線僅輸出深海狙擊雷達摘要。
-   * **不可豁免鐵律自查**：無衝突。
-6. **測試前置環境清理要求 (`[Probe V1]`)**：實機執行批次測試前，必須停用或移除開發排查階段使用之 `[Probe V1]` 拋棄式腳本，防止其外部攔截或干擾 `cm_batch_task` 狀態。
-   * **不可豁免鐵律自查**：無衝突。
+1. **URL 自動路由識別邊界限制【By Design / 預期行為】**（不可豁免鐵律自查：無衝突）：`applyAutoRoute` 僅針對 `/stock/{id}` 路徑自動切換分類與組合，於 `/watchlist` 與 `/market` 路徑刻意直接返回保持現狀。
+2. **同頁手動切換優先於自動路由【By Design / 預期行為】**（不可豁免鐵律自查：無衝突）：當使用者手動切換選單設定 `userManuallySelectedProfile = true` 後，同標的不再被定時器或 `MutationObserver` 逆向覆寫。
+3. **剪貼簿失焦環境沙盒原生限制【By Design / 預期行為】**（不可豁免鐵律自查：無衝突）：背景分頁完成彙整回主分頁若處於失焦狀態，`navigator.clipboard.writeText()` 靜默降級並啟動 `.cm-btn-pulse` 呼吸燈提示按 F9 或點擊按鈕複製。
+4. **Google 試算表 CSV 同步公開權限與防空熔斷【By Design / 預期行為】**（不可豁免鐵律自查：無衝突）：非 200 回應、HTML 登入頁或解析三欄全空時中斷寫入，100% 保留本機既有名單。
+5. **資產負債表選擇器收斂保護【By Design / 預期行為】**（不可豁免鐵律自查：無衝突）：`balance-sheet` 之 `getTableSnapshot` 嚴格收斂至 `.balanceSheet__table table, .stockPanel__view table`，排除全域裸 `table`。
+6. **基本資料雙軌多態自適應切換【By Design / 預期行為】**（不可豁免鐵律自查：無衝突）：以 `!!map['基金名稱']` 作為個股 9 大指標與 ETF 8 大屬性分流依據，不採用代碼前綴硬編碼。
+7. **股利政策連續配息摘要前導行【By Design / 預期行為】**（不可豁免鐵律自查：無衝突）：保留 `.dividend__text--infoDesc` 並附加過濾後有效筆數 `(共Z筆數據)` 作為表頭前導資訊行。
+8. **資產負債表非同步三表輪切讓步【By Design / 預期行為】**（不可豁免鐵律自查：無衝突）：依序點擊「資產 / 負債 / 股東權益」頁籤並各等待 `600ms` 後復原至「資產」視圖。
+9. **冷門股與 ETF 法人目標價優雅降級【By Design / 預期行為】**（不可豁免鐵律自查：無衝突）：無法人覆蓋報告時直接回傳 `(該標的尚無法人券商目標價報告或覆蓋)` 而不中斷批次佇列。
+10. **大盤技術分析無流水帳【By Design / 預期行為】**（不可豁免鐵律自查：無衝突）：`market_kline` 僅輸出【深海狙擊雷達】摘要，刻意不輸出逐日原始流水帳。
+11. **批次監控維持 1000ms 唯讀輪詢架構【By Design / 預期行為】**（不可豁免鐵律自查：無衝突）：保留 1000ms 輪詢與閉包追蹤，不置換為 `GM_addValueChangeListener`。
+12. **非 Worker 視窗靜默攔截與指紋匹配守衛【By Design / 預期行為】**（不可豁免鐵律自查：無衝突）：`checkAndExecuteWorkerTask` 嚴格驗證 `window.name === 'CMScrapeWorker'`、任務指紋 `id` 與 `queue[0]`。
+13. **初始化損毀分類自癒與畸形模組鍵濾除【By Design / 預期行為】**（不可豁免鐵律自查：無衝突）：不合規 `categories` 於啟動以深拷貝 `DEFAULT_CATEGORIES` 覆寫自癒；不符 `MODULE_KEY_REGEX` 之模組鍵靜默濾除。
+14. **表格無數據列時之 `headerLen` 兜底邊界【By Design / 預期行為】**（不可豁免鐵律自查：無衝突）：當 `tbody` 完全無資料列（`maxBodyLen === 0`）時，`flattenTableGrid` 回退採用 `headGrid` 最末列展開長度作為欄寬基準。
+15. **股利無日期全 `0` 佔位子列過濾邊界【By Design / 預期行為】**（不可豁免鐵律自查：無衝突）：僅濾除 `subRows` 中無除息/除權日且現金與股票股利為 `0` 之附屬衍生子列；獨立整年零配息列（`isSub === false`）依設計完整保留。
+16. **批次跨分頁小頁籤狀態邊界【By Design / 預期行為】**（不可豁免鐵律自查：無衝突）：Worker 分頁跨頁執行預設擷取頁面載入之預設頁籤（如月營收、季 EPS）；小頁籤（季/年營收、近四季/年 EPS）切換採集主要服務於單頁抓取場景。
 
 ---
 
 ### 2. 四大維度測試案例清單 (Test Cases)
 
-#### 🌟 維度一：新功能與修復驗收 (TC-NEW-xx)
+> 🛑 **代碼位置語意錨點契約**：以下全部測試案例之代碼定位均嚴格採用 `{函式名/模組名} 內 緊鄰 {字面量或條件式} 處` 語意錨點，嚴禁使用任何脆性實體行號。
 
-| 案例編號 | 測試情境與目標 | 靜態白箱審查步驟 / 操作路徑 | 預期結果 | 代碼 AST 語意錨點 |
-| :--- | :--- | :--- | :--- | :--- |
-| **TC-NEW-01** | 頭部版本宣告、面板標題與檔尾結構驗收 | 1. 檢查檔案頭部前 10 行 `@version` 欄位。<br>2. 檢查 `createUI` 內主面板標題字串。<br>3. 檢查檔案末尾最後一段啟動邏輯。 | 1. 前 10 行存在 `// @version      3.9.1`。<br>2. 標題顯示為 `數據助手 v3.9.1`。<br>3. 檔尾乾淨閉合於 `initMainApp` 條件分支，無殘留字元。 | Metadata 區塊 緊鄰 `// @namespace` 下方處；`createUI` 內 緊鄰 `#cm-panel-head` 模板處；檔尾 `if (document.readyState === 'loading')` 處 |
-| **TC-NEW-02** | `FIX-05` 批次完賽結算無早退與換行存活性驗證 | 1. 模擬 Worker 完賽寫入 `cm_batch_task`（含相同 `id: taskId`、`active: false`、`queue: []`、`results` 內含多列換行 `\n` 與 Tab `\t` 數據）。<br>2. 逐行推演 `batchMonitorTimer` 判定順位 1 至 5。 | 1. 順位 1 僅檢查 `!task \|\| task.id !== taskId`，不會因 `!task.active` 早退。<br>2. 進入順位 4，完整組裝 `finalOut`（含 `=== 【...】 ===` 與多列 `\n` / `\t` 數據，換行總數完整保留不被壓扁單行），寫入 `cm_last_scraped_data` 與 `cm_last_scraped_stock_id`，執行複製與呼吸燈判定，清空 `cm_batch_task = null`。 | `startRelayBatchScrape` 內 `batchMonitorTimer = setInterval` 緊鄰 `判定順位 1` 與 `判定順位 4` 處 |
-| **TC-NEW-03** | `FIX-05` 主分頁進度推進無寫回競態驗證 | 1. 模擬 Worker 執行中 `task.active === true` 且 `task.queue.length` 從 `3` 變為 `2`。<br>2. 追蹤 `batchMonitorTimer` 順位 2 至 5 是否觸發 `GM_setValue`。 | 1. 進入順位 2 僅於記憶體更新 `lastQueueLen` 與 `lastProgressAt`。<br>2. 整個正常進度推進與進行中分支內，零次呼叫 `GM_setValue("cm_batch_task", task)`，完全消除覆寫 Worker `results` 之競態風險。 | `startRelayBatchScrape` 內 緊鄰 `判定順位 2：Worker 已推進佇列` 與 `let lastProgressAt = Date.now()` 處 |
-| **TC-NEW-04** | `DEF-04` 初始化端 `CATEGORIES` 深度校驗與自癒 | 1. 分別推演 Storage key `cm_scrape_categories` 為 `[]`、`[{catId:0, profiles:[]}]`、`[{catId:0, profiles:[{id:null}]}]`、`[{catId:0, profiles:[{id:0, modules:"bad"}]}]`。<br>2. 追蹤啟動初始化與 `saveCategories` 邏輯。 | 1. `isValidCategoriesStructure` 均正確回傳 `false`。<br>2. 啟動邏輯以 `JSON.parse(JSON.stringify(DEFAULT_CATEGORIES))` 深拷貝建立 `CATEGORIES`，並立即呼叫 `GM_setValue("cm_scrape_categories", CATEGORIES)` 覆寫修復 Storage。 | `initMainApp` 內 `isValidCategoriesStructure` 與 `const storedCategories = GM_getValue` 條件分支處 |
-| **TC-NEW-05** | `OBS-06` 模組鍵白名單正則過濾驗證 | 1. 透過 `applyJsonData(data, true)` 匯入或啟動載入含 `modules: ["realtime", "bad\"][x", "kline\n", "pe", 123, "realtime"]` 之 Profile。<br>2. 追蹤 `sanitizeCategoryModules` 執行結果。 | 1. `MODULE_KEY_REGEX` (`/^[A-Za-z0-9_-]+$/`) 精準放行 `"realtime"` 與 `"pe"`。<br>2. 含引號、括號、換行字元及非字串之畸形鍵全數被濾除且完成去重；若 `p.modules` 本身為非陣列字串則由 `isValidCategoriesStructure` 整批拒絕還原。 | `initMainApp` 頂部 `MODULE_KEY_REGEX`、`sanitizeCategoryModules` 及 `applyJsonData` 內 `if (data.categories !== undefined)` 處 |
-| **TC-NEW-06** | `OBS-06` 儲存組合勾選安全反查驗證 | 1. 點擊 `#cm-btn-save-profile` 觸發儲存流程。<br>2. 檢查計算隱藏既有模組 `hiddenExisting` 之 DOM 比對實作。 | 1. 放棄字串拼接選擇器查詢，改為先檢查 `typeof modKey === 'string' && MODULE_KEY_REGEX.test(modKey)`。<br>2. 透過 `allModuleCbs.find(el => el.value === modKey)` 比對節點 `offsetParent === null`，零 `SyntaxError` 風險且保有 `UI-02` 聯集防抹殺能力。 | `createUI` 內 `document.getElementById('cm-btn-save-profile').onclick` 緊鄰 `hiddenExisting` 計算處 |
+#### 🌟 維度一：新功能驗收 (TC-NEW-xx)
 
-#### 🔄 維度二：關鍵防禦機制實體存活審查 (TC-REG-xx)
+* **TC-NEW-01：版本號 Metadata、面板標題與檔尾結構驗證**
+  * **測試情境**：核對腳本檔案頭尾版本標識與 UI 標題字面量。
+  * **操作步驟**：靜態檢視 Metadata 宣告區塊、`createUI` 內部 `#cm-panel-head` 樣板字串及檔案末尾啟動判斷式。
+  * **預期結果**：`@version` 為 `3.9.2`；面板標題精確顯示 `數據助手 v3.9.2`；檔案末尾僅存在 `DOMContentLoaded` 監聽與 `initMainApp()` 呼叫，無多餘非代碼字元。
+  * **AST 語意錨點推演**：核對檔案頂部 `// @version      3.9.2`、`createUI 內 緊鄰 <div id="cm-panel-head"> 處` 之 `<span>數據助手 v3.9.2</span>`，以及檔尾 `if (document.readyState === 'loading')` 區塊。
 
-| 案例編號 | 測試情境與目標 | 靜態白箱審查步驟 / 操作路徑 | 預期結果 | 代碼 AST 語意錨點 |
-| :--- | :--- | :--- | :--- | :--- |
-| **TC-REG-01** | `FIX-01` 任務指紋隔離與 Worker 視窗鎖定存活 | 1. 檢查 `startRelayBatchScrape` 之 `taskId` 生成與 Worker `checkAndExecuteWorkerTask` 入口守衛。<br>2. 檢查移轉佇列前之指紋核對條件。 | 1. 發起時生成隨機指紋 `id`；Worker 入口首行檢查 `window.name !== 'CMScrapeWorker'` 即退出。<br>2. Watchdog 與主流程寫入/跳轉前均驗證 `id === task.id` 且 `queue[0] === currentModKey`。 | `startRelayBatchScrape` 內 `const taskId =` 處；`checkAndExecuteWorkerTask` 首行與 `latestTask.id !== task.id` 處 |
-| **TC-REG-02** | `FIX-02 ~ FIX-04` 座標兜底、原子儲存與資產負債收斂存活 | 1. 檢查 `toggleSideDrawer` 與 `makeDraggable` 之座標計算。<br>2. 檢查 `saveCategories` 重新讀取與寫回流程。<br>3. 檢查 `balance-sheet` 之 `getTableSnapshot` 選擇器。 | 1. 座標全面以 `Number.isFinite` 兜底，杜絕 `NaN` 寫入 `panel_pos`。<br>2. `saveCategories` 重新讀取最新 Storage 並先校驗洗滌再原子寫回。<br>3. `balance-sheet` 僅查詢 `.balanceSheet__table table, .stockPanel__view table`，無裸 `table` 回退。 | `toggleSideDrawer` 底部、`makeDraggable` 內 `onmouseup`、`saveCategories` 函式體、`MODULE_REGISTRY['balance-sheet']` 內 `getTableSnapshot` 處 |
-| **TC-REG-03** | `DEF-01 ~ DEF-03` 就地替換與 5 處轉義消毒存活 | 1. 檢查 `applyJsonData` 對 `cats` 之變更方式。<br>2. 掃描全檔 `<option value="...">` 與輸入框 `value` 插值點。 | 1. `applyJsonData` 經 `saveCategories` 執行 `cats.length = 0; cats.push(...clonedCats);` 就地替換。<br>2. `loadCategories`、`loadProfilesList`、`populateDefaultProfileOptions`、`applyAutoRoute` 及左抽屜輸入框插值均包覆 `escapeHtml(...)`。 | `applyJsonData` 內 `saveCategories` 回呼體；`createUI` 內 `populateDefaultProfileOptions`、`loadCategories`、`loadProfilesList` 與 `applyAutoRoute` 處 |
-| **TC-REG-04** | `UI-01`、`UI-02` 與 CSS 權重級聯防呆驗證 | 1. 檢查 `injectStyles` 之雙欄 Grid、5 處防萎縮與所有 `!important` 聲明。<br>2. 檢查 `loadProfileData` 與 `applyAutoRoute` 之情境遮罩與寬度計算。 | 1. `.cc-center-stage` 寬度維持 `460 + (off * 16)` 並採 `.cm-checkbox-area-grid` 雙欄排版；5 處容器具備 `flex-shrink: 0 !important;`。<br>2. 動態行內座標 (`top`, `left`) 與遮罩 (`display`) 在 CSS 樣式表無 `!important` 壓制。 | `getDynamicUIParams`、`injectStyles`、`loadProfileData` 及 `applyAutoRoute` 緊鄰 `UI-02` 註解處 |
-| **TC-REG-05** | `ROUTE-01`、`SYNC-01`、`CLIP-01` 與攔截器存活 | 1. 檢查 `setupNetworkInterceptor`、`applyAutoRoute`、`syncGoogleSheetLists` 及 `finishScrape` / `startRelayBatchScrape` 複製流程。 | 1. XHR/Fetch 雙軌攔截與 `JsonCsv` 降級轉換完整。<br>2. `applyAutoRoute` 維持手動切換鎖定優先；`syncGoogleSheetLists` 維持 HTML 偵測、A/B 欄補零、C 欄不補零及防空熔斷。<br>3. 複製維持 `window.focus()` + 雙軌寫入 + 失焦 `.cm-btn-pulse` 呼吸燈。 | `setupNetworkInterceptor`、`applyAutoRoute`、`syncGoogleSheetLists`、`finishScrape` 處 |
+* **TC-NEW-02：`flattenTableGrid` 通用二維網格展平引擎與換行存活性驗證**
+  * **測試情境**：輸入包含跨列 `rowSpan`、跨欄 `colSpan`、上游錯標 `colSpan`（`thead` 總寬大於 `tbody` 實質欄寬）、同名子欄及單儲格內嵌換行（`A\nB`）之多列表格。
+  * **操作步驟**：白箱推演 `flattenTableGrid(table)` 執行流程：(1) 確認 `expand(bodyTrs)` 與 `expand(headTrs)` 各自僅呼叫一次；(2) 追蹤 `grid[r][0] !== undefined` 之 `subRows` 登錄邏輯；(3) 追蹤儲存格文本清洗順序；(4) 追蹤 `maxBodyLen` 對 `headerLen` 之裁切與 `parts` 相鄰去重串接；(5) 驗證多筆資料列輸入後換行存活性（單儲格內 `\n` 被折疊為 `' '`，資料列之間經模組輸出以 `\n` 保持總列數完整不壓扁）。
+  * **預期結果**：`subRows` 精準標記所有被上一列 `rowSpan` 覆蓋第 0 欄之列索引；單儲格內換行與不間斷空白經 `/[\n\r\t]+/g` 與 `/[^\S\r\n]+/g` 正規化為單一空白且無跨列吞噬；多層表頭正確生成 `父層-子層` 且相鄰同字不重複（例如 `年度` 不變成 `年度-年度`）；`maxBodyLen > 0` 時以實質數據欄寬裁切多餘表頭欄；缺失儲存格以 `'-'` 補齊等寬。
+  * **AST 語意錨點推演**：位於 `initMainApp 內 緊鄰 getMetaHeader 下方之 function flattenTableGrid(table) 處`，包含 `expand` 內部雙層迴圈、`const maxBodyLen = bodyGrid.reduce(...)`、`const headerLen = ...` 與 `parts[parts.length - 1] !== val` 邏輯。
+
+* **TC-NEW-03：`FIX-06` (`MODULE_REGISTRY.revenue`) 多頁籤與錯標 `colSpan` 免疫驗證**
+  * **測試情境**：驗證 `revenue` 解析器在月營收（8 欄）、季營收（5 欄）與年營收（上游 `thead[0]` 錯標 `colSpan: 4` 而實際僅 4 欄）下之展平與欄位對齊表現。
+  * **操作步驟**：白箱追蹤 `MODULE_REGISTRY.revenue.domParserFn` 之選擇器解析、`flattenTableGrid` 調用、`headers` 與 `rows.slice(0, limit)` 串接輸出。
+  * **預期結果**：選擇器優先匹配 `table.revenue__table, .revenue__table table, .stockPanel__view table`；年營收表頭因 `maxBodyLen = 4` 強制裁切而精準輸出 4 欄（完全免疫 `colSpan: 4` 錯標）；月營收 8 欄、季營收 5 欄皆可透過 `父層-子層` 明確區分 `營業收入-年增率%` 與 `累積營業收入-年增率%`，維持 `requiresExpand: true` 與 `delay: 800`。
+  * **AST 語意錨點推演**：位於 `MODULE_REGISTRY 內 緊鄰 revenue: { label: "月營收" 處` 之 `domParserFn`，檢核 `const targetTable = doc.querySelector('table.revenue__table, .revenue__table table, .stockPanel__view table')` 與 `flattenTableGrid(targetTable)` 呼叫鏈。
+
+* **TC-NEW-04：`FIX-07` (`MODULE_REGISTRY.dividend`) 跨列展平、佔位過濾與年度邊界補齊驗證**
+  * **測試情境**：分別推演個股多配息跨列含佔位子列（如 `2542` `2020` 年全 `0` 無日期子列與 `2003~2001` 獨立 `0.000` 年列）、季配息跨列截斷（如 `2330` `limit` 切在跨列中間）以及 ETF 7 欄結構（如 `00878`）。
+  * **操作步驟**：追蹤 `MODULE_REGISTRY.dividend.domParserFn` 內：(1) `iDate`、`iCash`、`iStk`、`iExStk` 動態索引查找（特別檢查 `h.replace(/-/g, '').includes(...)` 對 `現金-股利` 與 `現金股利` 的雙重相容）；(2) `isEmptyPlaceholder` 五條件聯合過濾邏輯；(3) `descEl` 前導摘要計數是否使用過濾後 `kept.length`；(4) `while (end > 0 && end < kept.length && kept[end].isSub)` 延伸邏輯。
+  * **預期結果**：個股 15 欄與 ETF 7 欄表頭自動自適應無硬編碼；`isSub === true` 且無除息/除權日且現金/股票股利為 `0` 之衍生佔位子列被精準剔除，同時 `isSub === false` 之獨立整年 `0.000` 紀錄完整保留；`limit` 落於跨列年度中間時 `end` 自動遞增補齊整年全部子列；摘要行輸出 `(共${kept.length}筆數據)`；保留 `requiresExpand: true` 與 `delay: 1500`。
+  * **AST 語意錨點推演**：位於 `MODULE_REGISTRY 內 緊鄰 dividend: { label: "股利政策" 處` 之 `domParserFn`，檢核 `iCash` / `iStk` 之 `.replace(/-/g, '')` 匹配、`isEmptyPlaceholder` 條件組與 `while (end > 0 && end < kept.length && kept[end].isSub)` 迴圈。
+
+* **TC-NEW-05：`FIX-08` (`MODULE_REGISTRY.eps`) 小頁籤欄數自適應與兜底驗證**
+  * **測試情境**：推演 `eps` 頁面切換「季」（4 欄）、「近四季」（4 欄，表頭含 `近四季 每股盈餘`）、「年」（3 欄，無季增率）與 `thead` 為空之異常兜底分支。
+  * **操作步驟**：追蹤 `MODULE_REGISTRY.eps.domParserFn` 內選擇器查詢、`flattenTableGrid` 執行與 `headers.length > 0` 分支判斷。
+  * **預期結果**：選擇器採用 `table.eps__table, .eps__table table, .stockPanel__view table`；依實際表格輸出對應 4 欄或 3 欄表頭，無多餘空白欄或欄位錯位；當 `headers` 為空時自動回退 `"年度/季別\t每股盈餘(EPS)\t季增率\t年增率"`；保留 `requiresExpand: true` 與 `delay: 800`。
+  * **AST 語意錨點推演**：位於 `MODULE_REGISTRY 內 緊鄰 eps: { label: "歷年 EPS" 處` 之 `domParserFn`，檢核 `if (headers.length > 0) res.push(headers.join('\t')); else res.push("年度/季別\t每股盈餘(EPS)\t季增率\t年增率");`。
+
+* **TC-NEW-06：`FIX-09` (`MODULE_REGISTRY.div_comp`) 兩層合併表頭完整還原驗證**
+  * **測試情境**：推演 `dividend-composition` 頁面包含 `thead[0]` 跨列標題（`除權息年度`、`股利` 各 `rowSpan: 2`）與 `收益組成` (`colSpan: 5`) 兩層結構。
+  * **操作步驟**：追蹤 `MODULE_REGISTRY.div_comp.domParserFn` 調用 `flattenTableGrid` 後表頭與資料列之欄位數對應關係。
+  * **預期結果**：第 0、1 欄不再遺失，7 欄表頭與 7 欄數據達成 `7=7` 完全對齊，且 `收益組成` 下 5 個子欄依 `收益組成-{子項}` 形式明確展開；保留 `requiresExpand: true` 與 `delay: 1000`。
+  * **AST 語意錨點推演**：位於 `MODULE_REGISTRY 內 緊鄰 div_comp: { label: "股利組成" 處` 之 `domParserFn`，檢核 `const { headers, rows } = flattenTableGrid(table)` 及其後續 `\t` 串接邏輯。
+
+* **TC-NEW-07：`P3-01 ~ P3-03` 白箱防禦加固項驗證**
+  * **測試情境**：分別模擬 (1) `panel_pos` 儲存值為 `null`、字串或 `{ top: NaN, left: 200 }`；(2) Worker 分頁執行最後一項模組（正常結束與 Watchdog 逾時兩種路徑）；(3) `applyJsonData` 匯入含非字串鍵值（如 `"hotkey_single": null`、`"hotkey_batch": 123`、`"white_list": []`）之 JSON 物件或非物件輸入。
+  * **操作步驟**：逐一白箱追蹤 `rawPanelPos` / `safePanelPos` 初始化邏輯、`checkAndExecuteWorkerTask` 佇列寫回分支與 `applyJsonData` 各欄位型別判定式。
+  * **預期結果**：(1) 任何損毀之 `panel_pos` 皆於 `CONFIG.panel_pos` 初始化即回退至 `{ top: 150, left: 200 }`；(2) Worker 佇列清空（`queue.length === 0`）時，先設定 `active = false` 後僅執行**單一次** `GM_setValue("cm_batch_task", ...)` 並隨即 `window.close()`；(3) `applyJsonData` 於入口阻斷非物件資料，並對全數 7 個字串欄位先行檢查 `typeof === 'string'` 方執行 `.trim()`，零 `TypeError`。
+  * **AST 語意錨點推演**：位於 `initMainApp 內 緊鄰 const rawPanelPos = GM_getValue("panel_pos"` 處、`checkAndExecuteWorkerTask 內 緊鄰 // P3-02: 僅執行單次原子寫回` 及 `watchdogTimer` 內 `if (currentTask.queue.length > 0)` 處，以及 `applyJsonData 內 緊鄰 // P3-03: 字串欄位型別守衛` 處。
+
+* **TC-NEW-08：動態外觀覆寫權重契約 (`CSS Specificity Guard`) 與三檔字級相容性驗證**
+  * **測試情境**：檢查 `injectStyles()` 注入之 CSS 選擇器與 `!important` 宣告是否壓制行內動態樣式與字體縮放變數。
+  * **操作步驟**：逐行核對 `injectStyles()` 內 `#cm-main-panel`、`#cm-drawer-btn`、`.cc-center-stage`、`.cc-drawer`、`#acc-etf`、`#acc-finance`、`.cm-stock-only-cb` 之屬性優先級，並比對 `font_offset` = `0`、`+2`、`+4` 計算公式。
+  * **預期結果**：位置座標（`top`/`left`）、字級變數（`--cm-fs`/`--cm-hfs`）、舞台寬度（`460 + off * 16`）與互斥遮罩行內 `display` 均未於樣式表中使用 `!important` 鎖死；所有控制項按鈕保留 `flex-shrink: 0 !important;` 防止擠壓變形；`.cc-center-stage` 維持 `max-height: 85vh !important; overflow-y: auto !important;` 確保任一字級皆可完整滾動操作。
+  * **AST 語意錨點推演**：位於 `getDynamicUIParams` 與 `injectStyles 內 緊鄰 #cm-main-panel` 及 `.cc-center-stage` CSS 樣板處，以及 `loadProfileData` / `applyAutoRoute` 內 `accEtf.style.display` 切換區塊。
+
+---
+
+#### 🔄 維度二：關鍵防禦機制實體存活審查 (AST Defense Invariant Audit) (TC-REG-xx)
+
+* **TC-REG-01：免修四模組與其餘 20 項既有解析器無迴歸驗證**
+  * **測試情境**：確認 `stockfindetail`、`income-statement`、`cash-flow`、`financial-ratio`、`balance-sheet` 等 20 項未列於本次變更範圍之模組未被誤改。
+  * **操作步驟**：比對 `MODULE_REGISTRY` 內除 `revenue`、`dividend`、`eps`、`div_comp` 外之其餘 20 項模組之選擇器、解析邏輯、`requiresExpand` 與 `delay` 參數。
+  * **預期結果**：`balance-sheet` 仍嚴格收斂於 `.balanceSheet__table table, .stockPanel__view table` 且維持三表輪切 `600ms` 讓步；`stockfindetail` / `income-statement` / `cash-flow` / `financial-ratio`、`constituent`、`profile`、`institutional-target`、`trading-fee`、`kline`、`market_kline`、`realtime`、`watchlist` 等結構 100% 維持原樣。
+  * **AST 語意錨點推演**：位於 `MODULE_REGISTRY 內 緊鄰 'income-statement':`、`balance-sheet` 內 `getTableSnapshot` 註解 `FIX-04` 處與 `stockfindetail`、`cash-flow`、`financial-ratio` 條目處。
+
+* **TC-REG-02：`FIX-05` 批次監控無競態結算與 5 階真值決策表存活審查**
+  * **測試情境**：推演 Worker 完賽關閉分頁與任務停滯超時場景下主分頁監控計時器行為。
+  * **操作步驟**：審查 `startRelayBatchScrape` 內 `batchMonitorTimer` 輪詢回呼之閉包狀態變數與 5 個條件分支順序。
+  * **預期結果**：閉包正確維護 `lastQueueLen` 與 `lastProgressAt`；順位 1 早退僅判斷 `!task || task.id !== taskId`（絕無 `!task.active`）；正常進度推進僅更新記憶體變數絕不寫回 `cm_batch_task`；逾時 `180000ms` 中斷解鎖；`!task.active || task.queue.length === 0` 完整彙整剪貼簿與失焦呼吸燈提示後清空任務。
+  * **AST 語意錨點推演**：位於 `startRelayBatchScrape 內 緊鄰 // FIX-05: 閉包區域變數紀錄進度` 至 `GM_setValue("cm_batch_task", null)` 處。
+
+* **TC-REG-03：`FIX-01` Worker 雙重隔離、指紋驗證與 25 秒 Watchdog 存活審查**
+  * **測試情境**：模擬一般使用者分頁誤入目標模組 URL、過期任務殘留與單模組渲染卡死超過 25 秒場景。
+  * **操作步驟**：審查 `checkAndExecuteWorkerTask` 入口守衛、`watchdogTimer` 時限及移轉前指紋檢查邏輯。
+  * **預期結果**：入口強制 `if (window.name !== 'CMScrapeWorker') return;`；Watchdog 維持 `25000ms` 並以 `isWatchdogFired` 物理阻斷延遲 Poller；移轉前核對 `latestTask.id === task.id && latestTask.queue[0] === currentModKey`。
+  * **AST 語意錨點推演**：位於 `checkAndExecuteWorkerTask 內 緊鄰 if (window.name !== 'CMScrapeWorker') return;` 與 `// FIX-01: 移轉前驗證任務指紋與佇列頭部` 處。
+
+* **TC-REG-04：`DEF-04` + `OBS-06` + `FIX-03` 結構自癒、白名單過濾與原子儲存存活審查**
+  * **測試情境**：驗證啟動期與匯入期異常分類結構、非法模組鍵注入及跨分頁分類儲存競態防線。
+  * **操作步驟**：審查 `isValidCategoriesStructure`、`sanitizeCategoryModules`、`storedCategories` 初始化分支、`saveCategories` 與 `#cm-btn-save-profile` 點擊處理函式。
+  * **預期結果**：初始化異常結構以 `JSON.parse(JSON.stringify(DEFAULT_CATEGORIES))` 深拷貝覆寫自癒；`MODULE_KEY_REGEX` (`/^[A-Za-z0-9_-]+$/`) 嚴格過濾去重 `p.modules`；`saveCategories` 重新自 Storage 拉取最新實體就地變更；隱藏模組反查先驗正則再以 `allModuleCbs.find(el => el.value === modKey)` 匹配，無字串拼接選擇器風險。
+  * **AST 語意錨點推演**：位於 `initMainApp 內 緊鄰 // DEF-04 & OBS-06: 深度結構校驗與模組鍵值洗滌函式` 處及 `createUI 內 緊鄰 // OBS-06 + UI-02 防抹殺規範` 處。
+
+* **TC-REG-05：全域 `escapeHtml` 消毒、`SYNC-01` 雲端同步防空與 `ROUTE-01` 路由鎖存活審查**
+  * **測試情境**：檢查 DOM 動態屬性插值、雲端試算表異常回應（非 200 / HTML 登入頁 / 三欄全空）與同頁手動切換選單後之路由行為。
+  * **操作步驟**：追蹤 `escapeHtml` 覆蓋點、`syncGoogleSheetLists` 條件中斷鏈及 `applyAutoRoute` 手動旗標判斷。
+  * **預期結果**：所有動態 `<option>` 與 `<input>` 均通過 `escapeHtml`；試算表非 200、偵測 `isHtmlResponse` 或三欄全空時立即 `return` 保留本機名單；`stockId === lastSniffedStockId && userManuallySelectedProfile` 直接返回不覆寫手動選擇。
+  * **AST 語意錨點推演**：位於 `syncGoogleSheetLists 內 緊鄰 if (isHtmlResponse(text))` 處、`applyAutoRoute 內 緊鄰 if (stockId === lastSniffedStockId && userManuallySelectedProfile) return;` 處與 `loadCategories` / `loadProfilesList` / `populateDefaultProfileOptions` 處。
+
+* **TC-REG-06：雙軌網路攔截與姊妹腳本左右抽屜儲存解耦存活審查**
+  * **測試情境**：檢查 API 攔截快取歸零時機、左右抽屜儲存按鈕寫入 Key 邊界及熱鍵輸入框屏蔽防呆。
+  * **操作步驟**：對照 `setupNetworkInterceptor`、`#cm-cfg-save-sys` 與 `#cm-cfg-save` 之 `GM_setValue` 鍵名清單及 `setupHotkeySystem` 目標元素過濾。
+  * **預期結果**：XHR `open` 與 Fetch 發起請求時立即重置 `window.__cm_kline_data_cache = null`；左抽屜 `#cm-cfg-save-sys` 僅寫系統外觀/熱鍵/路由/網址，右抽屜 `#cm-cfg-save` 僅寫筆數限制與白黑名單，兩者零交集；`setupHotkeySystem` 遇 `input`/`textarea`/`select`/`isContentEditable` 立即返回。
+  * **AST 語意錨點推演**：位於 `setupNetworkInterceptor 內 緊鄰 window.__cm_kline_data_cache = null;` 處、`createUI 內 緊鄰 #cm-cfg-save-sys` 與 `#cm-cfg-save` 處及 `setupHotkeySystem 內 緊鄰 e.target.tagName.toLowerCase()` 處。
+
+---
 
 #### ⚠️ 維度三：架構風險與極端情境識別 (TC-RISK-xx)
 
-| 案例編號 | 測試情境與目標 | 靜態白箱審查步驟 / 操作路徑 | 預期結果 | 代碼 AST 語意錨點 |
-| :--- | :--- | :--- | :--- | :--- |
-| **TC-RISK-01** | 180 秒停滯逾時與正常完賽邊界競爭推演 | 1. 推演最後一個模組耗時 179 秒完賽，Worker 設定 `active: false` 與 `queue: []`。<br>2. 推演 Worker 卡死超過 181 秒且 `active: true`、`queue` 未變動。 | 1. 情境 1：順位 2 更新 `lastProgressAt` 為 `Date.now()` 且 `task.active` 為 `false`，順位 3 必為 `false`，平滑進入順位 4 正常結算。<br>2. 情境 2：順位 3 觸發停滯超時，清除定時器、設 `task.active = false` 寫回並解鎖按鈕，不會誤進入順位 4 輸出殘缺成功訊息。 | `startRelayBatchScrape` 內 `判定順位 2`、`判定順位 3` 與 `判定順位 4` 處 |
-| **TC-RISK-02** | Worker 25 秒 Watchdog 與 K 線輪詢極限互斥推演 | 1. 模擬 K 線一直未載入，比較 Worker K 線 Poller (`50 次 = 25 秒`) 與 25 秒 Watchdog (`25,000ms`) 幾乎同時觸發之競爭。<br>2. 檢核單頁 K 線 Poller (`40 次 = 20 秒`)。 | 1. Watchdog 觸發後立即設置 `isWatchdogFired = true` 並移轉佇列。<br>2. 延遲到達的 Poller 進入 `executeScrapeAndJump()` 或 `clickShowMoreAndExecute` 回呼時受 `if (isWatchdogFired) return;` 阻斷，絕不重複 `shift()` 佇列或重複跳轉。 | `checkAndExecuteWorkerTask` 內 `isWatchdogFired`、`watchdogTimer` 與 `checkCount >= 50` 處；`executeSinglePageScrape` 內 `checkCount >= 40` 處 |
-| **TC-RISK-03** | 多重發起或切換視窗時之定時器收斂推演 | 1. 使用者連續發起兩次批次任務，或手動清空 `cm_batch_task`。<br>2. 檢查舊 `batchMonitorTimer` 行為。 | 1. `startRelayBatchScrape` 開頭先 `clearInterval(batchMonitorTimer)`。<br>2. 即使有殘留輪詢觸發，於順位 1 命中 `!task \|\| task.id !== taskId` 立即恢復按鈕並自我清除，不干擾新任務。 | `startRelayBatchScrape` 內 `if (batchMonitorTimer) clearInterval(batchMonitorTimer)` 與 `判定順位 1` 處 |
-| **TC-RISK-04** | 三檔字體縮放與雙向邊界拖曳防呆驗證 | 1. 檢查 `font_offset` 為 `0`、`+2`、`+4` 時 `getDynamicUIParams()` 與 `.cc-center-stage` 之 `max-height: 85vh` 表現。<br>2. 檢查 `makeDraggable` 與 `toggleSideDrawer` 邊界夾緊。 | 1. 寬度與字級按比例線性縮放，中央舞台固定 `85vh` 與 `overflow-y: auto` 保護視窗不溢出。<br>2. `toggleSideDrawer` 展開左抽屜以 `Math.max(0, ...)` 防負座標，`makeDraggable` 以視窗寬高 clamp 防拖出可視區。 | `getDynamicUIParams`、`injectStyles` 內 `.cc-center-stage`、`toggleSideDrawer` 與 `makeDraggable` 處 |
-| **TC-RISK-05** | Userscript 雙層脫困環境可達性審查 (`QP-Track1-DualLayer-Rescue`) | 1. 檢查當 `cm_batch_task` 卡死或 `cm_scrape_categories` 異常時之復原路徑。<br>2. 核對實機驗證專區對擴充套件 Context 切換要求。 | 1. 初始化 `DEF-04` 已提供無需人工介入之結構異常自動自癒。<br>2. 批次卡死具備 3 分鐘自動釋放及手動 Tampermonkey Context Console 指令脫困（詳見 `MV-04` 雙環境驗證）。 | `initMainApp` 初始化守衛、`GM_registerMenuCommand` 與 `startRelayBatchScrape` 逾時釋放處 |
+* **TC-RISK-01：`flattenTableGrid` 極端病態 DOM 與數值邊界推演**
+  * **測試情境**：測試 (1) 表格為 `null`；(2) 有 `thead` 但 `tbody` 為空；(3) `tbody` 某一列僅含 1 個 `colSpan` 未滿整寬之儲存格導致稀疏陣列；(4) `dividend` 頁面存在無 `descEl` 或無 `除息日` 欄位之非預期表頭結構。
+  * **操作步驟**：依 `flattenTableGrid` 與 `dividend` 解析器逐行推演各極端分支。
+  * **預期結果**：(1) 回傳 `{ headers: [], rows: [], subRows: new Set() }` 無例外；(2) `maxBodyLen === 0` 正確回退至 `headGrid` 末列長度；(3) 稀疏列缺失索引由 `row[c] !== undefined ? row[c] : '-'` 補齊至等寬 `headerLen`；(4) `iDate === -1` 時 `isEmptyPlaceholder` 為 `false`，不誤刪資料列，且因無 `descEl` 安全略過前導摘要行。
+  * **AST 語意錨點推演**：位於 `flattenTableGrid 內 緊鄰 if (!table) return` 與 `const rows = bodyGrid.map(...)` 處，以及 `MODULE_REGISTRY.dividend 內 緊鄰 const isEmptyPlaceholder = isSub` 處。
+
+* **TC-RISK-02：雙向拖曳、抽屜切換與啟動座標異常自癒邊界推演**
+  * **測試情境**：視窗寬高縮小後拖曳面板或切換左抽屜展開，以及 Storage 存有 `{ top: null, left: undefined }` 時啟動頁面。
+  * **操作步驟**：追蹤 `safePanelPos`、`makeDraggable` 與 `toggleSideDrawer` 之 `Math.max` / `Math.min` 邊界夾緊與 `Number.isFinite` 檢驗。
+  * **預期結果**：啟動異常座標不觸發 `NaNpx` 面板隱形，回退為 `{ top: 150, left: 200 }`；拖曳與左抽屜展開後寫入 `panel_pos` 之座標恆為有限數值且不超出視口邊界。
+  * **AST 語意錨點推演**：位於 `initMainApp 內 緊鄰 const safePanelPos =` 處、`toggleSideDrawer 內 緊鄰 // FIX-02: 夾緊與 NaN 防禦` 處及 `makeDraggable 內 緊鄰 element.style.left = Math.max(0, Math.min(` 處。
+
+* **TC-RISK-03：K 線 Lazy Load 高頻輪詢上限與資源釋放風險推演**
+  * **測試情境**：快速連續觸發單頁 K 線抓取，或目標頁面長時間未返回 `GetDtnoData.ashx` / `/dtno/JsonCsv`。
+  * **操作步驟**：追蹤 `executeSinglePageScrape` 內 `singleScrapePoller` 清除機制、`checkCount >= 40` / `>= 50` 截止條件與 `scrollY` 回沖呼叫。
+  * **預期結果**：重入觸發單頁抓取前先執行 `if (singleScrapePoller) clearInterval(singleScrapePoller)` 杜絕定時器洩漏；達計數上限即清除計時器並平滑回沖 `originalScrollY`，由 Parser 回傳標準失敗提示不無限空轉。
+  * **AST 語意錨點推演**：位於 `executeSinglePageScrape 內 緊鄰 if (singleScrapePoller) clearInterval(singleScrapePoller);` 與 `checkAndExecuteWorkerTask 內 緊鄰 const poller = setInterval(` 處。
+
+* **TC-RISK-04 (`QP-Track1-DualLayer-Rescue`)：Userscript 跨 Context 災難脫困可行性與容錯邊界驗證**
+  * **測試情境**：檢核本專案在擴充套件沙盒 Context 與瀏覽器預設頁面 Context 執行緊急救援方案之真實可行性。
+  * **操作步驟**：比對腳本內建 `GM_registerMenuCommand("🔄 重置面板位置 (尋回 UI)")`、左抽屜 JSON 匯入覆寫還原機制，以及後續維運救援手冊所規範之雙層 `try/catch` Context 偵測邏輯。
+  * **預期結果**：代碼自身不依賴脆弱頁面全域閉包，可透過 Tampermonkey 選單與 JSON 備份無條件復原；於實機驗證專區（`MV-06`）須分別於預設頁面 Context 與 Tampermonkey 沙盒 Context 實測救援指令並確認行為符合雙層容錯契約。
+  * **AST 語意錨點推演**：位於 `initMainApp 內 緊鄰 GM_registerMenuCommand("🔄 重置面板位置 (尋回 UI)"` 處與 `createUI 內 緊鄰 #cm-btn-imp-ap-fl` 處。
+
+---
 
 #### 🏛️ 維度四：靜態資料庫殘缺自癒推演 (Static Mock Data-Flow Trace) (TC-DEBT-xx)
 
-| 案例編號 | 測試情境與目標 | 靜態白箱推演步驟 | 預期結果 | 代碼 AST 語意錨點 |
-| :--- | :--- | :--- | :--- | :--- |
-| **TC-DEBT-01** | 變數讀寫計數雙向核驗（嚴查殭屍變數） | 1. 核對本次新增與修改之變數與常數：`MODULE_KEY_REGEX`、`storedCategories`、`lastQueueLen`、`lastProgressAt`、`allModuleCbs`。<br>2. 抽查既有 `CONFIG` 各屬性之讀取點。 | 1. 所有新增變數均同時具備寫入（定義）與讀取（判定/過濾/計算）路徑，無 Write-Only 殭屍變數。<br>2. `CONFIG` 各屬性均於 `getAutoLimit`、`injectStyles`、`createUI`、`syncGoogleSheetLists` 等處被實質讀取。 | `initMainApp` 內 `MODULE_KEY_REGEX`、`storedCategories` 與 `startRelayBatchScrape` 內 `lastProgressAt` 處 |
-| **TC-DEBT-02** | 全新安裝零狀態 (`undefined`) 冷啟動推演 | 1. 模擬所有 `GM_getValue` 皆回傳預設值（`cm_scrape_categories` 回傳 `undefined`）。<br>2. 追蹤 `CONFIG`、`CATEGORIES`、`loadCategories` 與 `applyAutoRoute` 執行鏈。 | 1. `storedCategories === undefined` 觸發深拷貝 `DEFAULT_CATEGORIES`，不執行多餘覆寫，正常生成 3 大類 15 組 Profile。<br>2. 頁面依 URL 自動路由或預設選項載入，0 例外發生。 | `initMainApp` 內 `const storedCategories` 與 `loadCategories` 處 |
-| **TC-DEBT-03** | 極端殘缺與混合毒丸資料流自癒推演 | 1. 模擬 `panel_pos` 為 `{top: "NaN", left: undefined}`、`cm_scrape_categories` 為 `[{catId: 0, profiles: []}]` 或 `[{catId: 0, profiles: [{id: 4, modules: ["realtime", "\"><img src=x>"]}]}]`。<br>2. 追蹤啟動與 UI 互動流。 | 1. `cm_scrape_categories` 空 `profiles` 觸發 `DEF-04` 自癒覆寫預設結構；畸形模組鍵觸發 `OBS-06` 濾除僅留 `"realtime"`。<br>2. `toggleSideDrawer` / `makeDraggable` 以 `Number.isFinite` 攔截 `NaN` 座標還原為 `150, 200`。 | `isValidCategoriesStructure`、`sanitizeCategoryModules`、`toggleSideDrawer` 與 `makeDraggable` 處 |
+* **TC-DEBT-01：變數讀寫計數雙向核驗與寫死/殭屍變數稽核**
+  * **測試情境**：對全檔新增與既有 `CONFIG` / 區域變數執行讀寫引用盤點。
+  * **操作步驟**：核對 `safePanelPos`、`flattenTableGrid` 回傳鍵 `{ headers, rows, subRows }`、`lastQueueLen` / `lastProgressAt` 及既有 `CONFIG` 全鍵之定義與讀取次數。
+  * **預期結果**：`safePanelPos` 寫入 `CONFIG.panel_pos` 後於 `injectStyles` 被實質讀取；`flattenTableGrid` 之 `headers`、`rows`、`subRows` 三鍵均被 `dividend` 等調用端實質讀取；`CONFIG.kline_type`、`kline_days`、`market_kline_days` 仍於 `parseKlineDataEngine` / `getAutoLimit` 作為 fallback 被讀取；無任何讀取次數為 `0` 之 Write-Only 殭屍變數。
+  * **AST 語意錨點推演**：位於 `initMainApp 頂部 const safePanelPos`、`const CONFIG =` 物件與 `flattenTableGrid` 回傳物件處。
+
+* **TC-DEBT-02：全新安裝零狀態與多維殘缺 JSON 輸入自癒推演**
+  * **測試情境**：模擬 (1) 全新瀏覽器環境全部 `GM_getValue` 回傳預設值；(2) 傳入 `{ panel_pos: "corrupt", cm_scrape_categories: [], applyJsonInput: { hotkey_single: 999, categories: [{ catId: 0, profiles: [] }] } }`。
+  * **操作步驟**：自 `initMainApp` 開頭至 `createUI` 結尾追蹤無數據與異常資料流向。
+  * **預期結果**：(1) 全新環境安全深拷貝 `DEFAULT_CATEGORIES` 並以預設 `CONFIG` 正常渲染面板；(2) `panel_pos` 自動自癒為 `{ top: 150, left: 200 }`；損毀 `cm_scrape_categories` 觸發自癒覆寫並輸出警告；`applyJsonData` 跳過數值型 `hotkey_single` 並因 `isValidCategoriesStructure` 為 `false` 拒絕覆寫分類且彈出錯誤 Toast，全程零異常拋出。
+  * **AST 語意錨點推演**：位於 `initMainApp 內 緊鄰 const storedCategories = GM_getValue("cm_scrape_categories", undefined);` 與 `applyJsonData 內 緊鄰 if (isValidCategoriesStructure(data.categories))` 處。
+
+* **TC-DEBT-03：全域清洗正則安全複掃與 Anti-Swallowing 靜態稽核**
+  * **測試情境**：針對本版新增與全部既有正則字面量進行語法毒性複掃。
+  * **操作步驟**：檢查 `flattenTableGrid` 內 `/[\n\r\t]+/g`、`/[^\S\r\n]+/g` 以及 `institutional-target`、`trading-fee`、`constituent`、`syncGoogleSheetLists`、`MODULE_KEY_REGEX` 之所有正則 Pattern。
+  * **預期結果**：`flattenTableGrid` 僅對單一儲存格 `innerText` 執行清洗，完全不含 `.*` / `.*?` 與 `s` 旗標、不含裸露 `\s+`、不含空交替分支；全檔其餘正則字面量均維持既有安全邊界，無無差別跨行粉碎風險。
+  * **AST 語意錨點推演**：位於 `flattenTableGrid 內 緊鄰 .replace(/[\n\r\t]+/g, ' ')` 處與 `MODULE_REGISTRY['institutional-target']` / `['trading-fee']` 清洗區塊。
 
 ---
 
 ### 3. 驗收報告格式要求 (Mandatory Output Schema)
 
+請 QA 嚴格依照以下結構回傳驗收報告（不得擅自省略章節）：
+
 #### 3.1 測試環境與涵蓋範圍總覽
-* 必須顯式確認以下四項規格定錨：**目標版本號 (`3.9.1`)、目標語系 (`繁體中文 / CMoney`)、By-Design 豁免清單、Profile (`Profile-WebScript`)**。
+* 確認並明列四項規格定錨：`目標版本號: 3.9.2`、`目標語系: JavaScript (Tampermonkey Userscript / Profile-WebScript)`、`By-Design 豁免清單: 第 1 節共 16 項`、`Profile: Profile-WebScript`。
+* 彙整靜態白箱覆蓋之測試案例總數（維度一 8 項、維度二 6 項、維度三 4 項、維度四 3 項，合計 21 項）與實機核對專區項目數（`MV-01` 至 `MV-06`）。
 
 #### 3.2 四大維度逐項檢驗表格
-* 必須完整展開 `TC-NEW-01 ~ 06`、`TC-REG-01 ~ 05`、`TC-RISK-01 ~ 05`、`TC-DEBT-01 ~ 03` 共 **19 項**。
-* 靜態白箱審查部分必須即時給予四態終審標籤：`[PASS]` ｜ `[PASS (By-Design)]` ｜ `[PASS (Retired)]` ｜ `[FAIL]`；若涉及待補證或仲裁爭議則填註 `[🟡 未決待處置]` 並附原因，嚴禁填入假性通過標籤。動態實機項目統一追蹤於下方 **3.2.1**。
+*(請對全數 21 項靜態推演逐項給出四態終審標籤：`[PASS]` ｜ `[PASS (By-Design)]` ｜ `[PASS (Retired)]` ｜ `[FAIL]`，若遇爭議或補證未決請標註 `[🟡 未決待處置]`)*
+
+| 測試編號 | 測試目標摘要 | 實體代碼語意錨點 | 推演結果與證據 | 四態終審標籤 |
+| :--- | :--- | :--- | :--- | :--- |
+| `TC-NEW-01` | `@version 3.9.2`、面板標題與檔尾閉合 | `// @version`、`#cm-panel-head`、檔尾判斷式 | *(待 QA 填寫)* | *(待填)* |
+| `TC-NEW-02` | `flattenTableGrid` 展平、裁切與換行存活性 | `initMainApp 內 function flattenTableGrid` | *(待 QA 填寫)* | *(待填)* |
+| `TC-NEW-03` | `FIX-06` (`revenue`) 三頁籤與 `colSpan` 錯標免疫 | `MODULE_REGISTRY.revenue.domParserFn` | *(待 QA 填寫)* | *(待填)* |
+| `TC-NEW-04` | `FIX-07` (`dividend`) 展平、過濾與邊界補齊 | `MODULE_REGISTRY.dividend.domParserFn` | *(待 QA 填寫)* | *(待填)* |
+| `TC-NEW-05` | `FIX-08` (`eps`) 三頁籤自適應與兜底表頭 | `MODULE_REGISTRY.eps.domParserFn` | *(待 QA 填寫)* | *(待填)* |
+| `TC-NEW-06` | `FIX-09` (`div_comp`) 合併表頭 7 欄還原 | `MODULE_REGISTRY.div_comp.domParserFn` | *(待 QA 填寫)* | *(待填)* |
+| `TC-NEW-07` | `P3-01~03` (`panel_pos` / Worker 單寫 / 字串守衛) | `safePanelPos`、`checkAndExecuteWorkerTask`、`applyJsonData` | *(待 QA 填寫)* | *(待填)* |
+| `TC-NEW-08` | CSS Specificity Guard 與三檔字級相容 | `getDynamicUIParams`、`injectStyles`、`loadProfileData` | *(待 QA 填寫)* | *(待填)* |
+| `TC-REG-01` | 免修四模組與其餘 20 項既有解析器無迴歸 | `MODULE_REGISTRY` 其餘 20 項條目 | *(待 QA 填寫)* | *(待填)* |
+| `TC-REG-02` | `FIX-05` 批次監控無競態結算存活 | `startRelayBatchScrape` 內 `batchMonitorTimer` | *(待 QA 填寫)* | *(待填)* |
+| `TC-REG-03` | `FIX-01` Worker 身分、指紋與 25s Watchdog | `checkAndExecuteWorkerTask` 入口與 `watchdogTimer` | *(待 QA 填寫)* | *(待填)* |
+| `TC-REG-04` | `DEF-04` + `OBS-06` + `FIX-03` 自癒與白名單 | `isValidCategoriesStructure`、`sanitizeCategoryModules`、`saveCategories` | *(待 QA 填寫)* | *(待填)* |
+| `TC-REG-05` | `escapeHtml`、`SYNC-01` 防空與 `ROUTE-01` 路由鎖 | `syncGoogleSheetLists`、`applyAutoRoute`、`loadCategories` | *(待 QA 填寫)* | *(待填)* |
+| `TC-REG-06` | 雙軌攔截與左右抽屜儲存解耦 | `setupNetworkInterceptor`、`#cm-cfg-save-sys`、`#cm-cfg-save` | *(待 QA 填寫)* | *(待填)* |
+| `TC-RISK-01` | `flattenTableGrid` 極端病態 DOM 與空表格 | `flattenTableGrid`、`MODULE_REGISTRY.dividend` | *(待 QA 填寫)* | *(待填)* |
+| `TC-RISK-02` | 雙向拖曳、抽屜展開夾緊與座標兜底 | `safePanelPos`、`toggleSideDrawer`、`makeDraggable` | *(待 QA 填寫)* | *(待填)* |
+| `TC-RISK-03` | K 線輪詢上限與 `scrollY` 回沖安全 | `executeSinglePageScrape`、`checkAndExecuteWorkerTask` | *(待 QA 填寫)* | *(待填)* |
+| `TC-RISK-04` | `QP-Track1-DualLayer-Rescue` 脫困環境邊界核查 | `GM_registerMenuCommand`、`#cm-btn-imp-ap-fl` | *(待 QA 填寫)* | *(待填)* |
+| `TC-DEBT-01` | 變數讀寫計數雙向核驗（無 Write-Only） | `initMainApp` `CONFIG` 與 `flattenTableGrid` | *(待 QA 填寫)* | *(待填)* |
+| `TC-DEBT-02` | 零狀態初始化與畸形輸入自癒流向 | `storedCategories`、`applyJsonData` | *(待 QA 填寫)* | *(待填)* |
+| `TC-DEBT-03` | 全域清洗正則安全複掃（無跨行吞噬） | `flattenTableGrid` 與 `MODULE_REGISTRY` 正則群 | *(待 QA 填寫)* | *(待填)* |
 
 #### 3.2.1 🕹️ 人類實機操作核對專區 (Manual Live Verification Area)
+*(本專區追蹤動態實機與視覺渲染項目，不阻礙 6-A 技術手冊白箱封存，由現場測試人員回填實證後納入 6-B 維運結案)*
+
 | 實機項目編號 | 驗證操作目標 | 實體代碼對應邏輯錨點 | 實機回填要求 | 當前專區狀態 |
 | :--- | :--- | :--- | :--- | :--- |
-| **MV-01** | `FIX-05` 批次彙整真實開窗關窗完賽結算實測（請先確認已停用 `[Probe V1]`） | `startRelayBatchScrape` 內 `batchMonitorTimer` 順位 1 至 5 及 `checkAndExecuteWorkerTask` 閉合處 | 於 `/stock/00922` 勾選 2 個以上模組執行「自動開頁彙整勾選資料」，回報 Worker 自動關閉後：剪貼簿是否成功取得多模組 `\n` / `\t` 數據（附上擷取摘要與換行存活確認）、`#cm-status-bar` 是否更新、以及點擊「重新複製上次數據」／F9 是否成功 | 待回填 |
-| **MV-02** | `DEF-04` + `OBS-06` 殘缺 Storage 自癒與畸形 JSON 匯入實測 | `initMainApp` 內 `storedCategories` 初始化分支、`applyJsonData` 及 `#cm-btn-save-profile` 處 | 透過 Console 將 `cm_scrape_categories` 設為 `[]` 後重整確認 UI 正常渲染且 Storage 已自動覆寫還原；另匯入含 `"bad\"][x"` 模組鍵之備份 JSON 並點擊儲存組合，確認無報錯且畸形鍵已被過濾 | 待回填 |
-| **MV-03** | 三檔字體縮放偏移 (`0` / `+2` / `+4`) 與動態行內樣式即時覆寫實測 | `getDynamicUIParams`、`injectStyles` 內 `.cc-center-stage`、`toggleSideDrawer` 與 `loadProfileData` 處 | 依序測試 `font_offset` 為 `0`、`+2`、`+4` 並重整，確認雙欄佈局無截斷重疊；實測拖曳主面板、開合左右抽屜與切換個股/ETF 遮罩，確認行內座標與 `display` 即時生效未被 `!important` 壓制 | 待回填 |
-| **MV-04** | `QP-Track1-DualLayer-Rescue` 雙環境 Console 脫困與選單重置實測 | `GM_registerMenuCommand` 與 Storage 鍵 `cm_batch_task` / `panel_pos` 處 | 分別於 **(a) 擴充套件沙盒 Context** 執行 `GM_setValue("cm_batch_task", null)` 與 **(b) 頁面預設 Context** 觀察權限提示，並實測 Tampermonkey 選單「🔄 重置面板位置 (尋回 UI)」確認均可成功脫困 | 待回填 |
-
-*專區狀態集合：`{待回填 ｜ 已回填-通過 ｜ 已回填-異常轉升格 3.3 缺陷並附 4 要素}`*
+| **MV-01** | `FIX-06` 營收三頁籤實機欄數對齊 (`2884?s=revenue`) | `MODULE_REGISTRY.revenue.domParserFn` 內 `flattenTableGrid(targetTable)` 處 | 分別切換「月營收」「季營收」「年營收」單頁抓取，貼回表頭與首 2 列驗證 `8=8`、`5=5`、`4=4` 及 `年增率%` 雙詞區分 | 待回填 |
+| **MV-02** | `FIX-07` 股利個股/ETF 跨列與佔位子列實機 (`2542`、`2330`、`00878`) | `MODULE_REGISTRY.dividend.domParserFn` 內 `isEmptyPlaceholder` 與 `end` 延伸處 | 貼回 `2542`（確認無 `2020` `0.000` 佔位子列且保留 `2003~2001`、7 年 9 列 `15=15`）、`2330`（7 年 27 列 `15=15`）與 `00878`（24 期 `7=7`）輸出截圖或文字 | 待回填 |
+| **MV-03** | `FIX-08` (`2330?s=eps`) 三頁籤與 `FIX-09` (`00878?s=dividend-composition`) 實機 | `MODULE_REGISTRY.eps.domParserFn` 與 `MODULE_REGISTRY.div_comp.domParserFn` 處 | 貼回 EPS 季(`4=4`)/近四季(`4=4`)/年(`3=3`) 與 股利組成 `7=7` 實測輸出 | 待回填 |
+| **MV-04** | 停用開發探勘腳本後實測 `v3.9.2` 跨分頁批次彙整與失焦呼吸燈（承接前版 `MV-01`） | `startRelayBatchScrape` 內 `batchMonitorTimer` 與 `checkAndExecuteWorkerTask` 處 | 停用輔助探勘腳本後發起批次任務，驗證最後模組關閉後主分頁寫入剪貼簿、更新 `#cm-status-bar` 與背景失焦觸發 `.cm-btn-pulse` | 待回填 |
+| **MV-05** | `font_offset` = `0` / `+2` / `+4` 三檔渲染、分類遮罩切換與拖曳即時覆寫（承接前版 `MV-03`） | `getDynamicUIParams`、`injectStyles` 與 `loadProfileData` 內 `accEtf.style.display` 處 | 切換 `0 / +2 / +4` 字級偏移並切換個股/ETF分類與拖曳面板，回傳無裁切與即時生效之截圖或檢核紀錄 | 待回填 |
+| **MV-06** | `QP-Track1-DualLayer-Rescue` 雙環境 DevTools Context 脫困實機（承接前版 `MV-04`） | `initMainApp` 內 `GM_registerMenuCommand` 與左抽屜 JSON 備份還原處 | 分別於 (a) DevTools 頁面預設 Context 執行救援測試（驗證錯誤捕獲與切換引導提示）與 (b) Tampermonkey 擴充套件沙盒 Context 執行重置測試（驗證成功重整復原） | 待回填 |
 
 #### 3.3 🚨 發現之缺陷與異常清單 (Defects & Observations)
-* 凡判定 `[FAIL]` 或實機異常者，必須附帶 4 要素：(1) 語意錨點位置（嚴禁行號）、(2) 最小復現步驟、(3) 實際 vs 預期行為、(4) 置信度標記（🔴 確認缺陷 / 🟡 疑似風險 / ⚪ 需實機驗證/人審回報）。
+凡判定 `[FAIL]` 或回報異常者，必須附帶 **缺陷復現 4 要素**：
+1. **具體代碼位置**：嚴格採用語意錨點格式（嚴禁出現具體行號）。
+2. **最小復現邏輯推演**：顯式宣告觸發極端前置輸入之逐步推演步驟。
+3. **實際行為 vs 預期行為**：代碼實體行為佐證 vs 規格要求對比。
+4. **置信度標記與證據鏈**：🔴 確認缺陷 / 🟡 疑似風險 / ⚪ 需實機驗證/人審回報。
 
 #### 3.3.1 🧬 清單外白箱代碼缺陷 (Off-List Static Vulnerabilities)
-* 承接 Phase 0（0.1 至 0.5 項）獨立白箱排查結果，於此區塊回報；若全數無風險則明文宣告「Phase 0 五項排查全數潔淨無異常」。
+承接 Phase 0.1 至 0.5 獨立排查結果，於此專屬區塊登錄回報（若無缺陷請明確聲明「Phase 0 五大排查項目均未發現風險」）。
 
 #### 3.4 最終 PASS / FAIL 簽核結論與發布建議
-* 依 **6-A / 6-B 分階段簽核機制** 出具結論：
-  - 若 **3.2** 全量 19 項靜態 TC 皆完成四態閉環、Phase 0 無確認缺陷且無未決 🟡 項目，即簽發 **【6-A 技術手冊封存核准】**（解除 ENG 代碼交付責任），並將 **3.2.1 (`MV-01 ~ MV-04`)** 列入 **【6-B 維運與現場實機待驗追蹤】**；
-  - 若 **3.2** 或 **3.3.1** 仍存在 `[FAIL]` 或 `[🟡 未決待處置]`，則嚴禁 6-A 封存，依雙門禁回退暫緩簽核並退回修復。
+* **6-A 技術手冊封存條件（解耦交付責任）**：當 `3.2` 表格內全數 21 項靜態測試案例均達成四態閉環標籤（`[PASS]` / `[PASS (By-Design)]` / `[PASS (Retired)]`）、Phase 0 無未決 🔴 風險，且所有 `🟡 未決待處置` 標記均已處置完畢時，主審即刻簽發【6-A 技術手冊封存核准】，宣告本輪 `v3.9.2` 靜態白箱品質達標並解除 ENG 交付責任，允許啟動交接文件封存流程。
+* **6-B 維運追蹤管理（解耦動態實機）**：`3.2.1` 專區 `MV-01` 至 `MV-06` 獨立移入【6-B 維運與動態實機追蹤清單】，由現場測試人員回填實證後結案，不阻礙 6-A 技術手冊產出與封存。
+* **雙門禁 Fallback 回退機制**：若 `3.2` 表格仍存在 `[FAIL]` 或未決 `[🟡 未決待處置]` 項目，嚴禁啟動 6-A 封存，強制退回原雙門禁結論（暫緩最終簽核並詳列待修復或待補證項）。
 
 ---
 
-> 🔔 **【肆、 任務切換 Hook 已就緒】**：本審查輸出完畢後將常駐監聽，待 QA 驗收閉環及收到新 ENG 產出之 `v3.9.1` 技術交接檔時，立即啟動反倒嚼熔斷審查、AST 結算數學閉環校驗、變數活性雙向檢查、雙環境救援標準化核驗及安全港防線審查。
+> *(備註：任務切換 Hook 常駐待機中——後續收到 QA 驗收報告或 `v3.9.2` 技術交接檔時，將依對應協議啟動階段 4.5 仲裁或階段 6 反倒嚼簽核審查。)*
